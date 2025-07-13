@@ -249,7 +249,8 @@ export class ParallelProcessingService extends EventEmitter {
         onAudioChunk,
         { 
           optimizationProfile: profile,
-          cacheResult: aiResponse.text.length < 100 // Only cache shorter responses
+          cacheResult: aiResponse.text.length < 100, // Only cache shorter responses
+          conversationId: conversationId // Pass conversationId to streamOptimizedSpeech
         }
       );
       
@@ -615,6 +616,7 @@ Language: ${context.language || 'English'}`
       stability?: number;
       similarityBoost?: number;
       style?: number;
+      conversationId?: string; // Add conversationId to options
     }
   ): Promise<void> {
     try {
@@ -638,7 +640,7 @@ Language: ${context.language || 'English'}`
       
       // Use the SDK service to stream the speech
       await this.sdkService.streamSpeech(
-        uuidv4(), // We don't need a persistent conversation ID here
+        options?.conversationId || uuidv4(), // Use provided conversationId or create a new one
         text,
         voiceId,
         onAudioChunk,

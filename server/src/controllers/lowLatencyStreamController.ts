@@ -251,24 +251,43 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
     const [callResult, configResult] = await Promise.all([
       Call.findById(callId),
       Configuration.findOne(),
-      // Also initialize the conversation session in parallel
-      (async () => {
-        const session = conversationEngine.getSession(conversationId);
-        if (!session) {
-          // If no session exists, create one
-          await conversationEngine.startConversation(
-            callId, 
-            call?.leadId.toString() || 'unknown', 
-            call?.campaignId.toString() || 'unknown'
-          );
-        }
-        return conversationEngine.getSession(conversationId);
-      })()
     ]);
     
     call = callResult;
     config = configResult;
+    
+    if (!call) {
+      logger.error(`No call found with ID ${callId} for streaming`);
+      ws.close(1008, 'Call not found');
+      return;
+    }
+    
+    // Initialize the conversation session - use persistent conversation ID
     session = conversationEngine.getSession(conversationId);
+    if (!session) {
+      // Create a session with the exact conversationId passed from the client
+      // This ensures voice settings and conversation context are maintained
+      logger.info(`Creating new conversation session with persistent ID: ${conversationId}`);
+      
+      // Create the session directly with the provided conversationId instead of generating a new one
+      const sessionCreated = await conversationEngine.createSessionWithId(
+        conversationId,
+        call.leadId.toString(), 
+        call.campaignId.toString(),
+        call.personalityId // Use the campaign voice ID stored in the call object
+      );
+      
+      if (sessionCreated) {
+        session = conversationEngine.getSession(conversationId);
+        logger.info(`Successfully created persistent conversation session: ${conversationId}`);
+      } else {
+        logger.error(`Failed to create conversation session with ID: ${conversationId}`);
+        ws.close(1008, 'Failed to create persistent conversation');
+        return;
+      }
+    } else {
+      logger.info(`Using existing conversation session: ${conversationId}`);
+    }
     
     if (!call) {
       logger.error(`No call found with ID ${callId} for streaming`);
@@ -377,13 +396,17 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
           call.campaignId.toString()
         );
         
-        // Get personality ID for voice synthesis
-        const personalityId = session.currentPersonality.id || 
-                              session.currentPersonality.voiceId || 
-                              config.elevenLabsConfig.availableVoices[0].voiceId;
+        // Get voice ID for voice synthesis - prioritize call's personalityId (campaign voice), then session personality
+        const voiceId = call.personalityId || 
+                        session.currentPersonality.voiceId || 
+                        config.elevenLabsConfig.availableVoices[0].voiceId;
         
-        // Log which personality we're using
-        logger.info(`Using personality ID ${personalityId} for call ${callId}`);
+        // Log detailed voice debug information
+        logger.info(`🎯 Voice Debug - Call personalityId (campaign voice): ${call.personalityId}`);
+        logger.info(`🎯 Voice Debug - Session personality voiceId: ${session.currentPersonality.voiceId}`);
+        logger.info(`🎯 Voice Debug - Config fallback voiceId: ${config.elevenLabsConfig.availableVoices[0].voiceId}`);
+        logger.info(`🎯 Voice Debug - Final selected voiceId: ${voiceId}`);
+        logger.info(`Using voice ID ${voiceId} for call ${callId}`);
         
         // Wait for opening message
         const openingMessage = await openingMessagePromise;
@@ -397,7 +420,7 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
         await processingService.processInputParallel(
           conversationId,
           openingMessage,
-          personalityId,
+          voiceId,
           [], // Empty conversation history for opening
           {
             streamCallback,
@@ -492,9 +515,9 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
             }
             
             // Process the user input with parallel processing for minimal latency
-            const personalityId = session.currentPersonality.id || 
-                                  session.currentPersonality.voiceId || 
-                                  config.elevenLabsConfig.availableVoices[0].voiceId;
+            const voiceId = call.personalityId || 
+                            session.currentPersonality.voiceId || 
+                            config.elevenLabsConfig.availableVoices[0].voiceId;
             
             // Define callback to send audio chunks
             const streamCallback = (chunk: Buffer) => {
@@ -513,7 +536,7 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
             await processingService.processInputParallel(
               conversationId,
               transcribedText,
-              personalityId,
+              voiceId,
               session.conversationHistory,
               {
                 streamCallback,

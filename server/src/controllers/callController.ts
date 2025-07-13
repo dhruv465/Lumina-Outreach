@@ -80,6 +80,7 @@ export const initiateCall = async (req: Request & { user?: any }, res: Response)
       retryCount: 0,
       recordCall: configuration.complianceSettings.recordCalls,
       priority: 'medium',
+      personalityId: campaign.voiceConfiguration?.voiceId, // Store campaign voice ID
       conversationLog: []
     });
 

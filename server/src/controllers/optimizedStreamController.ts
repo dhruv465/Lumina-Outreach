@@ -203,19 +203,19 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
           call.campaignId.toString()
         );
         
-        // Resolve personality ID while message is being generated
-        const personalityId = session.currentPersonality.id || 
-                             session.currentPersonality.voiceId || 
-                             config.elevenLabsConfig.availableVoices[0].voiceId;
+        // Resolve voice ID while message is being generated - prioritize call's personalityId (campaign voice)
+        const voiceId = call.personalityId || 
+                        session.currentPersonality.voiceId || 
+                        config.elevenLabsConfig.availableVoices[0].voiceId;
         
-        // Log which personality we're using
-        logger.info(`Using personality ID ${personalityId} for call ${callId}`);
+        // Log which voice we're using
+        logger.info(`Using voice ID ${voiceId} for call ${callId}`);
         
         // Wait for opening message
         const openingMessage = await openingMessagePromise;
         
         // First try to get from cache (for common greetings)
-        const cacheKey = `${personalityId}_${openingMessage}`;
+        const cacheKey = `${voiceId}_${openingMessage}`;
         if (responseCache.has(cacheKey)) {
           logger.info(`Using cached greeting for call ${callId}`);
           const cachedAudio = responseCache.get(cacheKey);
@@ -232,9 +232,10 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
           // Stream the audio response
           await sdkService.streamSpeechGeneration(
             openingMessage,
-            personalityId,
+            voiceId,
             onAudioChunk,
-            { optimizeLatency: true }
+            { optimizeLatency: true },
+            conversationId  // Pass the persistent conversation ID
           );
         }
       } catch (error) {
@@ -319,17 +320,17 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
             if (transcribedText.length > 50) {
               try {
                 const ack = "I'm thinking about that...";
-                const personalityId = session.currentPersonality.id || 
-                                     session.currentPersonality.voiceId || 
-                                     config.elevenLabsConfig.availableVoices[0].voiceId;
+                const voiceId = call.personalityId || 
+                                session.currentPersonality.voiceId || 
+                                config.elevenLabsConfig.availableVoices[0].voiceId;
                 
                 // Check cache for acknowledgment
-                const cacheKey = `${personalityId}_${ack}`;
+                const cacheKey = `${voiceId}_${ack}`;
                 if (responseCache.has(cacheKey)) {
                   ws.send(responseCache.get(cacheKey));
                 } else {
                   // Generate and cache acknowledgment in the background
-                  sdkService.generateSpeech(ack, personalityId, { optimizeLatency: true })
+                  sdkService.generateSpeech(ack, voiceId, { optimizeLatency: true })
                     .then(buffer => {
                       responseCache.set(cacheKey, buffer);
                     })
@@ -349,10 +350,10 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
               transcribedText
             );
             
-            // Get personality ID for voice synthesis
-            const personalityId = session.currentPersonality.id || 
-                                 session.currentPersonality.voiceId || 
-                                 config.elevenLabsConfig.availableVoices[0].voiceId;
+            // Get voice ID for voice synthesis - prioritize call's personalityId (campaign voice)
+            const voiceId = call.personalityId || 
+                            session.currentPersonality.voiceId || 
+                            config.elevenLabsConfig.availableVoices[0].voiceId;
             
             // Get the LLM provider configuration
             const openAIProvider = config.llmConfig.providers.find(p => p.name === 'openai');
@@ -414,9 +415,10 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
               // Stream the audio response
               await sdkService.streamSpeechGeneration(
                 aiResponse.text,
-                personalityId,
+                voiceId,
                 onAudioChunk,
-                { optimizeLatency: true }
+                { optimizeLatency: true },
+                conversationId  // Pass the persistent conversation ID
               );
             } catch (streamError) {
               logger.error(`Error streaming response for call ${callId}:`, streamError);
@@ -425,7 +427,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
               try {
                 const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
                   text: aiResponse.text,
-                  personalityId: personalityId,
+                  personalityId: voiceId,
                   language: session.language || 'English'
                 });
                 

@@ -67,7 +67,7 @@ export enum ConversationEvent {
  */
 export class ElevenLabsSDKService extends EventEmitter {
   private apiKey: string;
-  private wsUrl: string = 'wss://api.elevenlabs.io/v1/conversation';
+  private wsUrl: string = 'wss://api.elevenlabs.io/v1/streaming/';
   private conversations: Map<string, ConversationState> = new Map();
   private activeConnections: Map<string, WebSocket> = new Map();
   private elevenlabs: ElevenLabs;
@@ -279,9 +279,9 @@ export class ElevenLabsSDKService extends EventEmitter {
         } else if (voicesResponse && Array.isArray((voicesResponse as any).voices)) {
           voicesList = (voicesResponse as any).voices;
         }
-        const voiceExists = voicesList.some(v => v.voiceId === voiceId);
+        const voiceExists = voicesList.some(v => v.voice_id === voiceId);
         if (!voiceExists) {
-          logger.warn(`Voice ID ${voiceId} not found in available voices. Available voices: ${voicesList.map(v => v.voiceId).slice(0, 5).join(', ')}...`);
+          logger.warn(`Voice ID ${voiceId} not found in available voices. Available voices: ${voicesList.map(v => v.voice_id).slice(0, 5).join(', ')}...`);
         }
       } catch (voiceError) {
         logger.warn(`Could not validate voice ID (continuing anyway): ${getErrorMessage(voiceError)}`);
@@ -426,6 +426,7 @@ export class ElevenLabsSDKService extends EventEmitter {
    * @param voiceId Voice ID to use
    * @param onAudioChunk Callback for audio chunks
    * @param options Options for speech synthesis
+   * @param persistentConversationId Optional persistent conversation ID to maintain voice settings
    */
   public async streamSpeechGeneration(
     text: string,
@@ -436,7 +437,8 @@ export class ElevenLabsSDKService extends EventEmitter {
       stability?: number;
       similarityBoost?: number;
       style?: number;
-    }
+    },
+    persistentConversationId?: string
   ): Promise<void> {
     try {
       // Check cache first for common phrases
@@ -458,24 +460,34 @@ export class ElevenLabsSDKService extends EventEmitter {
         }
       };
       
-      // Generate a temporary conversation ID for this one-time streaming
-      const tempConversationId = `temp_${Date.now()}`;
-      
-      // Ensure the temporary conversation exists for streaming
-      if (!this.conversations.has(tempConversationId)) {
-        this.conversations.set(tempConversationId, {
-          id: tempConversationId,
-          createdAt: new Date(),
-          lastActivity: new Date(),
-          active: true,
-          messages: [],
-          isGenerating: false
-        });
+      // Determine conversation ID: use persistent one if provided, otherwise reuse last active or create new
+      let conversationId: string;
+      if (persistentConversationId) {
+        conversationId = persistentConversationId;
+        // Ensure the conversation exists in our tracking
+        if (!this.conversations.has(conversationId)) {
+          this.conversations.set(conversationId, { 
+            id: conversationId,
+            createdAt: new Date(),
+            lastActivity: new Date(),
+            active: true,
+            messages: [],
+            isGenerating: false
+          });
+        }
+      } else {
+        // Fallback to existing logic
+        const existingIds = Array.from(this.conversations.keys());
+        if (existingIds.length > 0) {
+          conversationId = existingIds[existingIds.length - 1];
+        } else {
+          conversationId = this.createConversation();
+        }
       }
       
       // Use the streamSpeech method to stream the speech
       await this.streamSpeech(
-        tempConversationId,
+        conversationId,
         text,
         voiceId,
         onAudioChunk,
@@ -508,12 +520,8 @@ export class ElevenLabsSDKService extends EventEmitter {
   }
 
   /**
-   * Stream speech with the ability to interrupt using ElevenLabs SDK
-   * @param conversationId Conversation ID
-   * @param text Text to synthesize
-   * @param voiceId Voice ID to use
-   * @param onAudioChunk Callback for audio chunks
-   * @param options Stream options
+   * Stream speech using text-to-speech API instead of conversational WebSocket
+   * This ensures we maintain control over voice IDs and conversation persistence
    */
   public async streamSpeech(
     conversationId: string,
@@ -527,106 +535,34 @@ export class ElevenLabsSDKService extends EventEmitter {
       throw new Error(`Conversation ${conversationId} not found`);
     }
 
-    // Create WebSocket connection (ElevenLabs SDK doesn't fully support streaming with interruption yet)
-    const ws = new WebSocket(this.wsUrl);
-    let interrupted = false;
-
-    // Store connection for potential interruption
-    this.activeConnections.set(conversationId, ws);
-
-    // Handle WebSocket connection
-    ws.on('open', () => {
-      logger.info(`WebSocket connection opened for conversation ${conversationId}`);
+    try {
+      // Use the standard text-to-speech API instead of WebSocket to maintain voice consistency
+      logger.info(`Using text-to-speech API for conversation ${conversationId} with voice ${voiceId}`);
       
-      // Send initialization message with optimized settings
-      ws.send(JSON.stringify({
-        text,
-        voice_id: voiceId,
-        xi_api_key: this.apiKey,
-        model_id: options?.model || 'eleven_multilingual_v2',
-        voice_settings: {
+      const audioBuffer = await this.elevenlabs.textToSpeech({
+        voiceId: voiceId,
+        text: text,
+        voiceSettings: {
           stability: options?.voiceSettings?.stability || 0.75,
-          similarity_boost: options?.voiceSettings?.similarityBoost || 0.75,
+          similarityBoost: options?.voiceSettings?.similarityBoost || 0.75,
           style: options?.voiceSettings?.style || 0.0,
-          use_speaker_boost: options?.voiceSettings?.speakerBoost || true
+          speakerBoost: options?.voiceSettings?.speakerBoost || true
         },
-        optimize_streaming_latency: options?.latencyOptimization ? (
-          // Use integer levels 0-4 for latency optimization
-          // 0 = disabled, 4 = max optimization
-          options.latencyOptimization === true ? 3 : options.latencyOptimization
-        ) : 0,
-        output_format: options?.outputFormat || 'mp3_44100_128'
-      }));
-
-      // Emit connection status
-      this.emit(ConversationEvent.CONNECTION_STATUS, { 
-        conversationId, 
-        status: 'connected' 
+        model: options?.model || 'eleven_multilingual_v2',
+        outputFormat: 'mp3_44100_128'
       });
-    });
 
-    // Handle incoming audio data
-    ws.on('message', (data) => {
-      if (Buffer.isBuffer(data)) {
-        onAudioChunk(data);
-        this.emit(ConversationEvent.MESSAGE_STREAM, { 
-          conversationId, 
-          chunk: data 
-        });
-      } else {
-        try {
-          const jsonData = JSON.parse(data.toString());
-          
-          if (jsonData.type === 'message') {
-            logger.info(`Message from ElevenLabs: ${jsonData.message}`);
-          } else if (jsonData.type === 'audio_started') {
-            this.emit(ConversationEvent.MESSAGE_START, { 
-              conversationId 
-            });
-          } else if (jsonData.type === 'audio_completed') {
-            this.emit(ConversationEvent.MESSAGE_COMPLETE, { 
-              conversationId,
-              interrupted: false
-            });
-          }
-        } catch (e) {
-          logger.warn(`Non-JSON message received: ${data}`);
-        }
-      }
-    });
-
-    // Handle errors
-    ws.on('error', (error) => {
-      logger.error(`WebSocket error for conversation ${conversationId}: ${getErrorMessage(error)}`);
-      this.emit(ConversationEvent.ERROR, { 
-        conversationId, 
-        error: getErrorMessage(error) 
-      });
-    });
-
-    // Handle WebSocket closure
-    ws.on('close', (code, reason) => {
-      logger.info(`WebSocket closed for conversation ${conversationId}: ${code} ${reason}`);
-      this.activeConnections.delete(conversationId);
+      // Send the complete audio buffer
+      onAudioChunk(audioBuffer);
       
-      // Emit completion event if not already emitted due to interruption
-      if (interrupted) {
-        this.emit(ConversationEvent.MESSAGE_COMPLETE, { 
-          conversationId,
-          interrupted: true
-        });
-      }
-    });
-
-    return new Promise((resolve) => {
-      ws.on('close', () => resolve());
-      ws.on('error', (error) => {
-        logger.error(`WebSocket error for conversation ${conversationId}: ${getErrorMessage(error)}`);
-        this.emit(ConversationEvent.ERROR, { conversationId, error: getErrorMessage(error) });
-        // swallow error to prevent unhandled exception
-        resolve();
-      });
-    });
+      // Add message to conversation history
+      this.addMessage(conversationId, 'assistant', text);
+      
+      logger.info(`Successfully generated speech for conversation ${conversationId}`);
+    } catch (error) {
+      logger.error(`Error in streamSpeech for conversation ${conversationId}: ${getErrorMessage(error)}`);
+      throw error;
+    }
   }
 
   /**
@@ -870,7 +806,16 @@ export class ElevenLabsSDKService extends EventEmitter {
     try {
       // Create conversation if it doesn't exist
       if (!this.conversations.has(conversationId)) {
-        this.createConversation();
+        // Use the provided conversationId instead of creating a new random one
+        this.conversations.set(conversationId, {
+          id: conversationId,
+          createdAt: new Date(),
+          lastActivity: new Date(),
+          active: true,
+          messages: [],
+          isGenerating: false
+        });
+        logger.info(`Created conversation with provided ID: ${conversationId}`);
       }
 
       const conversation = this.conversations.get(conversationId)!;
@@ -1015,12 +960,33 @@ export class ElevenLabsSDKService extends EventEmitter {
       const isConversationOverload = this.conversations.has(textOrConversationId) && !options?.text;
       
       // Set variables based on which overload is being used
-      const conversationId = isConversationOverload ? textOrConversationId : options?.conversationId;
+      let conversationId = isConversationOverload ? textOrConversationId : options?.conversationId;
       const text = isConversationOverload ? (options?.text || '') : textOrConversationId;
       
       if (isConversationOverload && !options?.text) {
         // This is a problem - we don't have text for the conversation overload
         throw new Error('Text parameter is required when using conversation overload');
+      }
+      
+      // If no conversationId is provided, reuse the last active one or create a new one
+      if (!conversationId) {
+        const existingIds = Array.from(this.conversations.keys());
+        if (existingIds.length > 0) {
+          conversationId = existingIds[existingIds.length - 1] as string;
+          logger.debug(`Using last active conversation ID: ${conversationId}`);
+        } else {
+          // Create a deterministic conversation ID instead of random
+          conversationId = `persistent-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          this.conversations.set(conversationId, {
+            id: conversationId,
+            createdAt: new Date(),
+            lastActivity: new Date(),
+            active: true,
+            messages: [],
+            isGenerating: false
+          });
+          logger.debug(`Created new persistent conversation ID: ${conversationId}`);
+        }
       }
       
       // Check cache first
@@ -1061,6 +1027,36 @@ export class ElevenLabsSDKService extends EventEmitter {
       
       // Use appropriate method based on whether we have a valid conversationId
       if (conversationId && this.conversations.has(conversationId)) {
+        // Use the persistent conversation for consistent voice settings
+        await this.streamSpeech(
+          conversationId,
+          text,
+          voiceId,
+          onAudioChunkProxy,
+          {
+            latencyOptimization,
+            voiceSettings: {
+              stability: profileSettings.stability,
+              similarityBoost: profileSettings.similarityBoost,
+              style: profileSettings.style,
+              speakerBoost: profileSettings.speakerBoost
+            },
+            model: profileSettings.model || options?.modelId,
+            outputFormat: profileSettings.outputFormat
+          }
+        );
+      } else if (conversationId) {
+        // We have a conversation ID but it's not in our map - create it
+        this.conversations.set(conversationId, {
+          id: conversationId,
+          createdAt: new Date(),
+          lastActivity: new Date(),
+          active: true,
+          messages: [],
+          isGenerating: false
+        });
+        
+        // Now use it for streaming
         await this.streamSpeech(
           conversationId,
           text,
@@ -1079,8 +1075,7 @@ export class ElevenLabsSDKService extends EventEmitter {
           }
         );
       } else {
-        // Use temporary conversation ID or streamSpeechGeneration
-        const tempId = `temp_${Date.now()}`;
+        // Fallback to streaming with stable conversation via streamSpeechGeneration
         await this.streamSpeechGeneration(
           text,
           voiceId,
@@ -1090,7 +1085,8 @@ export class ElevenLabsSDKService extends EventEmitter {
             stability: profileSettings.stability,
             similarityBoost: profileSettings.similarityBoost,
             style: profileSettings.style
-          }
+          },
+          conversationId  // Pass the persistent conversation ID
         );
       }
       

@@ -20,7 +20,8 @@ ElevenLabsSDKService.prototype.streamSpeechGeneration = async function(
     stability?: number;
     similarityBoost?: number;
     style?: number;
-  }
+  },
+  persistentConversationId?: string
 ): Promise<void> {
   try {
     // Check cache first for common phrases
@@ -45,12 +46,44 @@ ElevenLabsSDKService.prototype.streamSpeechGeneration = async function(
       }
     };
     
-    // Generate a temporary conversation ID for this one-time streaming
-    const tempConversationId = `temp_${Date.now()}`;
+    // Use the provided persistent conversation ID, or determine a stable one
+    let conversationId: string;
+    if (persistentConversationId) {
+      // Use the provided conversation ID to maintain persistent voice settings
+      conversationId = persistentConversationId;
+      
+      // Ensure the conversation exists in our conversations map
+      if (!this.conversations.has(conversationId)) {
+        // Create the conversation entry with the specific ID
+        this.conversations.set(conversationId, {
+          id: conversationId,
+          createdAt: new Date(),
+          lastActivity: new Date(),
+          active: true,
+          messages: [],
+          isGenerating: false
+        });
+        logger.debug(`Created conversation entry for persistent ID: ${conversationId}`);
+      } else {
+        logger.debug(`Using existing persistent conversation ID: ${conversationId}`);
+      }
+    } else {
+      // Fallback to existing behavior for backward compatibility
+      const existingIds = Array.from(this.conversations.keys());
+      if (existingIds.length > 0) {
+        // Use the most recent conversation ID to maintain voice settings
+        conversationId = existingIds[existingIds.length - 1] as string;
+        logger.debug(`Reusing existing conversation ID: ${conversationId}`);
+      } else {
+        // Create a new persistent conversation if none exists
+        conversationId = this.createConversation();
+        logger.debug(`Created new persistent conversation ID: ${conversationId}`);
+      }
+    }
     
     // Use the streamSpeech method to stream the speech
     await this.streamSpeech(
-      tempConversationId,
+      conversationId,
       text,
       voiceId,
       onAudioChunk,

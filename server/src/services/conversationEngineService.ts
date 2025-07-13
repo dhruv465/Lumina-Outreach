@@ -62,7 +62,29 @@ export class ConversationEngineService {
       // Get or create voice personality
       let personality: VoicePersonality;
       if (personalityId) {
-        personality = await this.voiceAI.getPersonality(personalityId);
+        const configuration = await Configuration.findOne();
+        const voiceSettings = configuration?.voiceAIConfig?.conversationalAI?.voiceSettings || {
+          speed: 1.0,
+          stability: 0.75,
+          style: 0.0
+        };
+        personality = {
+          id: uuidv4(),
+          name: 'Dynamic Agent',
+          description: 'A dynamically created agent',
+          voiceId: personalityId,
+          personality: 'professional',
+          style: 'conversational',
+          settings: {
+            stability: voiceSettings.stability,
+            similarityBoost: 0.75,
+            style: voiceSettings.style,
+            useSpeakerBoost: true
+          },
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
       } else {
         // Get configuration for voice settings
         const configuration = await Configuration.findOne();
@@ -91,6 +113,10 @@ export class ConversationEngineService {
           updatedAt: new Date()
         };
       }
+
+      logger.info(`🔧 Session Creation Debug - personalityId: ${personalityId}`);
+      logger.info(`🔧 Session Creation Debug - personality.voiceId: ${personality.voiceId}`);
+      logger.info(`🔧 Session Creation Debug - personality.name: ${personality.name}`);
 
       const session: CallSession = {
         id: sessionId,
@@ -129,6 +155,115 @@ export class ConversationEngineService {
     } catch (error) {
       logger.error('Error creating conversation session:', getErrorMessage(error));
       throw error;
+    }
+  }
+
+  // Create a session with a specific conversation ID for persistence
+  async createSessionWithId(
+    conversationId: string,
+    leadId: string,
+    campaignId: string,
+    personalityId?: string,
+    language: 'English' | 'Hindi' = 'English',
+    llmProvider?: LLMProvider
+  ): Promise<boolean> {
+    try {
+      // Check if session already exists
+      if (this.activeSessions.has(conversationId)) {
+        logger.warn(`Session with ID ${conversationId} already exists`);
+        return true;
+      }
+
+      // Get configuration for proper voice settings
+      const configuration = await Configuration.findOne();
+      const voiceSettings = configuration?.voiceAIConfig?.conversationalAI?.voiceSettings || {
+        speed: 1.0,
+        stability: 0.75,
+        style: 0.0
+      };
+
+      // Get or create voice personality
+      let personality: VoicePersonality;
+      if (personalityId) {
+        const matchingVoice = configuration?.elevenLabsConfig?.availableVoices?.find(
+          voice => voice.voiceId === personalityId
+        );
+        
+        personality = {
+          id: uuidv4(),
+          name: matchingVoice?.name || 'Dynamic Agent',
+          description: 'A dynamically created agent',
+          voiceId: personalityId,
+          personality: 'professional',
+          style: 'conversational',
+          settings: {
+            stability: voiceSettings.stability,
+            similarityBoost: 0.75,
+            style: voiceSettings.style,
+            useSpeakerBoost: true
+          },
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+      } else {
+        // Create default personality with configuration settings
+        personality = {
+          id: uuidv4(),
+          name: 'Default Agent',
+          description: 'Professional and friendly customer service agent',
+          voiceId: configuration?.voiceAIConfig?.conversationalAI?.defaultVoiceId || 'default',
+          personality: 'professional',
+          style: 'conversational',
+          settings: {
+            stability: voiceSettings.stability,
+            similarityBoost: 0.75,
+            style: voiceSettings.style,
+            useSpeakerBoost: true
+          },
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+      }
+
+      const session: CallSession = {
+        id: conversationId, // Use the provided conversationId
+        leadId,
+        campaignId,
+        startTime: new Date(),
+        language,
+        currentPersonality: personality,
+        conversationHistory: [],
+        context: {
+          currentTurn: 0,
+          customerProfile: {
+            mood: 'neutral',
+            interests: [],
+            objections: [],
+            engagement_level: 0.5
+          },
+          callObjective: 'general_inquiry',
+          progress: {
+            stage: 'opening',
+            completed_objectives: [],
+            next_steps: []
+          }
+        },
+        status: 'active',
+        metrics: {
+          totalTurns: 0,
+          personalityChanges: 0
+        },
+        llmProvider
+      };
+
+      this.activeSessions.set(conversationId, session);
+      logger.info(`Created conversation session with persistent ID: ${conversationId}`);
+      return true;
+    } catch (error) {
+      logger.error(`Error creating conversation session with ID ${conversationId}:`, getErrorMessage(error));
+      return false;
     }
   }
 
@@ -418,7 +553,7 @@ Instructions:
   }
 
   // Start a new conversation for a call
-  async startConversation(callId: string, leadId: string, campaignId: string): Promise<string> {
+  async startConversation(callId: string, leadId: string, campaignId: string, voiceId?: string): Promise<string> {
     try {
       // Get configuration for proper language settings
       const configuration = await Configuration.findOne();
@@ -430,7 +565,7 @@ Instructions:
       // Use default language from configuration
       const defaultLanguage = configuration.generalSettings.defaultLanguage as 'English' | 'Hindi';
       
-      const session = await this.createSession(leadId, campaignId, defaultLanguage);
+      const session = await this.createSession(leadId, campaignId, defaultLanguage, voiceId);
       
       logger.info(`Started new conversation ${session.id} for call ${callId}`);
       return session.id;

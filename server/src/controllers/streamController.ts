@@ -88,19 +88,19 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
           call.campaignId.toString()
         );
         
-        // Ensure we're using a valid personality ID - try both id and voiceId properties
-        const personalityId = session.currentPersonality.id || 
-                             session.currentPersonality.voiceId || 
-                             config.elevenLabsConfig.availableVoices[0].voiceId;
+        // Ensure we're using a valid voice ID - prioritize call's personalityId (campaign voice)
+        const voiceId = call.personalityId || 
+                        session.currentPersonality.voiceId || 
+                        config.elevenLabsConfig.availableVoices[0].voiceId;
         
-        // Log which personality we're using
-        logger.info(`Using personality ID ${personalityId} for call ${callId}`);
+        // Log which voice we're using
+        logger.info(`Using voice ID ${voiceId} for call ${callId}`);
         
         // Synthesize speech using ElevenLabs with robust error handling
         try {
           const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
             text: openingMessage,
-            personalityId: personalityId,
+            personalityId: voiceId,
             language: session.language || 'English'
           });
           
@@ -248,16 +248,16 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
               );
             }
             
-            // Use the same personality ID that worked for the opening message
-            const personalityId = session.currentPersonality.id || 
-                                 session.currentPersonality.voiceId || 
-                                 config.elevenLabsConfig.availableVoices[0].voiceId;
+            // Use the same voice ID that worked for the opening message - prioritize call's personalityId (campaign voice)
+            const voiceId = call.personalityId || 
+                            session.currentPersonality.voiceId || 
+                            config.elevenLabsConfig.availableVoices[0].voiceId;
             
             try {
               // Synthesize speech using ElevenLabs
               const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
                 text: aiResponse.text,
-                personalityId: personalityId,
+                personalityId: voiceId,
                 language: session.language || 'English'
               });
               

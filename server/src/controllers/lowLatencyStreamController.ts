@@ -102,6 +102,19 @@ export const initializeResponseCache = async (): Promise<void> => {
  * Uses parallel processing and human-like audio cues to reduce perceived latency
  */
 export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): Promise<void> => {
+  /**
+   * Helper function to send audio data to Twilio in the required JSON format
+   */
+  const sendAudioToTwilio = (audioData: Buffer) => {
+    const message = {
+      event: 'media',
+      media: {
+        payload: audioData.toString('base64')
+      }
+    };
+    ws.send(JSON.stringify(message));
+  };
+
   // Add proper WebSocket ready state check and error handling
   if (ws.readyState !== WebSocket.OPEN) {
     logger.warn('WebSocket connection not in OPEN state during initialization');
@@ -411,23 +424,29 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
         // Wait for opening message
         const openingMessage = await openingMessagePromise;
         
+        // Validate opening message
+        if (!openingMessage || typeof openingMessage !== 'string' || openingMessage.trim() === '') {
+          logger.error(`Invalid opening message for call ${callId}: ${JSON.stringify(openingMessage)}`);
+          throw new Error('Opening message is invalid or empty');
+        }
+        
+        logger.info(`📝 Opening message for call ${callId}: "${openingMessage}"`);
+        
         // Define callback to send audio chunks
         const streamCallback = (chunk: Buffer) => {
-          ws.send(chunk);
+          sendAudioToTwilio(chunk);
         };
         
-        // Process the opening message with parallel processing and optimized latency
-        await processingService.processInputParallel(
-          conversationId,
+        // Process the opening message - use direct speech synthesis instead of AI processing
+        // since the opening message is already generated
+        await sdkService.streamOptimizedSpeech(
           openingMessage,
           voiceId,
-          [], // Empty conversation history for opening
-          {
-            streamCallback,
-            campaignId: call.campaignId.toString(),
-            useThinkingSounds: false, // No thinking sounds for greeting
-            streamPartialResponses: false, // No partial responses for greeting
-            optimizationProfile: 'low' // Use low latency profile for greetings
+          streamCallback,
+          { 
+            optimizationProfile: 'low', // Use low latency profile for greetings
+            cacheResult: openingMessage.length < 100, // Cache shorter greetings
+            conversationId: conversationId
           }
         );
         } catch (error) {
@@ -443,7 +462,7 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
           const cacheKey = `${fallbackVoice}_${fallbackGreeting}`;
           if (responseCache.has(cacheKey)) {
             if (ws.readyState === WebSocket.OPEN) {
-              ws.send(responseCache.get(cacheKey));
+              sendAudioToTwilio(responseCache.get(cacheKey));
             }
           } else {
             // Generate simple greeting with optimized latency
@@ -457,7 +476,7 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
             );
             
             if (ws.readyState === WebSocket.OPEN) {
-              ws.send(buffer);
+              sendAudioToTwilio(buffer);
             }
           }
         } catch (fallbackError) {
@@ -523,7 +542,7 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
             const streamCallback = (chunk: Buffer) => {
               try {
                 if (ws.readyState === WebSocket.OPEN) {
-                  ws.send(chunk);
+                  sendAudioToTwilio(chunk);
                 } else {
                   logger.warn(`Cannot send audio chunk, WebSocket not open for call ${callId}`);
                 }

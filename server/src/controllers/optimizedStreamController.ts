@@ -103,6 +103,19 @@ export const initializeResponseCache = async (): Promise<void> => {
  * Uses parallel processing and streaming to reduce latency
  */
 export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): Promise<void> => {
+  /**
+   * Helper function to send audio data to Twilio in the required JSON format
+   */
+  const sendAudioToTwilio = (audioData: Buffer) => {
+    const message = {
+      event: 'media',
+      media: {
+        payload: audioData.toString('base64')
+      }
+    };
+    ws.send(JSON.stringify(message));
+  };
+
   // Extract query parameters
   const url = new URL(req.url, `http://${req.headers.host}`);
   const callId = url.searchParams.get('callId');
@@ -219,14 +232,14 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         if (responseCache.has(cacheKey)) {
           logger.info(`Using cached greeting for call ${callId}`);
           const cachedAudio = responseCache.get(cacheKey);
-          ws.send(cachedAudio);
+          sendAudioToTwilio(cachedAudio);
         } else {
           // Use streaming synthesis for optimal latency
           logger.info(`Streaming opening message audio for call ${callId}`);
           
           // Define callback to send chunks as they arrive
           const onAudioChunk = (chunk: Buffer) => {
-            ws.send(chunk);
+            sendAudioToTwilio(chunk);
           };
           
           // Stream the audio response
@@ -249,12 +262,12 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
           // Try cache first
           const cacheKey = `${fallbackVoice}_${fallbackGreeting}`;
           if (responseCache.has(cacheKey)) {
-            ws.send(responseCache.get(cacheKey));
+            sendAudioToTwilio(responseCache.get(cacheKey));
           } else {
             // Generate simple speech
             const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(fallbackGreeting, fallbackVoice);
             if (fallbackResponse) {
-              ws.send(fallbackResponse);
+              sendAudioToTwilio(fallbackResponse);
             } else {
               throw new Error('Fallback speech generation failed');
             }
@@ -327,7 +340,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
                 // Check cache for acknowledgment
                 const cacheKey = `${voiceId}_${ack}`;
                 if (responseCache.has(cacheKey)) {
-                  ws.send(responseCache.get(cacheKey));
+                  sendAudioToTwilio(responseCache.get(cacheKey));
                 } else {
                   // Generate and cache acknowledgment in the background
                   sdkService.generateSpeech(ack, voiceId, { optimizeLatency: true })
@@ -409,7 +422,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
               
               // Define callback to send chunks as they arrive
               const onAudioChunk = (chunk: Buffer) => {
-                ws.send(chunk);
+                sendAudioToTwilio(chunk);
               };
               
               // Stream the audio response
@@ -432,7 +445,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
                 });
                 
                 if (speechResponse && speechResponse.audioContent) {
-                  ws.send(speechResponse.audioContent);
+                  sendAudioToTwilio(speechResponse.audioContent);
                 } else {
                   throw new Error('No audio content returned for response');
                 }
@@ -445,7 +458,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
                   const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(aiResponse.text, fallbackVoice);
                   
                   if (fallbackResponse) {
-                    ws.send(fallbackResponse);
+                    sendAudioToTwilio(fallbackResponse);
                   } else {
                     throw new Error('All synthesis methods failed');
                   }

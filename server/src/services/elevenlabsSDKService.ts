@@ -963,6 +963,12 @@ export class ElevenLabsSDKService extends EventEmitter {
       let conversationId = isConversationOverload ? textOrConversationId : options?.conversationId;
       const text = isConversationOverload ? (options?.text || '') : textOrConversationId;
       
+      // Validate text parameter
+      if (!text || typeof text !== 'string') {
+        logger.error(`Invalid text parameter in streamOptimizedSpeech: ${JSON.stringify({ text, textOrConversationId, options })}`);
+        throw new Error('Text parameter is required and must be a string');
+      }
+      
       if (isConversationOverload && !options?.text) {
         // This is a problem - we don't have text for the conversation overload
         throw new Error('Text parameter is required when using conversation overload');

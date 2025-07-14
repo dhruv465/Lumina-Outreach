@@ -225,6 +225,18 @@ export class ParallelProcessingService extends EventEmitter {
       // Wait for AI response
       const aiResponse = await llmPromise;
       
+      // Validate AI response
+      if (!aiResponse || !aiResponse.text || typeof aiResponse.text !== 'string') {
+        logger.error(`Invalid AI response in parallel processing: ${JSON.stringify(aiResponse)}`);
+        this.emit(ProcessingEvent.ERROR, { 
+          conversationId, 
+          processingId, 
+          error: 'AI response is invalid or missing text' 
+        });
+        this.activeProcessingIds.delete(processingId);
+        return;
+      }
+      
       // Clear any scheduled thinking sounds or partial response timers
       this.clearActiveTimers(processingId);
       

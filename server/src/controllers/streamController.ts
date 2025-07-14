@@ -12,6 +12,19 @@ import { v4 as uuidv4 } from 'uuid';
  * This is the main handler for real-time voice communication during calls
  */
 export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<void> => {
+  /**
+   * Helper function to send audio data to Twilio in the required JSON format
+   */
+  const sendAudioToTwilio = (audioData: Buffer) => {
+    const message = {
+      event: 'media',
+      media: {
+        payload: audioData.toString('base64')
+      }
+    };
+    ws.send(JSON.stringify(message));
+  };
+
   // Extract query parameters
   const url = new URL(req.url, `http://${req.headers.host}`);
   const callId = url.searchParams.get('callId');
@@ -107,7 +120,7 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
           // Send synthesized audio through WebSocket
           if (speechResponse && speechResponse.audioContent) {
             logger.info(`Sending opening message audio to client for call ${callId}`);
-            ws.send(speechResponse.audioContent);
+            sendAudioToTwilio(speechResponse.audioContent);
           } else {
             throw new Error('No audio content returned from synthesizeAdaptiveVoice');
           }
@@ -122,7 +135,7 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
             
             if (fallbackResponse) {
               logger.info(`Sending fallback speech for call ${callId}`);
-              ws.send(fallbackResponse);
+              sendAudioToTwilio(fallbackResponse);
             } else {
               logger.error(`Fallback synthesis returned no audio for call ${callId}`);
               throw new Error('Fallback synthesis returned no audio');
@@ -263,7 +276,7 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
               
               // Send synthesized audio back through WebSocket
               if (speechResponse && speechResponse.audioContent) {
-                ws.send(speechResponse.audioContent);
+                sendAudioToTwilio(speechResponse.audioContent);
               } else {
                 throw new Error('No audio content returned for response');
               }
@@ -276,7 +289,7 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
                 const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(aiResponse.text, fallbackVoice);
                 
                 if (fallbackResponse) {
-                  ws.send(fallbackResponse);
+                  sendAudioToTwilio(fallbackResponse);
                 }
               } catch (fallbackError) {
                 logger.error(`Fallback synthesis failed for response in call ${callId}:`, fallbackError);
@@ -421,8 +434,14 @@ export const handleConversationalAIStream = async (ws: WebSocket, req: Request):
                 contextAwareness: true,
                 modelId: conversationalSettings.defaultModelId || 'eleven_multilingual_v2',
                 onAudioChunk: (chunk: Buffer) => {
-                  // Send audio chunk to client
-                  ws.send(chunk);
+                  // Send audio chunk to client in Twilio format
+                  const message = {
+                    event: 'media',
+                    media: {
+                      payload: chunk.toString('base64')
+                    }
+                  };
+                  ws.send(JSON.stringify(message));
                   audioChunks.push(chunk);
                 },
                 onInterruption: () => {
@@ -526,8 +545,14 @@ export const handleConversationalAIStream = async (ws: WebSocket, req: Request):
               contextAwareness: true,
               modelId: conversationalSettings.defaultModelId || 'eleven_multilingual_v2',
               onAudioChunk: (chunk: Buffer) => {
-                // Send audio chunk to client
-                ws.send(chunk);
+                // Send audio chunk to client in Twilio format
+                const message = {
+                  event: 'media',
+                  media: {
+                    payload: chunk.toString('base64')
+                  }
+                };
+                ws.send(JSON.stringify(message));
                 audioChunks.push(chunk);
               },
               onInterruption: () => {

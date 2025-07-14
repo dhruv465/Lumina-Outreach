@@ -530,6 +530,17 @@ export class ElevenLabsSDKService extends EventEmitter {
     onAudioChunk: (chunk: Buffer) => void,
     options?: StreamOptions
   ): Promise<void> {
+    // Validate all parameters before proceeding
+    if (!conversationId || typeof conversationId !== 'string') {
+      throw new Error(`Invalid conversationId parameter: ${conversationId}`);
+    }
+    if (!text || typeof text !== 'string') {
+      throw new Error(`Invalid text parameter: ${text}`);
+    }
+    if (!voiceId || typeof voiceId !== 'string') {
+      throw new Error(`Invalid voiceId parameter: ${voiceId}`);
+    }
+    
     const conversation = this.conversations.get(conversationId);
     if (!conversation) {
       throw new Error(`Conversation ${conversationId} not found`);
@@ -539,18 +550,88 @@ export class ElevenLabsSDKService extends EventEmitter {
       // Use the standard text-to-speech API instead of WebSocket to maintain voice consistency
       logger.info(`Using text-to-speech API for conversation ${conversationId} with voice ${voiceId}`);
       
-      const audioBuffer = await this.elevenlabs.textToSpeech({
-        voiceId: voiceId,
-        text: text,
-        voiceSettings: {
-          stability: options?.voiceSettings?.stability || 0.75,
-          similarityBoost: options?.voiceSettings?.similarityBoost || 0.75,
-          style: options?.voiceSettings?.style || 0.0,
-          speakerBoost: options?.voiceSettings?.speakerBoost || true
-        },
-        model: options?.model || 'eleven_multilingual_v2',
-        outputFormat: 'mp3_44100_128'
+      // Ensure all parameters are properly formatted
+      const fileName = `speech-${Date.now()}.mp3`;
+      const ttsParams = {
+        voiceId: String(voiceId), // Ensure it's a string
+        textInput: String(text), // Use textInput instead of text for elevenlabs-node
+        fileName: fileName, // Add required fileName parameter
+        modelId: options?.model || 'eleven_multilingual_v2', // Use modelId instead of model
+        stability: options?.voiceSettings?.stability ?? 0.75,
+        similarityBoost: options?.voiceSettings?.similarityBoost ?? 0.75,
+        style: options?.voiceSettings?.style ?? 0.0
+      };
+      
+      logger.debug(`TTS parameters:`, { 
+        voiceId: ttsParams.voiceId, 
+        textLength: ttsParams.textInput.length, 
+        modelId: ttsParams.modelId,
+        fileName: ttsParams.fileName
       });
+      
+      const audioResponse = await this.elevenlabs.textToSpeech(ttsParams);
+
+      // Clean up the temporary file if it was created
+      try {
+        const fs = require('fs');
+        if (fs.existsSync(fileName)) {
+          fs.unlinkSync(fileName);
+          logger.debug(`Cleaned up temp file: ${fileName}`);
+        }
+      } catch (cleanupError) {
+        logger.warn(`Failed to clean up temp file ${fileName}: ${cleanupError}`);
+      }
+
+      // Handle the response properly - the elevenlabs-node SDK returns different types
+      let audioBuffer: Buffer;
+      
+      // Add detailed logging to understand the response format
+      logger.debug(`Audio response type: ${typeof audioResponse}`, {
+        isBuffer: Buffer.isBuffer(audioResponse),
+        isIterable: audioResponse && typeof audioResponse[Symbol.iterator] === 'function',
+        hasData: audioResponse && audioResponse.data !== undefined,
+        constructor: audioResponse?.constructor?.name,
+        keys: audioResponse && typeof audioResponse === 'object' ? Object.keys(audioResponse) : []
+      });
+      
+      if (Buffer.isBuffer(audioResponse)) {
+        // If it's already a buffer, use it directly
+        audioBuffer = audioResponse;
+        logger.debug('Using direct buffer response');
+      } else if (audioResponse && audioResponse.data && Buffer.isBuffer(audioResponse.data)) {
+        // If the response has a data property that is a buffer
+        audioBuffer = audioResponse.data;
+        logger.debug('Using buffer from response.data');
+      } else if (audioResponse && typeof audioResponse[Symbol.iterator] === 'function') {
+        // If it's an iterator/stream, collect all chunks
+        logger.debug('Processing iterable response');
+        const chunks: Buffer[] = [];
+        for (const chunk of audioResponse) {
+          if (chunk) {
+            const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            chunks.push(bufferChunk);
+          }
+        }
+        audioBuffer = Buffer.concat(chunks);
+        logger.debug(`Concatenated ${chunks.length} chunks into ${audioBuffer.length} bytes`);
+      } else if (audioResponse && audioResponse.buffer) {
+        // If the response has a buffer property
+        audioBuffer = Buffer.isBuffer(audioResponse.buffer) ? audioResponse.buffer : Buffer.from(audioResponse.buffer);
+        logger.debug('Using buffer from response.buffer');
+      } else if (audioResponse && typeof audioResponse === 'string') {
+        // If it's a base64 string or similar
+        audioBuffer = Buffer.from(audioResponse, 'base64');
+        logger.debug('Converting string response to buffer');
+      } else {
+        // Last resort - try to inspect the response and convert it
+        logger.error('Unknown audio response format:', {
+          type: typeof audioResponse,
+          constructor: audioResponse?.constructor?.name,
+          keys: audioResponse && typeof audioResponse === 'object' ? Object.keys(audioResponse) : [],
+          value: typeof audioResponse === 'object' ? JSON.stringify(audioResponse, null, 2).substring(0, 500) : audioResponse
+        });
+        throw new Error(`Unsupported audio response format: ${typeof audioResponse}. Constructor: ${audioResponse?.constructor?.name}`);
+      }
 
       // Send the complete audio buffer
       onAudioChunk(audioBuffer);
@@ -1025,10 +1106,12 @@ export class ElevenLabsSDKService extends EventEmitter {
       
       // Create a proxy callback that captures audio chunks for caching
       const onAudioChunkProxy = (chunk: Buffer) => {
+        // Ensure chunk is a proper Buffer
+        const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         // Collect for caching
-        chunks.push(chunk);
+        chunks.push(bufferChunk);
         // Forward to caller
-        onAudioChunk(chunk);
+        onAudioChunk(bufferChunk);
       };
       
       // Use appropriate method based on whether we have a valid conversationId
@@ -1098,9 +1181,15 @@ export class ElevenLabsSDKService extends EventEmitter {
       
       // Cache the complete audio if it's short or caching was explicitly requested
       if ((options?.cacheResult || text.length < 100) && chunks.length > 0 && this.responseCache) {
-        const completeAudio = Buffer.concat(chunks);
-        this.responseCache.set(cacheKey, completeAudio);
-        logger.debug(`Cached streamed audio for: "${text.substring(0, 20)}..."`);
+        // Ensure all chunks are proper Buffers before concatenating
+        const validChunks = chunks.filter(chunk => Buffer.isBuffer(chunk) && chunk.length > 0);
+        if (validChunks.length > 0) {
+          const completeAudio = Buffer.concat(validChunks);
+          this.responseCache.set(cacheKey, completeAudio);
+          logger.debug(`Cached streamed audio for: "${text.substring(0, 20)}..."`);
+        } else {
+          logger.warn(`No valid buffer chunks to cache for: "${text.substring(0, 20)}..."`);
+        }
       }
     } catch (error) {
       logger.error(`Error streaming optimized speech: ${getErrorMessage(error)}`);

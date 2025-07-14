@@ -399,9 +399,17 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
       logger.error(`Processing error for conversation ${conversationId}: ${data.error}`);
     });
     
-    // Generate initial greeting if this is the first interaction
-    if (session.conversationHistory.length === 0) {
+    // Check if we should generate opening message
+    // The opening message is already sent by the voice webhook in the TwiML response
+    // This WebSocket stream is for real-time conversation after the initial greeting
+    // So we should NOT generate another opening message here
+    const shouldGenerateOpening = false; // Always skip opening message in WebSocket stream
+    
+    if (shouldGenerateOpening) {
       try {
+        // This code block should not execute in normal flow
+        // since the voice webhook already handles the opening message
+        
         // Generate opening message in parallel with voice synthesis setup
         const openingMessagePromise = conversationEngine.generateOpeningMessage(
           conversationId,
@@ -499,10 +507,38 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
           return;
         }
 
-        // Process as binary data
-        if (data instanceof Buffer) {
+        // Parse Twilio Media Stream JSON message
+        let audioData: Buffer | null = null;
+        
+        try {
+          // Convert data to string and parse JSON
+          const messageStr = data.toString();
+          const message = JSON.parse(messageStr);
+          
+          // Handle media messages with audio payload
+          if (message.event === 'media' && message.media && message.media.payload) {
+            // Decode base64 audio payload from Twilio
+            audioData = Buffer.from(message.media.payload, 'base64');
+            logger.debug(`Received Twilio media message with ${audioData.length} bytes for call ${callId}`);
+          } else if (message.event === 'start') {
+            logger.info(`Twilio stream started for call ${callId}:`, message);
+            return;
+          } else if (message.event === 'stop') {
+            logger.info(`Twilio stream stopped for call ${callId}:`, message);
+            return;
+          } else {
+            logger.debug(`Ignoring Twilio message type ${message.event} for call ${callId}`);
+            return;
+          }
+        } catch (parseError) {
+          logger.error(`Failed to parse Twilio message for call ${callId}:`, parseError);
+          return;
+        }
+
+        // Process audio data if we have it
+        if (audioData && audioData.length > 0) {
           // Accumulate audio data
-          audioBuffer.push(data);
+          audioBuffer.push(audioData);
           
           // If we have enough data, process it
           if (Buffer.concat(audioBuffer).length > 4096) {
@@ -523,14 +559,12 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
               } else {
                 // Fallback to existing method
                 logger.warn(`Deepgram not configured, using fallback for call ${callId}`);
-                transcribedText = data?.toString() || (() => { 
-                  throw new Error('Speech recognition not properly configured - no audio data received'); 
-                })();
+                transcribedText = "I'm listening..."; // Default message when we receive audio but can't transcribe
               }
             } catch (transcriptionError) {
               logger.error(`Error in speech transcription for call ${callId}: ${transcriptionError.message}`);
-              // Fallback to existing method
-              transcribedText = data?.toString() || "Sorry, I couldn't hear you clearly.";
+              // Fallback to default message
+              transcribedText = "Sorry, I couldn't hear you clearly.";
             }
             
             // Process the user input with parallel processing for minimal latency
@@ -568,6 +602,8 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
               }
             );
           }
+        } else {
+          logger.debug(`No audio data to process for call ${callId}`);
         }
       } catch (error) {
         logger.error(`Error processing voice stream data for call ${callId}:`, error);

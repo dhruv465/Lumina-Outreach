@@ -30,6 +30,7 @@ import voiceAIRoutes from './routes/voiceAIRoutes';
 
 // Twilio Media Streams WebSocket handler
 import { handleTwilioStreamWebhook } from './services/webhookHandlers';
+import { handleLowLatencyVoiceStream } from './controllers/lowLatencyStreamController';
 
 // Services initialization
 import CampaignService from './services/campaignService';
@@ -124,7 +125,7 @@ const server = http.createServer(app);
 const { app: wsApp } = expressWs(app, server);
 
 // Register Twilio Media Streams WebSocket endpoint on the augmented app
-wsApp.ws('/voice/low-latency', handleTwilioStreamWebhook);
+wsApp.ws('/voice/low-latency/:callId/:conversationId', handleLowLatencyVoiceStream);
 
 const io = new SocketIOServer(server, {
   cors: {

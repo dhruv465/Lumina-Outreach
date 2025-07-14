@@ -1349,7 +1349,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
       </div>
 
       {/* Status Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <div className="flex items-center gap-2">
@@ -1375,7 +1375,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
                 </HoverCardContent>
               </HoverCard>
             </div>
-            <Mic className="h-4 w-4 text-muted-foreground" />
+            <Volume2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold capitalize">
@@ -1401,6 +1401,69 @@ Keep the conversation natural and engaging. If they're not interested, politely 
                 <>
                   <AlertTriangle className="h-3 w-3 mr-1" />
                   Not Set
+                </>
+              )}
+            </Badge>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-sm font-medium">
+                STT Provider
+              </CardTitle>
+              <HoverCard>
+                <HoverCardTrigger asChild>
+                  <button className="h-5 w-5 text-muted-foreground hover:text-foreground">
+                    <Info className="h-4 w-4" />
+                  </button>
+                </HoverCardTrigger>
+                <HoverCardContent className="w-80">
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">STT Provider</h4>
+                    <p className="text-sm text-muted-foreground">
+                      The Speech-to-Text service used to transcribe customer
+                      speech during phone calls. Deepgram provides high-accuracy,
+                      low-latency transcription with advanced noise handling
+                      capabilities for real-time conversations.
+                    </p>
+                  </div>
+                </HoverCardContent>
+              </HoverCard>
+            </div>
+            <Mic className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {config.deepgramEnabled ? "Deepgram" : "OpenAI Whisper"}
+            </div>
+            <Badge variant="outline" className="mt-1">
+              {config.deepgramEnabled ? (
+                config.deepgramStatus === "verified" ? (
+                  <>
+                    <CheckCircle className="h-3 w-3 mr-1" />
+                    Connected
+                  </>
+                ) : config.deepgramStatus === "failed" ? (
+                  <>
+                    <AlertTriangle className="h-3 w-3 mr-1 text-red-500" />
+                    Failed
+                  </>
+                ) : config.deepgramApiKey ? (
+                  <>
+                    <AlertTriangle className="h-3 w-3 mr-1 text-yellow-500" />
+                    Unverified
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="h-3 w-3 mr-1" />
+                    Not Set
+                  </>
+                )
+              ) : (
+                <>
+                  <CheckCircle className="h-3 w-3 mr-1" />
+                  Fallback Active
                 </>
               )}
             </Badge>

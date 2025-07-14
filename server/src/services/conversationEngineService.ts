@@ -26,6 +26,7 @@ export interface CallSession {
   conversationHistory: ConversationTurn[];
   context: ConversationContext;
   status: 'active' | 'paused' | 'completed' | 'failed';
+  openingMessageSent?: boolean; // Track if opening message was already sent
   metrics: {
     totalTurns: number;
     personalityChanges: number;
@@ -142,6 +143,7 @@ export class ConversationEngineService {
           }
         },
         status: 'active',
+        openingMessageSent: false, // Initialize opening message flag
         metrics: {
           totalTurns: 0,
           personalityChanges: 0
@@ -251,6 +253,7 @@ export class ConversationEngineService {
           }
         },
         status: 'active',
+        openingMessageSent: false, // Initialize opening message flag
         metrics: {
           totalTurns: 0,
           personalityChanges: 0

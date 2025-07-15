@@ -90,7 +90,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onNavigate, collapsed = false }) => {
       )}
     >
       {/* Logo and title */}
-      <div className="h-16 flex items-center px-4 border-b">
+      <div className="h-16 flex items-center px-4">
         <div className="flex items-center gap-3 overflow-hidden">
           <Logo
             width={collapsed ? 30 : 28}
@@ -158,7 +158,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onNavigate, collapsed = false }) => {
       </ScrollArea>
 
       {/* Logout */}
-      <div className="p-3 border-t">
+      <div className="p-3">
         <Button
           variant="ghost"
           size="sm"

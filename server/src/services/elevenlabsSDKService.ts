@@ -1,4 +1,3 @@
-
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../utils/logger';
@@ -10,6 +9,14 @@ import responseCache from '../utils/responseCache';
 
 // Types
 type Language = 'English' | 'Hindi';
+
+// Rate limiting configuration
+interface RateLimitState {
+  requestCount: number;
+  windowStart: number;
+  backoffUntil: number;
+  consecutiveErrors: number;
+}
 
 export interface ConversationOptions {
   voiceId: string;
@@ -72,6 +79,21 @@ export class ElevenLabsSDKService extends EventEmitter {
   private activeConnections: Map<string, WebSocket> = new Map();
   private elevenlabs: ElevenLabs;
   private responseCache: any; // For caching common responses
+  
+  // Rate limiting state
+  private rateLimitState: RateLimitState = {
+    requestCount: 0,
+    windowStart: Date.now(),
+    backoffUntil: 0,
+    consecutiveErrors: 0
+  };
+  
+  // Rate limiting configuration
+  private readonly RATE_LIMIT_WINDOW = 60000; // 1 minute window
+  private readonly MAX_REQUESTS_PER_WINDOW = 20; // Conservative limit
+  private readonly BASE_BACKOFF_MS = 1000; // Start with 1 second
+  private readonly MAX_BACKOFF_MS = 30000; // Max 30 seconds
+  private readonly MAX_CONSECUTIVE_ERRORS = 3;
 
   /**
    * Create a new ElevenLabs SDK Service
@@ -134,6 +156,64 @@ export class ElevenLabsSDKService extends EventEmitter {
     });
     
     logger.info('ElevenLabs SDK Service API keys updated');
+  }
+
+  /**
+   * Check if we're within rate limits and handle backoff
+   */
+  private async checkRateLimit(): Promise<void> {
+    const now = Date.now();
+    
+    // Check if we're still in backoff period
+    if (now < this.rateLimitState.backoffUntil) {
+      const waitTime = this.rateLimitState.backoffUntil - now;
+      logger.warn(`Rate limit backoff active, waiting ${waitTime}ms`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return;
+    }
+    
+    // Reset window if it has expired
+    if (now - this.rateLimitState.windowStart > this.RATE_LIMIT_WINDOW) {
+      this.rateLimitState.requestCount = 0;
+      this.rateLimitState.windowStart = now;
+    }
+    
+    // Check if we're at the rate limit
+    if (this.rateLimitState.requestCount >= this.MAX_REQUESTS_PER_WINDOW) {
+      const waitTime = this.RATE_LIMIT_WINDOW - (now - this.rateLimitState.windowStart);
+      logger.warn(`Rate limit reached, waiting ${waitTime}ms for window reset`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      this.rateLimitState.requestCount = 0;
+      this.rateLimitState.windowStart = Date.now();
+    }
+    
+    this.rateLimitState.requestCount++;
+  }
+  
+  /**
+   * Handle rate limit error with exponential backoff
+   */
+  private handleRateLimitError(): void {
+    this.rateLimitState.consecutiveErrors++;
+    
+    const backoffTime = Math.min(
+      this.BASE_BACKOFF_MS * Math.pow(2, this.rateLimitState.consecutiveErrors - 1),
+      this.MAX_BACKOFF_MS
+    );
+    
+    this.rateLimitState.backoffUntil = Date.now() + backoffTime;
+    
+    logger.warn(`Rate limit hit, backing off for ${backoffTime}ms (consecutive errors: ${this.rateLimitState.consecutiveErrors})`);
+  }
+  
+  /**
+   * Reset rate limit error state on successful request
+   */
+  private resetRateLimitErrors(): void {
+    if (this.rateLimitState.consecutiveErrors > 0) {
+      logger.info(`Rate limit errors reset after successful request`);
+      this.rateLimitState.consecutiveErrors = 0;
+    }
   }
 
   /**
@@ -207,6 +287,9 @@ export class ElevenLabsSDKService extends EventEmitter {
     }
   ): Promise<Buffer> {
     try {
+      // Check rate limits before making request
+      await this.checkRateLimit();
+      
       // Validate input parameters
       if (!text || typeof text !== 'string' || text.trim() === '') {
         throw new Error(`Invalid text parameter: ${typeof text} - "${text}"`);
@@ -325,6 +408,8 @@ export class ElevenLabsSDKService extends EventEmitter {
         } else if (apiError.response?.status === 422) {
           throw new Error(`ElevenLabs API validation error: ${apiError.response?.data?.detail || 'Invalid request parameters'}`);
         } else if (apiError.response?.status === 429) {
+          // Handle rate limiting
+          this.handleRateLimitError();
           throw new Error(`ElevenLabs API rate limit exceeded. Please try again later.`);
         } else if (apiError.code === 'ERR_BAD_REQUEST' && apiError.response?.status) {
           throw new Error(`ElevenLabs API error (${apiError.response.status}): ${apiError.response.statusText || 'Unknown error'}`);
@@ -413,8 +498,18 @@ export class ElevenLabsSDKService extends EventEmitter {
         logger.debug(`Cached response for: "${text.substring(0, 20)}..."`);
       }
 
+      // Reset rate limit errors on successful request
+      this.resetRateLimitErrors();
+
       return buffer;
     } catch (error) {
+      // Handle rate limiting errors specifically
+      if (error.response?.status === 429 || getErrorMessage(error).includes('429') || getErrorMessage(error).includes('Too Many Requests')) {
+        this.handleRateLimitError();
+        logger.error(`Rate limit error in generateSpeech: ${getErrorMessage(error)}`);
+        throw new Error(`Rate limit exceeded. Please try again in a few moments.`);
+      }
+      
       logger.error(`Error generating speech: ${getErrorMessage(error)}`);
       throw new Error(`Speech generation failed: ${getErrorMessage(error)}`);
     }
@@ -547,6 +642,9 @@ export class ElevenLabsSDKService extends EventEmitter {
     }
 
     try {
+      // Check rate limits before making request
+      await this.checkRateLimit();
+      
       // Use the standard text-to-speech API instead of WebSocket to maintain voice consistency
       logger.info(`Using text-to-speech API for conversation ${conversationId} with voice ${voiceId}`);
       
@@ -618,6 +716,22 @@ export class ElevenLabsSDKService extends EventEmitter {
         // If the response has a buffer property
         audioBuffer = Buffer.isBuffer(audioResponse.buffer) ? audioResponse.buffer : Buffer.from(audioResponse.buffer);
         logger.debug('Using buffer from response.buffer');
+      } else if (audioResponse && audioResponse.status === 'ok' && audioResponse.fileName) {
+        // Handle the elevenlabs-node SDK response format that returns file info
+        const fs = require('fs');
+        try {
+          if (fs.existsSync(audioResponse.fileName)) {
+            audioBuffer = fs.readFileSync(audioResponse.fileName);
+            logger.debug(`Read audio from file: ${audioResponse.fileName} (${audioBuffer.length} bytes)`);
+            // Clean up the file after reading
+            fs.unlinkSync(audioResponse.fileName);
+          } else {
+            throw new Error(`Audio file not found: ${audioResponse.fileName}`);
+          }
+        } catch (fileError) {
+          logger.error(`Error reading audio file ${audioResponse.fileName}: ${fileError}`);
+          throw new Error(`Failed to read generated audio file: ${getErrorMessage(fileError)}`);
+        }
       } else if (audioResponse && typeof audioResponse === 'string') {
         // If it's a base64 string or similar
         audioBuffer = Buffer.from(audioResponse, 'base64');
@@ -636,11 +750,21 @@ export class ElevenLabsSDKService extends EventEmitter {
       // Send the complete audio buffer
       onAudioChunk(audioBuffer);
       
+      // Reset rate limit errors on successful request
+      this.resetRateLimitErrors();
+      
       // Add message to conversation history
       this.addMessage(conversationId, 'assistant', text);
       
       logger.info(`Successfully generated speech for conversation ${conversationId}`);
     } catch (error) {
+      // Handle rate limiting errors specifically
+      if (error.response?.status === 429 || getErrorMessage(error).includes('429') || getErrorMessage(error).includes('Too Many Requests')) {
+        this.handleRateLimitError();
+        logger.error(`Rate limit error in streamSpeech for conversation ${conversationId}: ${getErrorMessage(error)}`);
+        throw new Error(`Rate limit exceeded. Please try again in a few moments.`);
+      }
+      
       logger.error(`Error in streamSpeech for conversation ${conversationId}: ${getErrorMessage(error)}`);
       throw error;
     }

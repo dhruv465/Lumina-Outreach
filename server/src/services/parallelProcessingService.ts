@@ -90,9 +90,14 @@ export class ParallelProcessingService extends EventEmitter {
         
         const cues: ThinkingCue[] = [];
         
-        // Generate audio for each thinking phrase
+        // Generate audio for each thinking phrase with delay to avoid rate limits
         for (const phrase of thinkingPhrases) {
           try {
+            // Add delay between requests to avoid rate limiting
+            if (thinkingPhrases.indexOf(phrase) > 0) {
+              await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+            }
+            
             const audioBuffer = await this.sdkService.generateSpeech(
               phrase.text,
               voiceId,
@@ -112,7 +117,13 @@ export class ParallelProcessingService extends EventEmitter {
             
             logger.debug(`Generated thinking sound "${phrase.text}" for voice ${voiceId}`);
           } catch (error) {
-            logger.warn(`Failed to generate thinking sound "${phrase.text}" for voice ${voiceId}: ${getErrorMessage(error)}`);
+            const errorMessage = getErrorMessage(error);
+            if (errorMessage.includes('Rate limit') || errorMessage.includes('429')) {
+              logger.warn(`Rate limit hit while generating thinking sound "${phrase.text}" for voice ${voiceId}, skipping remaining phrases for this voice`);
+              break; // Skip remaining phrases for this voice to avoid more rate limit errors
+            } else {
+              logger.warn(`Failed to generate thinking sound "${phrase.text}" for voice ${voiceId}: ${errorMessage}`);
+            }
           }
         }
         

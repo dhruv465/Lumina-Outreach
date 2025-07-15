@@ -2,7 +2,6 @@ import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import Sidebar from '@/components/layout/Sidebar';
 import Header from '@/components/layout/Header';
-import { PageTitle } from '@/components/common/PageTitle';
 import { StatusBar } from '@/components/common/StatusBar';
 import { useState } from 'react';
 
@@ -26,27 +25,32 @@ const DashboardLayout = () => {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop Sidebar - hidden on mobile */}
-      <div className={`hidden lg:flex transition-all duration-300 ease-in-out ${collapsed ? 'lg:w-[70px]' : 'lg:w-64'}`}>
+      <div className={`hidden lg:flex flex-shrink-0 transition-all duration-300 ease-in-out ${collapsed ? 'lg:w-[70px]' : 'lg:w-64'}`}>
         <Sidebar collapsed={collapsed} />
       </div>
 
       {/* Main content */}
-      <div className="flex flex-col flex-1 overflow-hidden transition-all duration-300 ease-in-out">
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         {/* Header */}
-        <Header toggleSidebar={() => setCollapsed(!collapsed)} sidebarCollapsed={collapsed} />
+        <div className="flex-shrink-0">
+          <Header toggleSidebar={() => setCollapsed(!collapsed)} sidebarCollapsed={collapsed} />
+        </div>
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-6 bg-background/50">
-          <div className="max-w-[1500px] mx-auto">
-            <PageTitle />
-            <Outlet />
+        <main className="flex-1 overflow-y-auto p-4 md:p-6">
+          <div className="max-w-full mx-auto">
+            <div className="space-y-6">
+              <Outlet />
+            </div>
           </div>
         </main>
         
         {/* Status bar */}
-        <StatusBar />
+        <div className="flex-shrink-0">
+          <StatusBar />
+        </div>
       </div>
     </div>
   );

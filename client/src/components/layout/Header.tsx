@@ -1,17 +1,31 @@
-import { useState } from 'react';
-import { useAuth } from '@/hooks/useAuth';
-import { useTheme } from '@/contexts/ThemeContext';
-import { Menu, Moon, Sun, User, PanelLeftClose, PanelLeft, LogOut } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { useTheme } from "@/contexts/ThemeContext";
+import {
+  Menu,
+  Moon,
+  Sun,
+  User,
+  PanelLeftClose,
+  PanelLeft,
+  LogOut,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from '@/components/ui/sheet';
-import Sidebar from './Sidebar';
-import Logo from '@/components/Logo';
+} from "@/components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetTrigger,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
+import Sidebar from "./Sidebar";
+import Logo from "@/components/Logo";
 
 interface HeaderProps {
   toggleSidebar?: () => void;
@@ -24,7 +38,7 @@ const Header = ({ toggleSidebar, sidebarCollapsed }: HeaderProps) => {
   const [isOpen, setIsOpen] = useState(false);
 
   const toggleTheme = () => {
-    setTheme(theme === 'dark' ? 'light' : 'dark');
+    setTheme(theme === "dark" ? "light" : "dark");
   };
 
   return (
@@ -51,13 +65,19 @@ const Header = ({ toggleSidebar, sidebarCollapsed }: HeaderProps) => {
 
           {/* Desktop sidebar toggle */}
           {toggleSidebar && (
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className={`hidden lg:flex transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'cursor-e-resize' : 'cursor-w-resize'} hover:bg-muted/60 rounded-md`}
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`hidden lg:flex transition-all duration-300 ease-in-out ${
+                sidebarCollapsed ? "cursor-e-resize" : "cursor-w-resize"
+              } hover:bg-muted/60 rounded-md`}
               onClick={toggleSidebar}
             >
-              {sidebarCollapsed ? <PanelLeft size={18} /> : <PanelLeftClose size={18} />}
+              {sidebarCollapsed ? (
+                <PanelLeft size={18} />
+              ) : (
+                <PanelLeftClose size={18} />
+              )}
               <span className="sr-only">
                 {sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               </span>
@@ -74,25 +94,36 @@ const Header = ({ toggleSidebar, sidebarCollapsed }: HeaderProps) => {
         {/* Right side actions - moved to absolute right */}
         <div className="flex items-center gap-1 ml-auto">
           {/* Theme toggle */}
-          <Button variant="ghost" size="icon" className="rounded-md" onClick={toggleTheme}>
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-md"
+            onClick={toggleTheme}
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
             <span className="sr-only">Toggle theme</span>
           </Button>
 
           {/* User menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="rounded-md gap-2 pl-2 pr-3 ml-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="rounded-md gap-2 pl-2 pr-3 ml-1"
+              >
                 <User size={16} />
                 <span className="hidden md:inline text-sm font-normal truncate max-w-[100px]">
-                  {user?.name?.split(' ')[0]}
+                  {user?.name?.split(" ")[0]}
                 </span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-60">
               <div className="px-4 py-3 border-b">
                 <p className="text-sm font-medium mb-0.5">{user?.name}</p>
-                <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {user?.email}
+                </p>
               </div>
               <div className="py-1.5">
                 <DropdownMenuItem className="cursor-pointer">

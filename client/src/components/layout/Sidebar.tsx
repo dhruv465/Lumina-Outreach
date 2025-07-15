@@ -1,6 +1,6 @@
-import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
+import React from "react";
+import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 import {
   LayoutDashboard,
   Users,
@@ -9,11 +9,11 @@ import {
   Megaphone,
   BarChart3,
   LogOut,
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import Logo from '@/components/Logo';
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import Logo from "@/components/Logo";
 
 interface SidebarItemProps {
   href: string;
@@ -23,7 +23,13 @@ interface SidebarItemProps {
   collapsed?: boolean;
 }
 
-const SidebarItem: React.FC<SidebarItemProps> = ({ href, icon, title, onNavigate, collapsed }) => {
+const SidebarItem: React.FC<SidebarItemProps> = ({
+  href,
+  icon,
+  title,
+  onNavigate,
+  collapsed,
+}) => {
   const { pathname } = useLocation();
   const isActive = pathname === href;
 
@@ -37,24 +43,30 @@ const SidebarItem: React.FC<SidebarItemProps> = ({ href, icon, title, onNavigate
         variant="ghost"
         size="sm"
         className={cn(
-          'w-full justify-start gap-3 transition-all duration-300 ease-in-out h-9 my-1 rounded-md',
-          isActive ? 'bg-muted/70 font-medium' : 'font-normal hover:bg-muted/40',
-          collapsed ? 'justify-center px-2' : ''
+          "w-full justify-start gap-3 transition-all duration-300 ease-in-out h-9 my-1 rounded-md",
+          isActive
+            ? "bg-muted/70 font-medium"
+            : "font-normal hover:bg-muted/40",
+          collapsed ? "justify-center px-2" : ""
         )}
         title={collapsed ? title : undefined}
       >
-        <span className={cn(
-          'transition-transform duration-300 ease-in-out',
-          collapsed ? 'transform scale-110' : '',
-          isActive ? 'text-primary/80' : 'text-muted-foreground'
-        )}>
+        <span
+          className={cn(
+            "transition-transform duration-300 ease-in-out",
+            collapsed ? "transform scale-110" : "",
+            isActive ? "text-primary/80" : "text-muted-foreground"
+          )}
+        >
           {icon}
         </span>
-        <span className={cn(
-          'transition-all duration-300 ease-in-out whitespace-nowrap text-sm',
-          collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100 w-auto',
-          isActive ? 'text-foreground' : 'text-muted-foreground'
-        )}>
+        <span
+          className={cn(
+            "transition-all duration-300 ease-in-out whitespace-nowrap text-sm",
+            collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100 w-auto",
+            isActive ? "text-foreground" : "text-muted-foreground"
+          )}
+        >
           {title}
         </span>
       </Button>
@@ -71,15 +83,27 @@ const Sidebar: React.FC<SidebarProps> = ({ onNavigate, collapsed = false }) => {
   const { logout } = useAuth();
 
   return (
-    <div className={cn(
-      "flex flex-col border-r bg-card/60 h-full transition-all duration-300 ease-in-out",
-      collapsed ? "w-[70px]" : "w-64"
-    )}>
+    <div
+      className={cn(
+        "flex flex-col border-r bg-card/60 h-full transition-all duration-300 ease-in-out",
+        collapsed ? "w-[70px]" : "w-64"
+      )}
+    >
       {/* Logo and title */}
       <div className="h-16 flex items-center px-4 border-b">
         <div className="flex items-center gap-3 overflow-hidden">
-          <Logo width={collapsed ? 30 : 28} height={collapsed ? 30 : 28} className="transition-all duration-300" />
-          <h1 className={`font-medium tracking-tight whitespace-nowrap transition-all duration-300 origin-left ${collapsed ? 'opacity-0 scale-90 w-0' : 'opacity-100 w-auto text-base'}`}>
+          <Logo
+            width={collapsed ? 30 : 28}
+            height={collapsed ? 30 : 28}
+            className="transition-all duration-300"
+          />
+          <h1
+            className={`font-medium tracking-tight whitespace-nowrap transition-all duration-300 origin-left ${
+              collapsed
+                ? "opacity-0 scale-90 w-0"
+                : "opacity-100 w-auto text-base"
+            }`}
+          >
             Lumina <span className="text-primary/80">Outreach</span>
           </h1>
         </div>
@@ -145,16 +169,20 @@ const Sidebar: React.FC<SidebarProps> = ({ onNavigate, collapsed = false }) => {
           onClick={logout}
           title={collapsed ? "Sign Out" : undefined}
         >
-          <span className={cn(
-            'transition-transform duration-300 ease-in-out',
-            collapsed ? 'transform scale-110' : ''
-          )}>
+          <span
+            className={cn(
+              "transition-transform duration-300 ease-in-out",
+              collapsed ? "transform scale-110" : ""
+            )}
+          >
             <LogOut size={19} />
           </span>
-          <span className={cn(
-            'transition-all duration-300 ease-in-out whitespace-nowrap text-sm',
-            collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100 w-auto'
-          )}>
+          <span
+            className={cn(
+              "transition-all duration-300 ease-in-out whitespace-nowrap text-sm",
+              collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100 w-auto"
+            )}
+          >
             Sign Out
           </span>
         </Button>

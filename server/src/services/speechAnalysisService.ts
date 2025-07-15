@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { logger } from '../index';
-import { Deepgram } from '@deepgram/sdk';
+import { createClient, DeepgramResponse } from '@deepgram/sdk';
 import { getErrorMessage } from '../utils/logger';
 
 export interface SpeechAnalysis {
@@ -41,7 +41,7 @@ export class SpeechAnalysisService {
   private openAIApiKey: string;
   private googleSpeechKey?: string;
   private deepgramApiKey?: string;
-  private deepgramClient?: Deepgram;
+  private deepgramClient?: any;
 
   constructor(openAIApiKey: string, googleSpeechKey?: string, deepgramApiKey?: string) {
     this.openAIApiKey = openAIApiKey;
@@ -58,7 +58,7 @@ export class SpeechAnalysisService {
    */
   private initializeDeepgram(apiKey: string): void {
     try {
-      this.deepgramClient = new Deepgram(apiKey);
+      this.deepgramClient = createClient(apiKey);
       logger.info(`Deepgram client initialized successfully with API key (length: ${apiKey.length})`);
     } catch (error) {
       logger.error(`Failed to initialize Deepgram client: ${getErrorMessage(error)}`);
@@ -126,9 +126,8 @@ export class SpeechAnalysisService {
         };
         
         try {
-          // Use the Deepgram SDK directly
-          const source = { buffer: audioBuffer, mimetype: 'audio/wav' };
-          const deepgramResponse = await this.deepgramClient.transcription.preRecorded(source, options);
+          // Use the Deepgram SDK v4 API
+          const { result: deepgramResponse } = await this.deepgramClient.listen.prerecorded.transcribeFile(audioBuffer, options);
           
           // Extract the transcript from response
           const transcript = deepgramResponse?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';

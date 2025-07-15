@@ -179,9 +179,6 @@ Keep the conversation natural and engaging. If they're not interested, politely 
   );
   const [testingLLMChat, setTestingLLMChat] = useState(false);
   const [openTestLLMChatDialog, setOpenTestLLMChatDialog] = useState(false);
-  const [testLLMPrompt, setTestLLMPrompt] = useState(
-    ""
-  );
   const [testLLMResponse, setTestLLMResponse] = useState("");
   const [availableVoices, setAvailableVoices] = useState<
     { voiceId: string; name: string; previewUrl?: string }[]
@@ -718,11 +715,16 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           (p: any) => p.name === currentProvider
         )?.apiKey;
 
-        // Get current provider status
-        const currentProviderStatus =
+        // Get current provider status from server, but preserve local verified status
+        const serverProviderStatus =
           updatedConfigData.llmConfig?.providers?.find(
             (p: any) => p.name === currentProvider
           )?.status || "unverified";
+        
+        // Preserve verification status if it was just verified locally
+        const llmStatus = prevConfig.llmStatus === "verified" 
+          ? "verified" 
+          : serverProviderStatus;
 
         const llmApiKey = serverProviderKey || prevConfig.llmApiKey;
 
@@ -774,7 +776,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           llmModel:
             updatedConfigData.llmConfig?.defaultModel || prevConfig.llmModel,
           llmApiKey,
-          llmStatus: currentProviderStatus,
+          llmStatus: llmStatus,
           temperature:
             updatedConfigData.llmConfig?.temperature !== undefined
               ? updatedConfigData.llmConfig.temperature
@@ -1228,11 +1230,14 @@ Keep the conversation natural and engaging. If they're not interested, politely 
   };
 
   const handleTestLLMChat = async () => {
-    // Validate input
-    if (!testLLMPrompt) {
+    // Use a predefined test message instead of requiring user input
+    const testMessage = "Hello, how are you today? Can you tell me about your product or service?";
+    
+    // Validate that system prompt is set
+    if (!config.systemPrompt.trim()) {
       toast({
-        title: "Missing Prompt",
-        description: "Please enter a test prompt.",
+        title: "System Prompt Required",
+        description: "Please enter a system prompt before testing the AI chat.",
         variant: "destructive",
       });
       return;
@@ -1256,11 +1261,13 @@ Keep the conversation natural and engaging. If they're not interested, politely 
       const providerName = config.llmProvider.toLowerCase();
 
       console.log(`Testing LLM chat with provider: ${providerName}`);
+      console.log(`Using system prompt: ${config.systemPrompt.substring(0, 100)}...`);
+      console.log(`Test message: ${testMessage}`);
 
       const result = await configApi.testLLMChat({
         provider: providerName,
         model: config.llmModel,
-        prompt: testLLMPrompt,
+        prompt: `${config.systemPrompt}\n\nCustomer: ${testMessage}\nAI:`,
         temperature: config.temperature,
         apiKey: config.llmApiKey, // Pass the current API key from the input
       });
@@ -1270,7 +1277,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
 
         toast({
           title: "Test Successful",
-          description: "The LLM responded successfully to your prompt.",
+          description: "The LLM responded successfully with your system prompt configuration.",
         });
 
         // Update LLM status to verified if successful
@@ -1278,6 +1285,38 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           ...prev,
           llmStatus: "verified",
         }));
+
+        // Persist the verification status to the server immediately
+        try {
+          // Get current configuration to preserve all providers
+          const currentConfig = await configApi.getConfiguration();
+          
+          // Update only the tested provider's status while preserving others
+          const updatedProviders = currentConfig.llmConfig.providers.map((provider: any) => {
+            if (provider.name === config.llmProvider) {
+              return {
+                ...provider,
+                status: "verified",
+                lastVerified: new Date().toISOString(),
+                apiKey: config.llmApiKey,
+              };
+            }
+            return provider;
+          });
+
+          const quickUpdateConfig = {
+            llmConfig: {
+              ...currentConfig.llmConfig,
+              providers: updatedProviders
+            }
+          };
+          
+          await configApi.updateConfiguration(quickUpdateConfig);
+          console.log("Verification status saved to server successfully");
+        } catch (saveError) {
+          console.warn("Failed to save verification status to server:", saveError);
+          // Don't show error to user as the test was successful
+        }
       } else {
         toast({
           title: "Test Failed",
@@ -1292,6 +1331,35 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           ...prev,
           llmStatus: "failed",
         }));
+
+        // Persist the failed status to the server
+        try {
+          // Get current configuration to preserve all providers
+          const currentConfig = await configApi.getConfiguration();
+          
+          // Update only the tested provider's status while preserving others
+          const updatedProviders = currentConfig.llmConfig.providers.map((provider: any) => {
+            if (provider.name === config.llmProvider) {
+              return {
+                ...provider,
+                status: "failed",
+                apiKey: config.llmApiKey,
+              };
+            }
+            return provider;
+          });
+
+          const quickUpdateConfig = {
+            llmConfig: {
+              ...currentConfig.llmConfig,
+              providers: updatedProviders
+            }
+          };
+          
+          await configApi.updateConfiguration(quickUpdateConfig);
+        } catch (saveError) {
+          console.warn("Failed to save failed status to server:", saveError);
+        }
       }
     } catch (error: any) {
       console.error("LLM chat test error:", error);
@@ -1308,6 +1376,35 @@ Keep the conversation natural and engaging. If they're not interested, politely 
         ...prev,
         llmStatus: "failed",
       }));
+
+      // Persist the failed status to the server
+      try {
+        // Get current configuration to preserve all providers
+        const currentConfig = await configApi.getConfiguration();
+        
+        // Update only the tested provider's status while preserving others
+        const updatedProviders = currentConfig.llmConfig.providers.map((provider: any) => {
+          if (provider.name === config.llmProvider) {
+            return {
+              ...provider,
+              status: "failed",
+              apiKey: config.llmApiKey,
+            };
+          }
+          return provider;
+        });
+
+        const quickUpdateConfig = {
+          llmConfig: {
+            ...currentConfig.llmConfig,
+            providers: updatedProviders
+          }
+        };
+        
+        await configApi.updateConfiguration(quickUpdateConfig);
+      } catch (saveError) {
+        console.warn("Failed to save failed status to server:", saveError);
+      }
     } finally {
       setTestingLLMChat(false);
     }
@@ -1504,7 +1601,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
               {config.llmStatus === "verified" ? (
                 <>
                   <CheckCircle className="h-3 w-3 mr-1" />
-                  Active
+                  Connected
                 </>
               ) : config.llmStatus === "failed" ? (
                 <>
@@ -2392,27 +2489,26 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           <AlertDialogHeader>
             <AlertDialogTitle>Test AI Chat</AlertDialogTitle>
             <AlertDialogDescription>
-              Test your AI model with a sample prompt to verify it's working
-              correctly.
+              Test your AI model with your current system prompt configuration. 
+              This will send a sample customer message to see how the AI responds with your configured personality.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="testLLMPrompt">Test Prompt</Label>
-              <Textarea
-                id="testLLMPrompt"
-                placeholder="Enter a prompt to test the AI response..."
-                value={testLLMPrompt}
-                onChange={(e) => setTestLLMPrompt(e.target.value)}
-                rows={3}
-              />
+              <Label>Test Scenario</Label>
+              <div className="border rounded-md p-3 bg-muted/50 text-sm">
+                <strong>Customer Message:</strong> "Hello, how are you today? Can you tell me about your product or service?"
+              </div>
+              <p className="text-xs text-muted-foreground">
+                The AI will respond to this customer message using your configured system prompt and personality settings.
+              </p>
             </div>
 
             {testLLMResponse && (
               <div className="space-y-2 mt-4">
                 <Label>AI Response</Label>
-                <div className="border rounded-md p-3 bg-muted text-muted-foreground whitespace-pre-wrap">
+                <div className="border rounded-md p-3 bg-background text-foreground whitespace-pre-wrap">
                   {testLLMResponse}
                 </div>
               </div>

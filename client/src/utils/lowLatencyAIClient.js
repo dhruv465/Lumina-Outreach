@@ -191,6 +191,21 @@ function initializeLowLatencyAI(voiceId, callId = null, conversationId = null) {
     if (audioQueue.length === 0) {
       isPlaying = false;
       currentAudioSource = null;
+      
+      // After all audio has finished playing, indicate we're ready to listen
+      // This helps ensure proper state transitions, especially after the opening message
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: 'readyToListen'
+        }));
+        console.log('Sent readyToListen signal');
+        
+        // Notify the event handler that we're now listening
+        if (eventCallbacks.onProcessingComplete) {
+          eventCallbacks.onProcessingComplete();
+        }
+      }
+      
       return;
     }
     

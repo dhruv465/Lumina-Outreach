@@ -55,15 +55,15 @@ const initializeFromDatabase = async () => {
       googleSpeechKey = googleProvider?.apiKey || '';
       
       // Get deepgram API key
-      const deepgramProvider = config.llmConfig?.providers?.find((p: any) => p.name === 'deepgram');
-      deepgramApiKey = deepgramProvider?.apiKey || '';
+      deepgramApiKey = config.deepgramConfig?.apiKey || '';
 
       // Log API key status (showing length for security, not actual keys)
       console.log('API keys loaded from database:', {
         elevenLabsApiKey: elevenLabsApiKey ? `SET (${elevenLabsApiKey.length} chars)` : 'NOT SET',
         openAIApiKey: openAIApiKey ? `SET (${openAIApiKey.length} chars)` : 'NOT SET',
         anthropicApiKey: anthropicApiKey ? `SET (${anthropicApiKey.length} chars)` : 'NOT SET',
-        googleSpeechKey: googleSpeechKey ? `SET (${googleSpeechKey.length} chars)` : 'NOT SET'
+        googleSpeechKey: googleSpeechKey ? `SET (${googleSpeechKey.length} chars)` : 'NOT SET',
+        deepgramApiKey: deepgramApiKey ? `SET (${deepgramApiKey.length} chars)` : 'NOT SET'
       });
     } else {
       console.warn('No configuration document found in database');
@@ -219,6 +219,15 @@ export const initializeServicesAfterDB = async () => {
     // Re-initialize services that depend on database configuration
     await initializeFromDatabase();
     
+    // Initialize the Deepgram controller
+    try {
+      const { initializeDeepgramController } = await import('../controllers/deepgramController');
+      await initializeDeepgramController();
+      logger.info('Deepgram controller initialized successfully');
+    } catch (deepgramError) {
+      logger.error('Failed to initialize Deepgram controller:', deepgramError);
+    }
+    
     console.log('About to initialize services with keys:', {
       hasElevenLabsKey: !!elevenLabsApiKey,
       hasOpenAIKey: !!openAIApiKey,
@@ -244,6 +253,7 @@ export const initializeServicesAfterDB = async () => {
         googleSpeechKey || '', 
         deepgramApiKey || ''
       );
+      console.log('Speech analysis service initialized with API keys (Deepgram length:', deepgramApiKey?.length || 0, ')');
       
       // Initialize LLM service
       const llmService = new LLMService({

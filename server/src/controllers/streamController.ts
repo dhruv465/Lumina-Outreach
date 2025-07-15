@@ -457,7 +457,17 @@ export const handleConversationalAIStream = async (ws: WebSocket, req: Request):
                     interrupted: response.interrupted || false,
                     metadata: response.metadata || {}
                   }));
-                  isProcessing = false;
+                  
+                  // After the opening message is complete, explicitly transition to listening state
+                  // This ensures the agent continues the conversation
+                  setTimeout(() => {
+                    ws.send(JSON.stringify({
+                      type: 'listening',
+                      conversationId
+                    }));
+                    logger.info(`Transitioned to listening state after initial script for conversation ${conversationId}`);
+                    isProcessing = false;
+                  }, 500); // Small delay to ensure client has processed completion
                 }
               }
             ).catch((error) => {
@@ -506,6 +516,17 @@ export const handleConversationalAIStream = async (ws: WebSocket, req: Request):
               conversationId
             }));
           }
+          isProcessing = false;
+          return;
+        }
+        
+        // Handle readyToListen message from client
+        if (data.type === 'readyToListen') {
+          logger.info(`Client ready to listen for conversation ${conversationId}`);
+          ws.send(JSON.stringify({
+            type: 'listening',
+            conversationId
+          }));
           isProcessing = false;
           return;
         }

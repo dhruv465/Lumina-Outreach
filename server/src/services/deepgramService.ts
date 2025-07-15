@@ -483,6 +483,32 @@ export class DeepgramService extends EventEmitter {
       this.closeTranscriptionStream(id);
     });
   }
+
+  /**
+   * Validate the Deepgram API key
+   * @returns Promise<boolean> - True if the API key is valid
+   */
+  public async validateApiKey(): Promise<boolean> {
+    try {
+      // Use a simple API call to test if the key is valid
+      const circuitBreaker = getCircuitBreakerService().getCircuit(this.CIRCUIT_NAME);
+      
+      const result = await circuitBreaker.fire(async () => {
+        // Simple request to check if key is valid
+        await this.client.listen.prerecorded.transcribeUrl(
+          { url: 'https://res.cloudinary.com/dvfrcaw1c/video/upload/v1711698492/test-samples/test-sample-en.mp3' },
+          { model: 'nova-2', language: 'en' }
+        );
+        return true;
+      });
+      
+      logger.info('Deepgram API key validation successful');
+      return true;
+    } catch (error) {
+      logger.error(`Deepgram API key validation failed: ${error}`);
+      return false;
+    }
+  }
 }
 
 // Singleton instance

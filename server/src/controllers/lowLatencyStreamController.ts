@@ -526,8 +526,16 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
           } else if (message.event === 'stop') {
             logger.info(`Twilio stream stopped for call ${callId}:`, message);
             return;
+          } else if (message.type === 'readyToListen') {
+            // Handle readyToListen message from client
+            logger.info(`Client ready to listen for call ${callId}`);
+            ws.send(JSON.stringify({
+              type: 'listening',
+              conversationId
+            }));
+            return;
           } else {
-            logger.debug(`Ignoring Twilio message type ${message.event} for call ${callId}`);
+            logger.debug(`Ignoring Twilio message type ${message.event || message.type} for call ${callId}`);
             return;
           }
         } catch (parseError) {

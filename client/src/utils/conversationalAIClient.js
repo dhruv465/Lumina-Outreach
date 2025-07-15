@@ -105,6 +105,13 @@ function initializeConversationalAI(voiceId, conversationId = null, campaignId =
             console.log('Received initial script:', message);
             metrics.state = 'speaking';
             updateMetrics();
+            
+            // After receiving the initial script, make sure we properly transition
+            // to listening state once audio playback is complete
+            if (message.text) {
+              console.log('Initial script text:', message.text);
+              // The audio will be sent separately as binary data
+            }
             break;
             
           case 'processing':
@@ -264,6 +271,15 @@ function initializeConversationalAI(voiceId, conversationId = null, campaignId =
       if (metrics.state === 'speaking') {
         metrics.state = 'listening';
         updateMetrics();
+        
+        // Signal the server that we're ready for listening mode
+        // This ensures the conversation continues after initial script
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({
+            type: 'readyToListen'
+          }));
+          console.log('Sent readyToListen signal');
+        }
       }
       
       return;

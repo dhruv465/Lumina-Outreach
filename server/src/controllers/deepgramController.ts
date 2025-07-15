@@ -20,6 +20,8 @@ export async function initializeDeepgramController(): Promise<void> {
       logger.warn('No Deepgram API key found in configuration');
       return;
     }
+    
+    logger.info(`Initializing Deepgram controller with API key (length: ${config.deepgramConfig.apiKey.length})`);
 
     // Initialize the Deepgram service
     const deepgramService = initializeDeepgramService(config.deepgramConfig.apiKey);
@@ -30,7 +32,38 @@ export async function initializeDeepgramController(): Promise<void> {
     // Initialize the circuit breaker service for Deepgram
     getCircuitBreakerService();
     
-    logger.info('Deepgram controller initialized with circuit breaker protection');
+    // Verify the API key is valid
+    try {
+      const isValid = await deepgramService.validateApiKey();
+      
+      // Update configuration status based on validation result
+      config.deepgramConfig.status = isValid ? 'verified' : 'failed';
+      config.deepgramConfig.lastVerified = new Date();
+      
+      if (!isValid) {
+        config.deepgramConfig.lastError = 'API key validation failed';
+        logger.warn('Deepgram API key validation failed');
+      } else {
+        logger.info('Deepgram API key validated successfully');
+      }
+      
+      await config.save();
+    } catch (validationError) {
+      logger.error(`Error validating Deepgram API key: ${validationError}`);
+      
+      // Update configuration to mark validation failure
+      config.deepgramConfig.status = 'failed';
+      config.deepgramConfig.lastVerified = new Date();
+      config.deepgramConfig.lastError = `Validation error: ${validationError.message}`;
+      await config.save();
+    }
+    
+    // Verify that the service has been properly initialized
+    if (deepgramService) {
+      logger.info('Deepgram controller initialized with circuit breaker protection');
+    } else {
+      logger.warn('Deepgram service failed to initialize');
+    }
   } catch (error) {
     logger.error(`Error initializing Deepgram controller: ${error}`);
   }

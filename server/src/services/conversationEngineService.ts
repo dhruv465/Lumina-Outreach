@@ -666,6 +666,27 @@ Instructions:
       return false;
     }
   }
+
+  /**
+   * Update API keys for all services
+   */
+  updateApiKeys(
+    openAIApiKey?: string,
+    googleSpeechKey?: string,
+    deepgramApiKey?: string,
+    elevenLabsApiKey?: string
+  ): void {
+    // Update speech analysis service keys
+    if (this.speechAnalysis && (openAIApiKey !== undefined || googleSpeechKey !== undefined || deepgramApiKey !== undefined)) {
+      this.speechAnalysis.updateApiKeys(openAIApiKey, googleSpeechKey, deepgramApiKey);
+      logger.info('Updated SpeechAnalysisService API keys');
+    }
+
+    // Note: EnhancedVoiceAIService doesn't have updateApiKeys method
+    // It would need to be recreated with new API key if needed
+
+    logger.info('ConversationEngine API keys updated');
+  }
 }
 
 // Export default for compatibility

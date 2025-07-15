@@ -462,7 +462,7 @@ const initializeServices = async () => {
       googleSpeechApiKey = googleProvider?.apiKey || '';
       
       // Deepgram for STT (Nova-2)
-      const deepgramApiKey = config.deepgramConfig?.apiKey || '';
+      deepgramApiKey = config.deepgramConfig?.apiKey || '';
       logger.info('Deepgram API key ' + (deepgramApiKey ? 'found' : 'not found') + ' in configuration');
     } else {
       logger.warn('No configuration found in database, services will operate without API keys');

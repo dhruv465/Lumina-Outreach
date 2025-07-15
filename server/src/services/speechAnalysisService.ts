@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { logger } from '../index';
-import { createClient, DeepgramResponse } from '@deepgram/sdk';
+import { createClient } from '@deepgram/sdk';
 import { getErrorMessage } from '../utils/logger';
 
 export interface SpeechAnalysis {
@@ -54,15 +54,31 @@ export class SpeechAnalysisService {
   }
 
   /**
-   * Initialize Deepgram client
+   * Initialize Deepgram client with proper validation
    */
   private initializeDeepgram(apiKey: string): void {
     try {
+      if (!apiKey || apiKey.length < 10) {
+        logger.warn('Invalid Deepgram API key provided - must be at least 10 characters');
+        return;
+      }
+      
       this.deepgramClient = createClient(apiKey);
       logger.info(`Deepgram client initialized successfully with API key (length: ${apiKey.length})`);
+      
+      // Validate the client by making a test connection (optional)
+      // Note: We don't make actual API calls here to avoid unnecessary costs
     } catch (error) {
       logger.error(`Failed to initialize Deepgram client: ${getErrorMessage(error)}`);
+      this.deepgramClient = undefined;
     }
+  }
+
+  /**
+   * Check if Deepgram is properly configured and ready to use
+   */
+  public isDeepgramConfigured(): boolean {
+    return !!(this.deepgramApiKey && this.deepgramClient && this.deepgramApiKey.length > 10);
   }
 
   /**
@@ -109,112 +125,88 @@ export class SpeechAnalysisService {
     language?: 'English' | 'Hindi'
   ): Promise<{ transcript: string; language: string; confidence: number }> {
     try {
-      // First check if we have Deepgram API key and client
-      if (this.deepgramApiKey && this.deepgramClient) {
-        logger.info(`Using Deepgram Nova-2 for transcription with API key length: ${this.deepgramApiKey.length}`);
-        
-        // Prepare transcription options
-        const options = {
-          model: 'nova-2', // Use the Nova-2 model for better accuracy
-          smart_format: true,
-          language: language ? (language === 'English' ? 'en' : 'hi') : undefined,
-          detect_language: language ? false : true,
-          punctuate: true,
-          utterances: true, // Get utterance-level timestamps
-          diarize: true, // Speaker identification
-          tier: 'enhanced' // Use enhanced model for higher accuracy
-        };
-        
-        try {
-          // Use the Deepgram SDK v4 API
-          const { result: deepgramResponse } = await this.deepgramClient.listen.prerecorded.transcribeFile(audioBuffer, options);
-          
-          // Extract the transcript from response
-          const transcript = deepgramResponse?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
-          const confidence = deepgramResponse?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
-          
-          // Get detected language or use the provided one
-          let detectedLanguage: 'English' | 'Hindi';
-          if (deepgramResponse?.results?.channels?.[0]?.detected_language === 'hi') {
-            detectedLanguage = 'Hindi';
-          } else {
-            detectedLanguage = 'English'; // Default to English or use detected language
-          }
-          
-          logger.info(`Deepgram transcription completed: ${transcript.substring(0, 100)}...`);
-          
-          return {
-            transcript,
-            language: detectedLanguage,
-            confidence
-          };
-        } catch (deepgramError) {
-          logger.error(`Deepgram SDK error: ${getErrorMessage(deepgramError)}`);
-          logger.warn('Falling back to axios direct API call');
-          
-          // Fallback to direct API call with axios
-          const response = await axios.post(
-            'https://api.deepgram.com/v1/listen',
-            audioBuffer,
-            {
-              params: options,
-              headers: {
-                'Authorization': `Token ${this.deepgramApiKey}`,
-                'Content-Type': 'audio/wav'
-              }
-            }
-          );
-          
-          // Extract the transcript from response
-          const transcript = response.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
-          const confidence = response.data?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
-          
-          // Get detected language or use the provided one
-          let detectedLanguage: 'English' | 'Hindi';
-          if (response.data?.results?.channels?.[0]?.detected_language === 'hi') {
-            detectedLanguage = 'Hindi';
-          } else {
-            detectedLanguage = 'English'; // Default to English or use detected language
-          }
-          
-          logger.info(`Deepgram transcription completed: ${transcript.substring(0, 100)}...`);
-          
-          return {
-            transcript,
-            language: detectedLanguage,
-            confidence
-          };
-        }
-      } else {
-        logger.warn('Deepgram not configured, falling back to OpenAI Whisper');
-        
-        // Use OpenAI Whisper as fallback (original implementation)
-        const formData = new FormData();
-        const audioBlob = new Blob([audioBuffer], { type: 'audio/wav' });
-        formData.append('file', audioBlob, 'audio.wav');
-        formData.append('model', 'whisper-1');
-        
-        if (language) {
-          formData.append('language', language === 'English' ? 'en' : 'hi');
-        }
+      // Check if Deepgram is properly configured
+      if (!this.isDeepgramConfigured()) {
+        const errorMsg = `Deepgram is not properly configured. API key: ${this.deepgramApiKey ? 'SET' : 'NOT SET'}, Client: ${this.deepgramClient ? 'SET' : 'NOT SET'}`;
+        logger.error(errorMsg);
+        throw new Error(errorMsg);
+      }
 
+      logger.info(`Using Deepgram Nova-2 for transcription with API key length: ${this.deepgramApiKey!.length}`);
+      
+      // Prepare transcription options for Deepgram v4
+      const options = {
+        model: 'nova-2',
+        smart_format: true,
+        language: language ? (language === 'English' ? 'en' : 'hi') : undefined,
+        detect_language: language ? false : true,
+        punctuate: true,
+        utterances: true,
+        diarize: true,
+        tier: 'enhanced'
+      };
+      
+      try {
+        // Use the Deepgram SDK v4 API - for audio files we need to use a different method
+        const response = await this.deepgramClient.listen.prerecorded.transcribeFile(
+          audioBuffer,
+          options
+        );
+        
+        // Extract the transcript from response
+        const transcript = response.result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+        const confidence = response.result?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
+        
+        // Get detected language or use the provided one
+        let detectedLanguage: 'English' | 'Hindi';
+        if (response.result?.results?.channels?.[0]?.detected_language === 'hi') {
+          detectedLanguage = 'Hindi';
+        } else {
+          detectedLanguage = 'English';
+        }
+        
+        logger.info(`Deepgram transcription completed successfully: ${transcript.substring(0, 100)}...`);
+        
+        return {
+          transcript,
+          language: detectedLanguage,
+          confidence
+        };
+      } catch (deepgramError) {
+        logger.error(`Deepgram SDK error: ${getErrorMessage(deepgramError)}`);
+        logger.warn('Attempting fallback to direct API call');
+        
+        // Fallback to direct API call with axios
         const response = await axios.post(
-          'https://api.openai.com/v1/audio/transcriptions',
-          formData,
+          'https://api.deepgram.com/v1/listen',
+          audioBuffer,
           {
+            params: options,
             headers: {
-              'Authorization': `Bearer ${this.openAIApiKey}`,
-              'Content-Type': 'multipart/form-data'
+              'Authorization': `Token ${this.deepgramApiKey}`,
+              'Content-Type': 'audio/wav'
             }
           }
         );
-
-        const detectedLanguage = this.detectLanguage(response.data.text);
+        
+        // Extract the transcript from response
+        const transcript = response.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+        const confidence = response.data?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
+        
+        // Get detected language or use the provided one
+        let detectedLanguage: 'English' | 'Hindi';
+        if (response.data?.results?.channels?.[0]?.detected_language === 'hi') {
+          detectedLanguage = 'Hindi';
+        } else {
+          detectedLanguage = 'English';
+        }
+        
+        logger.info(`Deepgram transcription completed via direct API: ${transcript.substring(0, 100)}...`);
         
         return {
-          transcript: response.data.text,
+          transcript,
           language: detectedLanguage,
-          confidence: 0.9 // OpenAI Whisper generally has high confidence
+          confidence
         };
       }
     } catch (error) {

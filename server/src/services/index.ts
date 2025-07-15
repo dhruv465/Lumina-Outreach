@@ -278,8 +278,20 @@ export const initializeServicesAfterDB = async () => {
       
       servicesInitialized = true;
       console.log('Core services initialized with database configuration');
+      
+      // Log Deepgram configuration status
+      console.log('Deepgram API key loaded:', deepgramApiKey ? `${deepgramApiKey.substring(0, 8)}...` : 'NOT SET');
     } else {
       console.warn('No API keys found in database, services will remain with empty configuration');
+    }
+    
+    // Always update existing conversation engine with latest API keys from database
+    // This ensures that even if the conversation engine was created earlier with empty keys,
+    // it gets updated with the proper configuration from the database
+    if (_conversationEngine) {
+      console.log('Updating existing ConversationEngine with database API keys...');
+      _conversationEngine.updateApiKeys(openAIApiKey, googleSpeechKey, deepgramApiKey);
+      console.log('ConversationEngine updated with Deepgram API key:', deepgramApiKey ? 'SET' : 'NOT SET');
     }
 
     // Import and call reinitializeLLMServiceWithDbConfig to ensure campaign service LLM is properly initialized

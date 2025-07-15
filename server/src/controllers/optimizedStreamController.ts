@@ -306,7 +306,13 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
               // Try to transcribe using Deepgram
               if (config.deepgramConfig?.isEnabled && speechAnalysisService) {
                 logger.info(`Using Deepgram for speech recognition in call ${callId}`);
-                transcribedText = await speechAnalysisService.transcribeAudio(completeAudio);
+                const transcriptionResult = await speechAnalysisService.transcribeAudio(completeAudio);
+                transcribedText = transcriptionResult.transcript || "";
+                
+                // Log the transcription details
+                if (transcriptionResult.transcript) {
+                  logger.info(`Transcription: "${transcriptionResult.transcript.substring(0, 100)}..." (confidence: ${transcriptionResult.confidence}, language: ${transcriptionResult.language})`);
+                }
               } else {
                 // Fallback to existing method
                 logger.warn(`Deepgram not configured, using fallback for call ${callId}`);

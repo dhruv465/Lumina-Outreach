@@ -9,6 +9,7 @@ import {
   Megaphone,
   BarChart3,
   LogOut,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -151,6 +152,13 @@ const Sidebar: React.FC<SidebarProps> = ({ onNavigate, collapsed = false }) => {
             href="/configuration"
             icon={<Settings size={19} />}
             title="Configuration"
+            onNavigate={onNavigate}
+            collapsed={collapsed}
+          />
+          <SidebarItem
+            href="/knowledge"
+            icon={<BookOpen size={19} />}
+            title="Knowledge Base"
             onNavigate={onNavigate}
             collapsed={collapsed}
           />

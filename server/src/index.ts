@@ -15,11 +15,14 @@ import winston from 'winston';
 
 // Routes
 import analyticsRoutes from './routes/analyticsRoutes';
+import aiRoutes from './routes/aiRoutes';
+import aiOrchestrationRoutes from './routes/aiOrchestrationRoutes';
 import callRoutes from './routes/callRoutes';
 import campaignRoutes from './routes/campaignRoutes';
 import configurationRoutes from './routes/configurationRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import debugRoutes from './routes/debugRoutes';
+import knowledgeRoutes from './routes/knowledgeRoutes';
 import leadRoutes from './routes/leadRoutes';
 import rootWebhookRoutes from './routes/rootWebhookRoutes';
 import streamRoutes from './routes/streamRoutes';
@@ -40,6 +43,8 @@ import leadService from './services/leadService';
 import { LLMService } from './services/llm/service';
 import { initializeSpeechService } from './services/realSpeechService';
 import SpeechAnalysisService from './services/speechAnalysisService';
+import { getAIOrchestrationService } from './services/aiOrchestrationService';
+import { getRAGService } from './services/ragService';
 
 // Configuration and health services
 import { validateStartupConfig } from './config/database-validation';
@@ -344,6 +349,9 @@ app.use('/api/configuration', configurationRoutes);
 app.use('/api/lumina-outreach', voiceAIRoutes);
 app.use('/api/telephony', telephonyRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/ai', aiRoutes); // Core AI routes
+app.use('/api/ai-orchestration', aiOrchestrationRoutes); // AI orchestration layer routes
+app.use('/api/knowledge', knowledgeRoutes); // Knowledge management routes
 app.use('/api/transcription', transcriptionRoutes);
 
 // Debug routes only in development
@@ -596,6 +604,14 @@ const startServer = async () => {
     // Initialize post-database services
     const { initializeServicesAfterDB } = await import('./services');
     await initializeServicesAfterDB();
+    
+    // Initialize AI Orchestration service
+    const { getLLMService } = await import('./services');
+    const llmService = getLLMService();
+    const aiOrchestrationService = getAIOrchestrationService();
+    const ragService = getRAGService(llmService);
+    
+    logger.info('AI Orchestration and RAG services initialized');
     
     logger.info('Services initialization completed');
     

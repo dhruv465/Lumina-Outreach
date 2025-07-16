@@ -253,29 +253,58 @@ export class ParallelProcessingService extends EventEmitter {
       
       // Stream the final response with optimized settings based on requested profile
       const onAudioChunk = (chunk: Buffer) => {
-        options.streamCallback(chunk);
-        this.emit(ProcessingEvent.RESPONSE_CHUNK, { 
-          conversationId, 
-          processingId, 
-          chunk 
-        });
+        try {
+          options.streamCallback(chunk);
+          this.emit(ProcessingEvent.RESPONSE_CHUNK, { 
+            conversationId, 
+            processingId, 
+            chunk 
+          });
+        } catch (error) {
+          logger.error(`Error in audio chunk callback: ${getErrorMessage(error)}`);
+        }
       };
       
       // Use the appropriate optimization profile based on response length and importance
       const profile = options.optimizationProfile || 
                      (aiResponse.text.length > 100 ? 'balanced' : 'low');
       
-      // Generate speech for the AI response with streaming
-      await this.sdkService.streamOptimizedSpeech(
-        aiResponse.text,
-        voiceId,
-        onAudioChunk,
-        { 
-          optimizationProfile: profile,
-          cacheResult: aiResponse.text.length < 100, // Only cache shorter responses
-          conversationId: conversationId // Pass conversationId to streamOptimizedSpeech
+      try {
+        // Generate speech for the AI response with streaming
+        await this.sdkService.streamOptimizedSpeech(
+          aiResponse.text,
+          voiceId,
+          onAudioChunk,
+          { 
+            optimizationProfile: profile,
+            cacheResult: aiResponse.text.length < 100, // Only cache shorter responses
+            conversationId: conversationId // Pass conversationId to streamOptimizedSpeech
+          }
+        );
+      } catch (speechError) {
+        logger.error(`Error in speech generation: ${getErrorMessage(speechError)}`);
+        
+        // Try fallback with direct speech generation
+        try {
+          logger.info(`Attempting fallback speech generation for ${conversationId}`);
+          const audioBuffer = await this.sdkService.generateSpeech(
+            aiResponse.text,
+            voiceId,
+            { 
+              optimizeLatency: true,
+              stability: 0.7,
+              similarityBoost: 0.7,
+              style: 0.0
+            }
+          );
+          
+          // Send the complete audio buffer
+          onAudioChunk(audioBuffer);
+        } catch (fallbackError) {
+          logger.error(`Fallback speech generation also failed: ${getErrorMessage(fallbackError)}`);
+          throw new Error(`Speech generation failed after multiple attempts: ${getErrorMessage(fallbackError)}`);
         }
-      );
+      }
       
       // Complete processing
       this.activeProcessingIds.delete(processingId);

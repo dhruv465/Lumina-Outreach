@@ -3,6 +3,15 @@ import path from 'path';
 import { Request } from 'express';
 import fs from 'fs';
 
+// Extend the Express Request interface to include fileValidationError
+declare global {
+  namespace Express {
+    interface Request {
+      fileValidationError?: string;
+    }
+  }
+}
+
 // Ensure uploads directory exists
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -21,12 +30,14 @@ const storage = multer.diskStorage({
 });
 
 // File filter
-const fileFilter = (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   // Accept only CSV files for lead imports
   if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
     cb(null, true);
   } else {
-    cb(new Error('Only CSV files are allowed'));
+    cb(null, false);
+    // Add custom error message to request object
+    (req as any).fileValidationError = 'Only CSV files are allowed';
   }
 };
 

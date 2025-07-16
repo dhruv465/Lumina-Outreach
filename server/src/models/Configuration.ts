@@ -35,6 +35,18 @@ export interface IConfiguration extends mongoose.Document {
     };
     useFlashModel?: boolean; // Whether to use the Flash v2.5 model
   };
+  ragConfig?: {
+    embeddingModel: string;
+    embeddingProvider: string;
+    embeddingApiKey?: string;
+    chunkSize: number;
+    chunkOverlap: number;
+    similarityThreshold: number;
+    maxResults: number;
+    isEnabled: boolean;
+    lastVerified?: Date | null;
+    status?: 'unverified' | 'verified' | 'failed';
+  };
   deepgramConfig: {
     apiKey: string;
     isEnabled: boolean;
@@ -323,6 +335,49 @@ const ConfigurationSchema = new mongoose.Schema(
       },
       lastError: {
         type: String,
+      },
+    },
+    ragConfig: {
+      embeddingModel: {
+        type: String,
+        default: 'text-embedding-ada-002',
+      },
+      embeddingProvider: {
+        type: String,
+        default: 'openai',
+      },
+      embeddingApiKey: {
+        type: String,
+        default: '',
+      },
+      chunkSize: {
+        type: Number,
+        default: 1000,
+      },
+      chunkOverlap: {
+        type: Number,
+        default: 200,
+      },
+      similarityThreshold: {
+        type: Number,
+        default: 0.7,
+      },
+      maxResults: {
+        type: Number,
+        default: 5,
+      },
+      isEnabled: {
+        type: Boolean,
+        default: false,
+      },
+      lastVerified: {
+        type: Date,
+        default: null,
+      },
+      status: {
+        type: String,
+        enum: ['unverified', 'verified', 'failed'],
+        default: 'unverified',
       },
     },
     voiceAIConfig: {

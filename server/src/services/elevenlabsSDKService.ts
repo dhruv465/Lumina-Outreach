@@ -6,6 +6,9 @@ import ElevenLabs from 'elevenlabs-node';
 import WebSocket from 'ws';
 import * as latencyConfig from '../config/latencyOptimization';
 import responseCache from '../utils/responseCache';
+import axios from 'axios';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Types
 type Language = 'English' | 'Hindi';
@@ -90,9 +93,9 @@ export class ElevenLabsSDKService extends EventEmitter {
   
   // Rate limiting configuration
   private readonly RATE_LIMIT_WINDOW = 60000; // 1 minute window
-  private readonly MAX_REQUESTS_PER_WINDOW = 20; // Conservative limit
-  private readonly BASE_BACKOFF_MS = 1000; // Start with 1 second
-  private readonly MAX_BACKOFF_MS = 30000; // Max 30 seconds
+  private readonly MAX_REQUESTS_PER_WINDOW = 10; // More conservative limit to avoid 429 errors
+  private readonly BASE_BACKOFF_MS = 2000; // Start with 2 seconds
+  private readonly MAX_BACKOFF_MS = 60000; // Max 60 seconds
   private readonly MAX_CONSECUTIVE_ERRORS = 3;
 
   /**
@@ -614,6 +617,10 @@ export class ElevenLabsSDKService extends EventEmitter {
     }
   }
 
+  // streamOptimizedSpeech implementation moved to line ~1373
+
+  // generateOptimizedSpeech implementation moved to line ~1311
+
   /**
    * Stream speech using text-to-speech API instead of conversational WebSocket
    * This ensures we maintain control over voice IDs and conversation persistence
@@ -648,12 +655,21 @@ export class ElevenLabsSDKService extends EventEmitter {
       // Use the standard text-to-speech API instead of WebSocket to maintain voice consistency
       logger.info(`Using text-to-speech API for conversation ${conversationId} with voice ${voiceId}`);
       
-      // Ensure all parameters are properly formatted
-      const fileName = `speech-${Date.now()}.mp3`;
+      // Use a more reliable file path with absolute path
+      const uploadsDir = path.join(__dirname, '../../uploads');
+      
+      // Ensure uploads directory exists
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      
+      // Use absolute path for the file
+      const fileName = path.join(uploadsDir, `speech-${Date.now()}.mp3`);
+      
       const ttsParams = {
         voiceId: String(voiceId), // Ensure it's a string
         textInput: String(text), // Use textInput instead of text for elevenlabs-node
-        fileName: fileName, // Add required fileName parameter
+        fileName: fileName, // Add required fileName parameter with absolute path
         modelId: options?.model || 'eleven_multilingual_v2', // Use modelId instead of model
         stability: options?.voiceSettings?.stability ?? 0.75,
         similarityBoost: options?.voiceSettings?.similarityBoost ?? 0.75,
@@ -669,17 +685,6 @@ export class ElevenLabsSDKService extends EventEmitter {
       
       const audioResponse = await this.elevenlabs.textToSpeech(ttsParams);
 
-      // Clean up the temporary file if it was created
-      try {
-        const fs = require('fs');
-        if (fs.existsSync(fileName)) {
-          fs.unlinkSync(fileName);
-          logger.debug(`Cleaned up temp file: ${fileName}`);
-        }
-      } catch (cleanupError) {
-        logger.warn(`Failed to clean up temp file ${fileName}: ${cleanupError}`);
-      }
-
       // Handle the response properly - the elevenlabs-node SDK returns different types
       let audioBuffer: Buffer;
       
@@ -692,59 +697,161 @@ export class ElevenLabsSDKService extends EventEmitter {
         keys: audioResponse && typeof audioResponse === 'object' ? Object.keys(audioResponse) : []
       });
       
-      if (Buffer.isBuffer(audioResponse)) {
-        // If it's already a buffer, use it directly
-        audioBuffer = audioResponse;
-        logger.debug('Using direct buffer response');
-      } else if (audioResponse && audioResponse.data && Buffer.isBuffer(audioResponse.data)) {
-        // If the response has a data property that is a buffer
-        audioBuffer = audioResponse.data;
-        logger.debug('Using buffer from response.data');
-      } else if (audioResponse && typeof audioResponse[Symbol.iterator] === 'function') {
-        // If it's an iterator/stream, collect all chunks
-        logger.debug('Processing iterable response');
-        const chunks: Buffer[] = [];
-        for (const chunk of audioResponse) {
-          if (chunk) {
-            const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            chunks.push(bufferChunk);
+      try {
+        if (Buffer.isBuffer(audioResponse)) {
+          // If it's already a buffer, use it directly
+          audioBuffer = audioResponse;
+          logger.debug('Using direct buffer response');
+        } else if (audioResponse && audioResponse.data && Buffer.isBuffer(audioResponse.data)) {
+          // If the response has a data property that is a buffer
+          audioBuffer = audioResponse.data;
+          logger.debug('Using buffer from response.data');
+        } else if (audioResponse && typeof audioResponse[Symbol.iterator] === 'function') {
+          // If it's an iterator/stream, collect all chunks
+          logger.debug('Processing iterable response');
+          const chunks: Buffer[] = [];
+          for (const chunk of audioResponse) {
+            if (chunk) {
+              const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+              chunks.push(bufferChunk);
+            }
           }
-        }
-        audioBuffer = Buffer.concat(chunks);
-        logger.debug(`Concatenated ${chunks.length} chunks into ${audioBuffer.length} bytes`);
-      } else if (audioResponse && audioResponse.buffer) {
-        // If the response has a buffer property
-        audioBuffer = Buffer.isBuffer(audioResponse.buffer) ? audioResponse.buffer : Buffer.from(audioResponse.buffer);
-        logger.debug('Using buffer from response.buffer');
-      } else if (audioResponse && audioResponse.status === 'ok' && audioResponse.fileName) {
-        // Handle the elevenlabs-node SDK response format that returns file info
-        const fs = require('fs');
-        try {
-          if (fs.existsSync(audioResponse.fileName)) {
-            audioBuffer = fs.readFileSync(audioResponse.fileName);
-            logger.debug(`Read audio from file: ${audioResponse.fileName} (${audioBuffer.length} bytes)`);
-            // Clean up the file after reading
-            fs.unlinkSync(audioResponse.fileName);
-          } else {
-            throw new Error(`Audio file not found: ${audioResponse.fileName}`);
+          audioBuffer = Buffer.concat(chunks);
+          logger.debug(`Concatenated ${chunks.length} chunks into ${audioBuffer.length} bytes`);
+        } else if (audioResponse && audioResponse.buffer) {
+          // If the response has a buffer property
+          audioBuffer = Buffer.isBuffer(audioResponse.buffer) ? audioResponse.buffer : Buffer.from(audioResponse.buffer);
+          logger.debug('Using buffer from response.buffer');
+        } else if (audioResponse && audioResponse.status === 'ok' && audioResponse.fileName) {
+          // Handle the elevenlabs-node SDK response format that returns file info
+          try {
+            // Check if the fileName is an absolute path
+            const audioFilePath = path.isAbsolute(audioResponse.fileName) 
+              ? audioResponse.fileName 
+              : path.resolve(audioResponse.fileName);
+              
+            logger.debug(`Checking for audio file at: ${audioFilePath}`);
+            
+            if (fs.existsSync(audioFilePath)) {
+              audioBuffer = fs.readFileSync(audioFilePath);
+              logger.debug(`Read audio from file: ${audioFilePath} (${audioBuffer.length} bytes)`);
+              
+              // Clean up the file after reading
+              try {
+                fs.unlinkSync(audioFilePath);
+                logger.debug(`Cleaned up temp file: ${audioFilePath}`);
+              } catch (unlinkError) {
+                logger.warn(`Failed to clean up temp file ${audioFilePath}: ${unlinkError}`);
+              }
+            } else {
+              // Try to find the file in the uploads directory
+              const uploadsDir = path.join(__dirname, '../../uploads');
+              const alternativePath = path.join(uploadsDir, path.basename(audioResponse.fileName));
+              
+              logger.debug(`File not found at ${audioFilePath}, trying alternative path: ${alternativePath}`);
+              
+              if (fs.existsSync(alternativePath)) {
+                audioBuffer = fs.readFileSync(alternativePath);
+                logger.debug(`Read audio from alternative path: ${alternativePath} (${audioBuffer.length} bytes)`);
+                
+                // Clean up the file after reading
+                try {
+                  fs.unlinkSync(alternativePath);
+                  logger.debug(`Cleaned up temp file: ${alternativePath}`);
+                } catch (unlinkError) {
+                  logger.warn(`Failed to clean up temp file ${alternativePath}: ${unlinkError}`);
+                }
+              } else {
+                throw new Error(`Audio file not found at either ${audioFilePath} or ${alternativePath}`);
+              }
+            }
+          } catch (fileError) {
+            logger.error(`Error reading audio file ${audioResponse.fileName}: ${fileError}`);
+            
+            // Try to generate a fallback response directly
+            const fallbackText = "I'm sorry, there was an issue processing the audio. Could you please repeat that?";
+            
+            // Use direct API call as fallback
+            const fallbackResponse = await axios.post(
+              `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+              {
+                text: fallbackText,
+                voice_settings: {
+                  stability: 0.8,
+                  similarity_boost: 0.8,
+                  style: 0.0,
+                  use_speaker_boost: true
+                },
+                model_id: "eleven_turbo_v2"
+              },
+              {
+                headers: {
+                  'Accept': 'audio/mpeg',
+                  'xi-api-key': this.apiKey,
+                  'Content-Type': 'application/json'
+                },
+                responseType: 'arraybuffer'
+              }
+            );
+            
+            audioBuffer = Buffer.from(fallbackResponse.data);
+            logger.info(`Generated fallback response after file read error: ${audioBuffer.length} bytes`);
           }
-        } catch (fileError) {
-          logger.error(`Error reading audio file ${audioResponse.fileName}: ${fileError}`);
-          throw new Error(`Failed to read generated audio file: ${getErrorMessage(fileError)}`);
+        } else if (audioResponse && typeof audioResponse === 'string') {
+          // If it's a base64 string or similar
+          audioBuffer = Buffer.from(audioResponse, 'base64');
+          logger.debug('Converting string response to buffer');
+        } else {
+          // Last resort - try to inspect the response and convert it
+          logger.error('Unknown audio response format:', {
+            type: typeof audioResponse,
+            constructor: audioResponse?.constructor?.name,
+            keys: audioResponse && typeof audioResponse === 'object' ? Object.keys(audioResponse) : [],
+            value: typeof audioResponse === 'object' ? JSON.stringify(audioResponse, null, 2).substring(0, 500) : audioResponse
+          });
+          
+          // Generate a fallback response
+          const fallbackText = "I'm sorry, there was an issue processing the audio. Could you please repeat that?";
+          
+          // Use direct API call as fallback
+          const fallbackResponse = await axios.post(
+            `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+            {
+              text: fallbackText,
+              voice_settings: {
+                stability: 0.8,
+                similarity_boost: 0.8,
+                style: 0.0,
+                use_speaker_boost: true
+              },
+              model_id: "eleven_turbo_v2"
+            },
+            {
+              headers: {
+                'Accept': 'audio/mpeg',
+                'xi-api-key': this.apiKey,
+                'Content-Type': 'application/json'
+              },
+              responseType: 'arraybuffer'
+            }
+          );
+          
+          audioBuffer = Buffer.from(fallbackResponse.data);
+          logger.info(`Generated fallback response for unknown format: ${audioBuffer.length} bytes`);
         }
-      } else if (audioResponse && typeof audioResponse === 'string') {
-        // If it's a base64 string or similar
-        audioBuffer = Buffer.from(audioResponse, 'base64');
-        logger.debug('Converting string response to buffer');
-      } else {
-        // Last resort - try to inspect the response and convert it
-        logger.error('Unknown audio response format:', {
-          type: typeof audioResponse,
-          constructor: audioResponse?.constructor?.name,
-          keys: audioResponse && typeof audioResponse === 'object' ? Object.keys(audioResponse) : [],
-          value: typeof audioResponse === 'object' ? JSON.stringify(audioResponse, null, 2).substring(0, 500) : audioResponse
-        });
-        throw new Error(`Unsupported audio response format: ${typeof audioResponse}. Constructor: ${audioResponse?.constructor?.name}`);
+      } catch (processingError) {
+        logger.error(`Error processing audio response: ${getErrorMessage(processingError)}`);
+        throw new Error(`Failed to process audio response: ${getErrorMessage(processingError)}`);
+      }
+      
+      // Clean up the original file if it exists
+      try {
+        if (typeof fileName === 'string' && fs.existsSync(fileName)) {
+          fs.unlinkSync(fileName);
+          logger.debug(`Cleaned up original temp file: ${fileName}`);
+        }
+      } catch (cleanupError) {
+        logger.warn(`Failed to clean up original temp file ${fileName}: ${cleanupError}`);
       }
 
       // Send the complete audio buffer

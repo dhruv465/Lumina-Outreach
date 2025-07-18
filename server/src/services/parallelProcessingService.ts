@@ -201,6 +201,28 @@ export class ParallelProcessingService extends EventEmitter {
         };
       }
       
+      // Skip processing for empty inputs
+      if (!userInput.trim()) {
+        logger.info(`Skipping AI processing for empty input in conversation ${conversationId}`);
+        
+        // Complete the processing without generating a response
+        this.activeProcessingIds.delete(processingId);
+        
+        // Emit processing complete event
+        this.emit(ProcessingEvent.PROCESSING_COMPLETE, {
+          conversationId,
+          processingId,
+          responseText: "",
+          processingTime: Date.now() - startTime
+        });
+        
+        // Return early with empty response
+        return { 
+          text: "", 
+          processingTime: Date.now() - startTime 
+        };
+      }
+      
       // For longer inputs, send an acknowledgment to reduce perceived latency
       // Use ultra-low latency profile for acknowledgments
       if (userInput.length > 30 && options.useThinkingSounds !== false) {

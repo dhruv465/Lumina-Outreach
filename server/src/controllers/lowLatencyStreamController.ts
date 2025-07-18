@@ -555,6 +555,7 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
             
             // Process the audio with speech recognition using Deepgram if available
             let transcribedText;
+            let shouldProcessInput = true;
             
             // Get the speech analysis service from the conversation engine
             const speechAnalysisService = conversationEngine.getSpeechAnalysisService();
@@ -567,8 +568,12 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
                 transcribedText = transcriptionResult.transcript || "";
                 
                 // Log the transcription details
-                if (transcriptionResult.transcript) {
-                  logger.info(`Transcription: "${transcriptionResult.transcript.substring(0, 100)}..." (confidence: ${transcriptionResult.confidence}, language: ${transcriptionResult.language})`);
+                logger.info(`Deepgram transcription completed successfully: "${transcribedText}"`);
+                
+                // Skip processing if transcription is empty
+                if (!transcribedText.trim()) {
+                  logger.debug(`Empty transcription detected for call ${callId}, skipping AI processing`);
+                  shouldProcessInput = false;
                 }
               } else {
                 // Fallback to existing method
@@ -599,22 +604,27 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
               }
             };
             
-            // Process user input with optimized parallel processing
-            await processingService.processInputParallel(
-              conversationId,
-              transcribedText,
-              voiceId,
-              session.conversationHistory,
-              {
-                streamCallback,
-                leadId: call.leadId.toString(),
-                campaignId: call.campaignId.toString(),
-                language: session.language || 'English',
-                useThinkingSounds: true,
-                streamPartialResponses: true,
-                optimizationProfile: 'balanced'  // Use balanced profile for normal conversation
-              }
-            );
+            // Only process non-empty transcriptions
+            if (shouldProcessInput && transcribedText.trim()) {
+              // Process user input with optimized parallel processing
+              await processingService.processInputParallel(
+                conversationId,
+                transcribedText,
+                voiceId,
+                session.conversationHistory,
+                {
+                  streamCallback,
+                  leadId: call.leadId.toString(),
+                  campaignId: call.campaignId.toString(),
+                  language: session.language || 'English',
+                  useThinkingSounds: true,
+                  streamPartialResponses: true,
+                  optimizationProfile: 'balanced'  // Use balanced profile for normal conversation
+                }
+              );
+            } else {
+              logger.info(`Skipping AI processing for empty or filtered transcription in call ${callId}`);
+            }
           }
         } else {
           logger.debug(`No audio data to process for call ${callId}`);

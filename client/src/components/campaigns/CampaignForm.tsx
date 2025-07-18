@@ -269,15 +269,20 @@ const CampaignForm = ({
         // Determine the most reliable voice ID from configuration
         let bestVoiceId = '';
         
-        // Priority 1: voice config default ID  
-        if (config.voiceConfig?.defaultVoiceId) {
+        // Priority 1: voiceAIConfig conversationalAI defaultVoiceId (system default voice)
+        if (config.voiceAIConfig?.conversationalAI?.defaultVoiceId) {
+          bestVoiceId = config.voiceAIConfig.conversationalAI.defaultVoiceId;
+          console.log("Using system default voice ID:", bestVoiceId);
+        }
+        // Priority 2: voice config default ID  
+        else if (config.voiceConfig?.defaultVoiceId) {
           bestVoiceId = config.voiceConfig.defaultVoiceId;
         } 
-        // Priority 2: ElevenLabs first voice
+        // Priority 3: ElevenLabs first voice
         else if (config.elevenLabsConfig?.availableVoices?.length > 0) {
           bestVoiceId = config.elevenLabsConfig.availableVoices[0].voiceId;
         }
-        // Priority 3: Ensure we have a voice ID
+        // Priority 4: Ensure we have a voice ID
         else {
           console.error("No voices available in system configuration");
           showToast("Warning", "No voices configured in system. Please configure ElevenLabs voices.", "destructive");

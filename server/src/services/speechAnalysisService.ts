@@ -165,7 +165,7 @@ export class SpeechAnalysisService {
           detectedLanguage = 'English';
         }
         
-        logger.info(`Deepgram transcription completed successfully: ${transcript.substring(0, 100)}...`);
+        logger.info(`Deepgram transcription completed successfully: "${transcript}"`);
         
         return {
           transcript,

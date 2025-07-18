@@ -13,6 +13,7 @@ import {
   ModelInfo
 } from './types';
 import { logger } from '../../index';
+import { executeWithRateLimit } from '../../utils/rateLimiter';
 
 export class GoogleClient implements ILLMProviderClient {
   readonly provider: LLMProvider = 'google';
@@ -114,38 +115,41 @@ export class GoogleClient implements ILLMProviderClient {
         throw new Error('Google/Gemini model name is missing or empty after attempting to resolve.');
       }
       
-      const googleModel = this.client.getGenerativeModel({
-        model: resolvedModel,
-        generationConfig: {
-          temperature: options?.temperature,
-          maxOutputTokens: options?.maxTokens,
-          topP: options?.topP,
-          stopSequences: options?.stopSequences,
-        }
+      // Use rate limiter to manage API requests
+      return await executeWithRateLimit('google', async () => {
+        const googleModel = this.client!.getGenerativeModel({
+          model: resolvedModel,
+          generationConfig: {
+            temperature: options?.temperature,
+            maxOutputTokens: options?.maxTokens,
+            topP: options?.topP,
+            stopSequences: options?.stopSequences,
+          }
+        });
+        
+        const result = await googleModel.generateContent(prompt);
+        const response = result.response;
+        
+        // Google doesn't provide token usage in the same way
+        // Estimate based on input and output length
+        const estimatedPromptTokens = Math.ceil(prompt.length / 4);
+        const responseText = response.text();
+        const estimatedCompletionTokens = Math.ceil(responseText.length / 4);
+        
+        const usage: TokenUsage = {
+          promptTokens: estimatedPromptTokens,
+          completionTokens: estimatedCompletionTokens,
+          totalTokens: estimatedPromptTokens + estimatedCompletionTokens
+        };
+        
+        return {
+          content: responseText,
+          model: resolvedModel, // Ensure resolvedModel is used here
+          provider: this.provider,
+          usage,
+          rawResponse: response
+        };
       });
-      
-      const result = await googleModel.generateContent(prompt);
-      const response = result.response;
-      
-      // Google doesn't provide token usage in the same way
-      // Estimate based on input and output length
-      const estimatedPromptTokens = Math.ceil(prompt.length / 4);
-      const responseText = response.text();
-      const estimatedCompletionTokens = Math.ceil(responseText.length / 4);
-      
-      const usage: TokenUsage = {
-        promptTokens: estimatedPromptTokens,
-        completionTokens: estimatedCompletionTokens,
-        totalTokens: estimatedPromptTokens + estimatedCompletionTokens
-      };
-      
-      return {
-        content: responseText,
-        model: resolvedModel, // Ensure resolvedModel is used here
-        provider: this.provider,
-        usage,
-        rawResponse: response
-      };
     } catch (error) {
       this.handleError(error);
     }
@@ -164,49 +168,52 @@ export class GoogleClient implements ILLMProviderClient {
         throw new Error('Google/Gemini model name is missing or empty after attempting to resolve.');
       }
       
-      const googleModel = this.client.getGenerativeModel({
-        model: resolvedModel,
-        generationConfig: {
-          temperature: options?.temperature,
-          maxOutputTokens: options?.maxTokens,
-          topP: options?.topP,
-          stopSequences: options?.stopSequences,
+      // Use rate limiter to manage API requests
+      return await executeWithRateLimit('google', async () => {
+        const googleModel = this.client!.getGenerativeModel({
+          model: resolvedModel,
+          generationConfig: {
+            temperature: options?.temperature,
+            maxOutputTokens: options?.maxTokens,
+            topP: options?.topP,
+            stopSequences: options?.stopSequences,
+          }
+        });
+        
+        // Convert to Google's chat format
+        const chat = googleModel.startChat({
+          history: this.convertMessagesToGoogleFormat(messages),
+        });
+        
+        // Get the last user message
+        const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+        if (!lastUserMessage) {
+          throw new Error('No user message found in the conversation');
         }
+        
+        const result = await chat.sendMessage(lastUserMessage.content);
+        const response = result.response;
+        
+        // Estimate token usage
+        const inputText = messages.map(m => m.content).join(' ');
+        const estimatedPromptTokens = Math.ceil(inputText.length / 4);
+        const responseText = response.text();
+        const estimatedCompletionTokens = Math.ceil(responseText.length / 4);
+        
+        const usage: TokenUsage = {
+          promptTokens: estimatedPromptTokens,
+          completionTokens: estimatedCompletionTokens,
+          totalTokens: estimatedPromptTokens + estimatedCompletionTokens
+        };
+        
+        return {
+          content: responseText,
+          model: resolvedModel, // Ensure resolvedModel is used here
+          provider: this.provider,
+          usage,
+          rawResponse: response
+        };
       });
-      
-      // Convert to Google's chat format
-      const chat = googleModel.startChat({
-        history: this.convertMessagesToGoogleFormat(messages),
-      });
-      
-      // Get the last user message
-      const lastUserMessage = messages.filter(m => m.role === 'user').pop();
-      if (!lastUserMessage) {
-        throw new Error('No user message found in the conversation');
-      }
-      
-      const result = await chat.sendMessage(lastUserMessage.content);
-      const response = result.response;
-      
-      // Estimate token usage
-      const inputText = messages.map(m => m.content).join(' ');
-      const estimatedPromptTokens = Math.ceil(inputText.length / 4);
-      const responseText = response.text();
-      const estimatedCompletionTokens = Math.ceil(responseText.length / 4);
-      
-      const usage: TokenUsage = {
-        promptTokens: estimatedPromptTokens,
-        completionTokens: estimatedCompletionTokens,
-        totalTokens: estimatedPromptTokens + estimatedCompletionTokens
-      };
-      
-      return {
-        content: responseText,
-        model: resolvedModel, // Ensure resolvedModel is used here
-        provider: this.provider,
-        usage,
-        rawResponse: response
-      };
     } catch (error) {
       this.handleError(error);
     }
@@ -228,44 +235,47 @@ export class GoogleClient implements ILLMProviderClient {
         throw new Error('Google/Gemini model name is missing or empty after attempting to resolve.');
       }
       
-      const googleModel = this.client.getGenerativeModel({
-        model: resolvedModel,
-        generationConfig: {
-          temperature: options?.temperature,
-          maxOutputTokens: options?.maxTokens,
-          topP: options?.topP,
-          stopSequences: options?.stopSequences,
-        }
-      });
-      
-      // Convert to Google's chat format
-      const chat = googleModel.startChat({
-        history: this.convertMessagesToGoogleFormat(messages),
-      });
-      
-      // Get the last user message
-      const lastUserMessage = messages.filter(m => m.role === 'user').pop();
-      if (!lastUserMessage) {
-        throw new Error('No user message found in the conversation');
-      }
-      
-      const result = await chat.sendMessageStream(lastUserMessage.content);
-      
-      for await (const chunk of result.stream) {
-        const text = chunk.text();
-        
-        onChunk({
-          content: text,
-          isDone: false,
-          rawChunk: chunk
+      // Use rate limiter to manage API requests
+      await executeWithRateLimit('google', async () => {
+        const googleModel = this.client!.getGenerativeModel({
+          model: resolvedModel,
+          generationConfig: {
+            temperature: options?.temperature,
+            maxOutputTokens: options?.maxTokens,
+            topP: options?.topP,
+            stopSequences: options?.stopSequences,
+          }
         });
-      }
-      
-      // Signal completion
-      onChunk({
-        content: '',
-        isDone: true,
-        rawChunk: null
+        
+        // Convert to Google's chat format
+        const chat = googleModel.startChat({
+          history: this.convertMessagesToGoogleFormat(messages),
+        });
+        
+        // Get the last user message
+        const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+        if (!lastUserMessage) {
+          throw new Error('No user message found in the conversation');
+        }
+        
+        const result = await chat.sendMessageStream(lastUserMessage.content);
+        
+        for await (const chunk of result.stream) {
+          const text = chunk.text();
+          
+          onChunk({
+            content: text,
+            isDone: false,
+            rawChunk: chunk
+          });
+        }
+        
+        // Signal completion
+        onChunk({
+          content: '',
+          isDone: true,
+          rawChunk: null
+        });
       });
     } catch (error) {
       this.handleError(error);

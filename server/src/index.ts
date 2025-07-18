@@ -605,6 +605,25 @@ const startServer = async () => {
     const { initializeServicesAfterDB } = await import('./services');
     await initializeServicesAfterDB();
     
+    // Initialize rate limiters for API providers
+    try {
+      const { getRateLimiter } = await import('./utils/rateLimiter');
+      
+      // Initialize rate limiters with appropriate limits
+      // Google/Gemini - 15 requests per minute (free tier)
+      getRateLimiter('google', { requestsPerMinute: 15, queueSize: 30 });
+      
+      // OpenAI - 60 requests per minute (default tier)
+      getRateLimiter('openai', { requestsPerMinute: 60, queueSize: 30 });
+      
+      // ElevenLabs - 30 requests per minute (default tier)
+      getRateLimiter('elevenlabs', { requestsPerMinute: 30, queueSize: 20 });
+      
+      logger.info('Rate limiters initialized for API providers');
+    } catch (error) {
+      logger.error(`Error initializing rate limiters: ${error.message}`);
+    }
+    
     // Initialize AI Orchestration service
     const { getLLMService } = await import('./services');
     const llmService = getLLMService();

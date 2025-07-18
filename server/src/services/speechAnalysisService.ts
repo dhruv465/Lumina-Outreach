@@ -119,11 +119,49 @@ export class SpeechAnalysisService {
     return this.deepgramApiKey;
   }
 
+  /**
+   * Detect if there is voice activity in the audio buffer
+   * This is a simple energy-based voice activity detection
+   */
+  detectVoiceActivity(audioBuffer: Buffer): boolean {
+    try {
+      // Simple energy-based voice activity detection
+      // This is a basic implementation that checks if the audio buffer has enough energy
+      
+      // Convert buffer to 16-bit PCM samples
+      const samples = [];
+      for (let i = 0; i < audioBuffer.length; i += 2) {
+        if (i + 1 < audioBuffer.length) {
+          // Convert two bytes to a 16-bit sample
+          const sample = audioBuffer.readInt16LE(i);
+          samples.push(sample);
+        }
+      }
+      
+      // Calculate energy
+      let energy = 0;
+      for (const sample of samples) {
+        energy += Math.abs(sample);
+      }
+      
+      // Normalize energy
+      const avgEnergy = energy / samples.length;
+      
+      // Threshold for voice activity detection
+      const threshold = 500; // Adjust this threshold based on your audio characteristics
+      
+      return avgEnergy > threshold;
+    } catch (error) {
+      logger.warn(`Error detecting voice activity: ${getErrorMessage(error)}`);
+      return false; // Default to no voice activity on error
+    }
+  }
+
   // Speech-to-Text with Language Detection using Deepgram Nova-2
   async transcribeAudio(
     audioBuffer: Buffer,
     language?: 'English' | 'Hindi'
-  ): Promise<{ transcript: string; language: string; confidence: number }> {
+  ): Promise<{ transcript: string; language: string; confidence: number; hasVoiceActivity: boolean }> {
     try {
       // Check if Deepgram is properly configured
       if (!this.isDeepgramConfigured()) {
@@ -165,12 +203,16 @@ export class SpeechAnalysisService {
           detectedLanguage = 'English';
         }
         
-        logger.info(`Deepgram transcription completed successfully: "${transcript}"`);
+        // Check for voice activity using our detector
+        const hasVoiceActivity = this.detectVoiceActivity(audioBuffer) || transcript.trim().length > 0;
+        
+        logger.info(`Deepgram transcription completed successfully: "${transcript}" (Voice activity: ${hasVoiceActivity ? 'YES' : 'NO'})`);
         
         return {
           transcript,
           language: detectedLanguage,
-          confidence
+          confidence,
+          hasVoiceActivity
         };
       } catch (deepgramError) {
         logger.error(`Deepgram SDK error: ${getErrorMessage(deepgramError)}`);
@@ -201,12 +243,16 @@ export class SpeechAnalysisService {
           detectedLanguage = 'English';
         }
         
-        logger.info(`Deepgram transcription completed via direct API: ${transcript.substring(0, 100)}...`);
+        // Check for voice activity using our detector
+        const hasVoiceActivity = this.detectVoiceActivity(audioBuffer) || transcript.trim().length > 0;
+        
+        logger.info(`Deepgram transcription completed via direct API: "${transcript}" (Voice activity: ${hasVoiceActivity ? 'YES' : 'NO'})`);
         
         return {
           transcript,
           language: detectedLanguage,
-          confidence
+          confidence,
+          hasVoiceActivity
         };
       }
     } catch (error) {

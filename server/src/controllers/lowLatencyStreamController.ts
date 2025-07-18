@@ -548,8 +548,19 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
           // Accumulate audio data
           audioBuffer.push(audioData);
           
-          // If we have enough data, process it
-          if (Buffer.concat(audioBuffer).length > 4096) {
+          // Set a flag to indicate that we've received audio data (user might be speaking)
+          if (!session.userSpeaking && audioBuffer.length > 1) {
+            logger.info(`Potential speech detected for call ${callId}, entering listening mode`);
+            session.userSpeaking = true;
+            
+            // Update session in memory
+            sessionManager.updateSession(conversationId, session);
+          }
+          
+          // Process audio more frequently (1024 bytes instead of 4096) to improve responsiveness
+          // Use a smaller buffer size when in listening mode to be more responsive
+          const bufferThreshold = session.userSpeaking ? 1024 : 2048;
+          if (Buffer.concat(audioBuffer).length > bufferThreshold) {
             const completeAudio = Buffer.concat(audioBuffer);
             audioBuffer = []; // Reset buffer
             
@@ -567,14 +578,70 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
                 const transcriptionResult = await speechAnalysisService.transcribeAudio(completeAudio);
                 transcribedText = transcriptionResult.transcript || "";
                 
-                // Log the transcription details
-                logger.info(`Deepgram transcription completed successfully: "${transcribedText}"`);
+                // Use voice activity detection to determine if user is speaking
+                const hasVoiceActivity = transcriptionResult.hasVoiceActivity;
                 
-                // Skip processing if transcription is empty
-                if (!transcribedText.trim()) {
-                  logger.debug(`Empty transcription detected for call ${callId}, skipping AI processing`);
+                // Log the transcription details with voice activity information
+                logger.info(`Deepgram transcription completed: "${transcribedText}" (Voice activity: ${hasVoiceActivity ? 'YES' : 'NO'})`);
+                
+                // Update user speaking state based on voice activity and transcription
+                if (hasVoiceActivity || transcribedText.trim()) {
+                  // If we have voice activity or actual speech content, confirm user is speaking
+                  if (!session.userSpeaking) {
+                    logger.info(`Speech detected for call ${callId}, entering listening mode`);
+                    session.userSpeaking = true;
+                    session.emptyTranscriptionCount = 0;
+                    
+                    // Send a listening indicator to the client
+                    try {
+                      // Play a short "listening" sound or send a visual indicator
+                      // This could be a short beep or a visual indicator in the UI
+                      const listeningIndicator = Buffer.from([0x01, 0x02, 0x03, 0x04]); // Special marker for listening mode
+                      if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                          type: 'listening_mode',
+                          active: true,
+                          timestamp: Date.now()
+                        }));
+                      }
+                    } catch (error) {
+                      logger.error(`Error sending listening indicator for call ${callId}:`, error);
+                    }
+                  }
+                } else {
+                  // If we have multiple empty transcriptions with no voice activity, user might have stopped speaking
+                  if (session.emptyTranscriptionCount === undefined) {
+                    session.emptyTranscriptionCount = 1;
+                  } else {
+                    session.emptyTranscriptionCount++;
+                  }
+                  
+                  // After 2 empty transcriptions with no voice activity, consider user stopped speaking
+                  if (session.emptyTranscriptionCount > 2 && session.userSpeaking) {
+                    logger.info(`No speech detected for call ${callId}, exiting listening mode`);
+                    session.userSpeaking = false;
+                    session.emptyTranscriptionCount = 0;
+                    
+                    // Send a "not listening" indicator to the client
+                    try {
+                      if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                          type: 'listening_mode',
+                          active: false,
+                          timestamp: Date.now()
+                        }));
+                      }
+                    } catch (error) {
+                      logger.error(`Error sending listening indicator for call ${callId}:`, error);
+                    }
+                  }
+                  
+                  logger.debug(`Empty transcription detected for call ${callId}, skipping AI processing (count: ${session.emptyTranscriptionCount})`);
                   shouldProcessInput = false;
                 }
+                
+                // Update session in memory
+                sessionManager.updateSession(conversationId, session);
               } else {
                 // Fallback to existing method
                 logger.warn(`Deepgram not configured, using fallback for call ${callId}`);
@@ -606,6 +673,9 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
             
             // Only process non-empty transcriptions
             if (shouldProcessInput && transcribedText.trim()) {
+              // Log that we're processing user speech
+              logger.info(`Processing user speech for call ${callId}: "${transcribedText}"`);
+              
               // Process user input with optimized parallel processing
               await processingService.processInputParallel(
                 conversationId,
@@ -622,8 +692,15 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
                   optimizationProfile: 'balanced'  // Use balanced profile for normal conversation
                 }
               );
+              
+              // Reset empty transcription count after successful processing
+              session.emptyTranscriptionCount = 0;
+              sessionManager.updateSession(conversationId, session);
+            } else if (session.userSpeaking) {
+              // If we're in listening mode but got an empty transcription, log it
+              logger.info(`Agent is in listening mode for call ${callId}, waiting for clear speech`);
             } else {
-              logger.info(`Skipping AI processing for empty or filtered transcription in call ${callId}`);
+              logger.debug(`Skipping AI processing for empty or filtered transcription in call ${callId}`);
             }
           }
         } else {

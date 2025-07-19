@@ -39,11 +39,16 @@ router.post('/', async (req, res) => {
       serviceSid: payload.service_sid
     });
     
-    // Log the notification but don't treat it as an error
+    // Log the notification with appropriate handling for specific error codes
     if (level === 'ERROR') {
       console.error(`Twilio error notification: ${errorCode} for resource ${payload.resource_sid}`);
     } else if (level === 'WARNING') {
-      console.warn(`Twilio warning notification: ${errorCode} for resource ${payload.resource_sid}`);
+      // Handle specific warning codes
+      if (errorCode === '31951') {
+        console.warn(`Twilio warning 31951: WebSocket connection issue for resource ${payload.resource_sid} - this is usually not critical`);
+      } else {
+        console.warn(`Twilio warning notification: ${errorCode} for resource ${payload.resource_sid}`);
+      }
     }
     
     // Return success for system notifications

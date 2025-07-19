@@ -493,18 +493,15 @@ export class AIOrchestrationLayer extends EventEmitter {
         throw new Error('LLM circuit breaker not initialized');
       }
       
-      const response = await circuitBreaker.fire(
-        'chat',
-        {
-          provider,
-          model: options?.model || this.llmService.getConfig().defaultModel,
-          messages,
-          options: {
-            temperature: options?.temperature,
-            maxTokens: options?.maxTokens
-          }
+      const response = await circuitBreaker.execute({
+        provider,
+        model: options?.model || this.llmService.getConfig().defaultModel,
+        messages,
+        options: {
+          temperature: options?.temperature,
+          maxTokens: options?.maxTokens
         }
-      );
+      });
       
       // Update metrics
       this.updateServiceMetrics(ServiceType.LLM, {
@@ -555,18 +552,15 @@ export class AIOrchestrationLayer extends EventEmitter {
                 throw new Error('LLM circuit breaker not initialized');
               }
               
-              const response = await circuitBreaker.fire(
-                'chat',
-                {
-                  provider: fallbackProvider as LLMProvider,
-                  model: options?.model || this.llmService.getConfig().defaultModel,
-                  messages,
-                  options: {
-                    temperature: options?.temperature,
-                    maxTokens: options?.maxTokens
-                  }
+              const response = await circuitBreaker.execute({
+                provider: fallbackProvider as LLMProvider,
+                model: options?.model || this.llmService.getConfig().defaultModel,
+                messages,
+                options: {
+                  temperature: options?.temperature,
+                  maxTokens: options?.maxTokens
                 }
-              );
+              });
               
               // Update metrics for successful fallback
               this.updateServiceMetrics(ServiceType.LLM, {

@@ -139,7 +139,7 @@ export function registerDashboardRoutes(
       
       // Process active calls
       const activeCallsData = Object.entries(activeCalls).map(([callId, callData]) => {
-        const call = JSON.parse(callData);
+        const call = JSON.parse(callData as string);
         
         return {
           callId,

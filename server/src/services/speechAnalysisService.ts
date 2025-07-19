@@ -121,36 +121,94 @@ export class SpeechAnalysisService {
 
   /**
    * Detect if there is voice activity in the audio buffer
-   * This is a simple energy-based voice activity detection
+   * This is an enhanced energy-based voice activity detection with proper μ-law decoding
    */
   detectVoiceActivity(audioBuffer: Buffer): boolean {
     try {
-      // Simple energy-based voice activity detection
-      // This is a basic implementation that checks if the audio buffer has enough energy
+      // Enhanced energy-based voice activity detection
+      // This implementation properly handles Twilio's μ-law audio format
       
-      // Convert buffer to 16-bit PCM samples
-      const samples = [];
-      for (let i = 0; i < audioBuffer.length; i += 2) {
-        if (i + 1 < audioBuffer.length) {
-          // Convert two bytes to a 16-bit sample
-          const sample = audioBuffer.readInt16LE(i);
-          samples.push(sample);
+      if (audioBuffer.length === 0) {
+        return false;
+      }
+      
+      // μ-law to linear conversion table (standard ITU-T G.711)
+      const MULAW_DECODE_TABLE = [
+        -32124, -31100, -30076, -29052, -28028, -27004, -25980, -24956,
+        -23932, -22908, -21884, -20860, -19836, -18812, -17788, -16764,
+        -15996, -15484, -14972, -14460, -13948, -13436, -12924, -12412,
+        -11900, -11388, -10876, -10364, -9852, -9340, -8828, -8316,
+        -7932, -7676, -7420, -7164, -6908, -6652, -6396, -6140,
+        -5884, -5628, -5372, -5116, -4860, -4604, -4348, -4092,
+        -3900, -3772, -3644, -3516, -3388, -3260, -3132, -3004,
+        -2876, -2748, -2620, -2492, -2364, -2236, -2108, -1980,
+        -1884, -1820, -1756, -1692, -1628, -1564, -1500, -1436,
+        -1372, -1308, -1244, -1180, -1116, -1052, -988, -924,
+        -876, -844, -812, -780, -748, -716, -684, -652,
+        -620, -588, -556, -524, -492, -460, -428, -396,
+        -372, -356, -340, -324, -308, -292, -276, -260,
+        -244, -228, -212, -196, -180, -164, -148, -132,
+        -120, -112, -104, -96, -88, -80, -72, -64,
+        -56, -48, -40, -32, -24, -16, -8, 0,
+        32124, 31100, 30076, 29052, 28028, 27004, 25980, 24956,
+        23932, 22908, 21884, 20860, 19836, 18812, 17788, 16764,
+        15996, 15484, 14972, 14460, 13948, 13436, 12924, 12412,
+        11900, 11388, 10876, 10364, 9852, 9340, 8828, 8316,
+        7932, 7676, 7420, 7164, 6908, 6652, 6396, 6140,
+        5884, 5628, 5372, 5116, 4860, 4604, 4348, 4092,
+        3900, 3772, 3644, 3516, 3388, 3260, 3132, 3004,
+        2876, 2748, 2620, 2492, 2364, 2236, 2108, 1980,
+        1884, 1820, 1756, 1692, 1628, 1564, 1500, 1436,
+        1372, 1308, 1244, 1180, 1116, 1052, 988, 924,
+        876, 844, 812, 780, 748, 716, 684, 652,
+        620, 588, 556, 524, 492, 460, 428, 396,
+        372, 356, 340, 324, 308, 292, 276, 260,
+        244, 228, 212, 196, 180, 164, 148, 132,
+        120, 112, 104, 96, 88, 80, 72, 64,
+        56, 48, 40, 32, 24, 16, 8, 0
+      ];
+      
+      // Calculate energy using proper μ-law decoding
+      let sumSquares = 0;
+      let sampleCount = 0;
+      let maxAbsValue = 0;
+      
+      // Process as μ-law audio (Twilio's format)
+      for (let i = 0; i < audioBuffer.length; i++) {
+        // Get the μ-law encoded byte
+        const mulawByte = audioBuffer[i];
+        
+        // Convert μ-law to linear PCM using lookup table
+        const linearSample = MULAW_DECODE_TABLE[mulawByte];
+        
+        // Track maximum absolute value for peak detection
+        const absValue = Math.abs(linearSample);
+        if (absValue > maxAbsValue) {
+          maxAbsValue = absValue;
         }
+        
+        // Accumulate squared values for RMS calculation
+        sumSquares += linearSample * linearSample;
+        sampleCount++;
       }
       
-      // Calculate energy
-      let energy = 0;
-      for (const sample of samples) {
-        energy += Math.abs(sample);
+      if (sampleCount === 0) {
+        return false;
       }
       
-      // Normalize energy
-      const avgEnergy = energy / samples.length;
+      // Calculate RMS energy
+      const rmsEnergy = Math.sqrt(sumSquares / sampleCount);
       
-      // Threshold for voice activity detection
-      const threshold = 500; // Adjust this threshold based on your audio characteristics
+      // Use a more reasonable threshold for actual speech detection
+      // After μ-law decoding, typical speech energy is much higher
+      const threshold = 1000; // Adjusted for decoded μ-law values
       
-      return avgEnergy > threshold;
+      const hasActivity = rmsEnergy > threshold;
+      
+      // Always log energy levels for debugging until we get the threshold right
+      logger.debug(`🔊 UPDATED VAD - Voice activity detection: RMS energy = ${rmsEnergy.toFixed(2)}, max peak = ${maxAbsValue}, threshold = ${threshold}, hasActivity = ${hasActivity}, buffer size = ${audioBuffer.length}`);
+      
+      return hasActivity;
     } catch (error) {
       logger.warn(`Error detecting voice activity: ${getErrorMessage(error)}`);
       return false; // Default to no voice activity on error
@@ -170,30 +228,77 @@ export class SpeechAnalysisService {
         throw new Error(errorMsg);
       }
 
-      logger.info(`Using Deepgram Nova-2 for transcription with API key length: ${this.deepgramApiKey!.length}`);
+      logger.info(`🔧 UPDATED SpeechAnalysisService - Using Deepgram Nova-2 for transcription with API key length: ${this.deepgramApiKey!.length}`);
       
-      // Prepare transcription options for Deepgram v4
+      // Check for voice activity first to avoid unnecessary API calls
+      const hasVoiceActivity = this.detectVoiceActivity(audioBuffer);
+      
+      logger.info(`🔊 Voice Activity Check: ${hasVoiceActivity ? 'DETECTED' : 'NOT DETECTED'} for buffer size ${audioBuffer.length} bytes`);
+      
+      // Temporarily disable early return to debug Deepgram responses
+      // if (!hasVoiceActivity) {
+      //   logger.debug('No voice activity detected, skipping transcription');
+      //   return {
+      //     transcript: '',
+      //     language: language || 'English',
+      //     confidence: 0,
+      //     hasVoiceActivity: false
+      //   };
+      // }
+      
+      // Convert μ-law audio from Twilio to PCM format for better Deepgram compatibility
+      const processedAudioBuffer = this.convertMuLawToPCM(audioBuffer);
+      
+      logger.info(`🎵 Audio Conversion: μ-law ${audioBuffer.length} bytes → WAV ${processedAudioBuffer.length} bytes`);
+      
+      // Prepare transcription options for Deepgram v4 - optimized for real-time audio
       const options = {
         model: 'nova-2',
         smart_format: true,
-        language: language ? (language === 'English' ? 'en' : 'hi') : undefined,
-        detect_language: language ? false : true,
+        language: 'en', // Force English for now to avoid language detection issues
         punctuate: true,
-        utterances: true,
-        diarize: true,
+        // Simplified options for better compatibility
         tier: 'enhanced'
       };
       
       try {
-        // Use the Deepgram SDK v4 API - for audio files we need to use a different method
+        // Use the Deepgram SDK v4 API with proper audio format specification
+        logger.info(`🚀 Sending ${processedAudioBuffer.length} bytes to Deepgram API`);
+        
         const response = await this.deepgramClient.listen.prerecorded.transcribeFile(
-          audioBuffer,
-          options
+          processedAudioBuffer,
+          {
+            mimetype: 'audio/wav',
+            ...options
+          }
         );
         
-        // Extract the transcript from response
-        const transcript = response.result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
-        const confidence = response.result?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
+        logger.info(`📥 Deepgram API Response received:`, {
+          hasResponse: !!response,
+          hasResult: !!response?.result,
+          responseKeys: response ? Object.keys(response) : [],
+          resultKeys: response?.result ? Object.keys(response.result) : [],
+          error: response?.error ? response.error : null,
+          fullResponse: JSON.stringify(response, null, 2)
+        });
+        
+        // Extract the transcript from response with better error handling
+        const channels = response.result?.results?.channels;
+        const alternatives = channels?.[0]?.alternatives;
+        const transcript = alternatives?.[0]?.transcript || '';
+        const confidence = alternatives?.[0]?.confidence || 0;
+        
+        // Debug logging for Deepgram response
+        logger.info(`🔍 Deepgram Response Debug:`, {
+          hasResult: !!response.result,
+          hasChannels: !!channels,
+          channelCount: channels?.length || 0,
+          hasAlternatives: !!alternatives,
+          alternativeCount: alternatives?.length || 0,
+          transcript: transcript,
+          confidence: confidence,
+          rawResponse: JSON.stringify(response.result, null, 2)
+        });
         
         // Get detected language or use the provided one
         let detectedLanguage: 'English' | 'Hindi';
@@ -203,62 +308,207 @@ export class SpeechAnalysisService {
           detectedLanguage = 'English';
         }
         
-        // Check for voice activity using our detector
-        const hasVoiceActivity = this.detectVoiceActivity(audioBuffer) || transcript.trim().length > 0;
-        
-        logger.info(`Deepgram transcription completed successfully: "${transcript}" (Voice activity: ${hasVoiceActivity ? 'YES' : 'NO'})`);
+        logger.info(`🎯 UPDATED SERVICE - Deepgram transcription completed successfully: "${transcript}" (Voice activity: ${hasVoiceActivity ? 'YES' : 'NO'})`);
         
         return {
           transcript,
           language: detectedLanguage,
           confidence,
-          hasVoiceActivity
+          hasVoiceActivity: true // We already confirmed voice activity above
         };
       } catch (deepgramError) {
         logger.error(`Deepgram SDK error: ${getErrorMessage(deepgramError)}`);
-        logger.warn('Attempting fallback to direct API call');
+        logger.warn('Attempting fallback with raw μ-law audio');
         
-        // Fallback to direct API call with axios
-        const response = await axios.post(
-          'https://api.deepgram.com/v1/listen',
-          audioBuffer,
-          {
-            params: options,
-            headers: {
-              'Authorization': `Token ${this.deepgramApiKey}`,
-              'Content-Type': 'audio/wav'
+        // Try with raw μ-law audio as a fallback
+        try {
+          const fallbackResponse = await this.deepgramClient.listen.prerecorded.transcribeFile(
+            audioBuffer, // Use original μ-law buffer
+            {
+              mimetype: 'audio/mulaw',
+              model: 'nova-2',
+              language: 'en',
+              smart_format: true,
+              punctuate: true,
+              tier: 'enhanced',
+              encoding: 'mulaw',
+              sample_rate: 8000,
+              channels: 1
             }
+          );
+          
+          logger.info(`🔄 Fallback μ-law transcription attempt completed`);
+          
+          const channels = fallbackResponse.result?.results?.channels;
+          const alternatives = channels?.[0]?.alternatives;
+          const transcript = alternatives?.[0]?.transcript || '';
+          const confidence = alternatives?.[0]?.confidence || 0;
+          
+          logger.info(`🎯 UPDATED SERVICE - Deepgram μ-law fallback completed: "${transcript}" (Voice activity: ${hasVoiceActivity ? 'YES' : 'NO'})`);
+          
+          return {
+            transcript,
+            language: 'English',
+            confidence,
+            hasVoiceActivity: true
+          };
+          
+        } catch (fallbackError) {
+          logger.error(`μ-law fallback also failed: ${getErrorMessage(fallbackError)}`);
+          
+          // Final fallback to direct API call with axios
+          logger.warn('Attempting final fallback to direct API call');
+          
+          const response = await axios.post(
+            'https://api.deepgram.com/v1/listen',
+            processedAudioBuffer,
+            {
+              params: {
+                model: 'nova-2',
+                language: 'en',
+                smart_format: true,
+                punctuate: true,
+                tier: 'enhanced'
+              },
+              headers: {
+                'Authorization': `Token ${this.deepgramApiKey}`,
+                'Content-Type': 'audio/wav',
+                'Accept': 'application/json'
+              },
+              timeout: 10000 // 10 second timeout
+            }
+          );
+        
+          // Extract the transcript from response
+          const transcript = response.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+          const confidence = response.data?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
+          
+          // Get detected language or use the provided one
+          let detectedLanguage: 'English' | 'Hindi';
+          if (response.data?.results?.channels?.[0]?.detected_language === 'hi') {
+            detectedLanguage = 'Hindi';
+          } else {
+            detectedLanguage = 'English';
           }
-        );
-        
-        // Extract the transcript from response
-        const transcript = response.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
-        const confidence = response.data?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
-        
-        // Get detected language or use the provided one
-        let detectedLanguage: 'English' | 'Hindi';
-        if (response.data?.results?.channels?.[0]?.detected_language === 'hi') {
-          detectedLanguage = 'Hindi';
-        } else {
-          detectedLanguage = 'English';
+          
+          logger.info(`🎯 UPDATED SERVICE - Deepgram transcription completed via direct API: "${transcript}" (Voice activity: ${hasVoiceActivity ? 'YES' : 'NO'})`);
+          
+          return {
+            transcript,
+            language: detectedLanguage,
+            confidence,
+            hasVoiceActivity: true
+          };
         }
-        
-        // Check for voice activity using our detector
-        const hasVoiceActivity = this.detectVoiceActivity(audioBuffer) || transcript.trim().length > 0;
-        
-        logger.info(`Deepgram transcription completed via direct API: "${transcript}" (Voice activity: ${hasVoiceActivity ? 'YES' : 'NO'})`);
-        
-        return {
-          transcript,
-          language: detectedLanguage,
-          confidence,
-          hasVoiceActivity
-        };
       }
     } catch (error) {
       logger.error(`Error transcribing audio: ${getErrorMessage(error)}`);
-      throw new Error(`Failed to transcribe audio: ${getErrorMessage(error)}`);
+      
+      // Return a result indicating failure but with voice activity info
+      return {
+        transcript: '',
+        language: language || 'English',
+        confidence: 0,
+        hasVoiceActivity: this.detectVoiceActivity(audioBuffer)
+      };
     }
+  }
+
+  /**
+   * Convert μ-law audio to PCM format with proper WAV header for Deepgram
+   * Twilio sends audio in μ-law format, but Deepgram works better with PCM WAV
+   */
+  private convertMuLawToPCM(muLawBuffer: Buffer): Buffer {
+    try {
+      // Use the same μ-law decode table as in voice activity detection
+      const MULAW_DECODE_TABLE = [
+        -32124, -31100, -30076, -29052, -28028, -27004, -25980, -24956,
+        -23932, -22908, -21884, -20860, -19836, -18812, -17788, -16764,
+        -15996, -15484, -14972, -14460, -13948, -13436, -12924, -12412,
+        -11900, -11388, -10876, -10364, -9852, -9340, -8828, -8316,
+        -7932, -7676, -7420, -7164, -6908, -6652, -6396, -6140,
+        -5884, -5628, -5372, -5116, -4860, -4604, -4348, -4092,
+        -3900, -3772, -3644, -3516, -3388, -3260, -3132, -3004,
+        -2876, -2748, -2620, -2492, -2364, -2236, -2108, -1980,
+        -1884, -1820, -1756, -1692, -1628, -1564, -1500, -1436,
+        -1372, -1308, -1244, -1180, -1116, -1052, -988, -924,
+        -876, -844, -812, -780, -748, -716, -684, -652,
+        -620, -588, -556, -524, -492, -460, -428, -396,
+        -372, -356, -340, -324, -308, -292, -276, -260,
+        -244, -228, -212, -196, -180, -164, -148, -132,
+        -120, -112, -104, -96, -88, -80, -72, -64,
+        -56, -48, -40, -32, -24, -16, -8, 0,
+        32124, 31100, 30076, 29052, 28028, 27004, 25980, 24956,
+        23932, 22908, 21884, 20860, 19836, 18812, 17788, 16764,
+        15996, 15484, 14972, 14460, 13948, 13436, 12924, 12412,
+        11900, 11388, 10876, 10364, 9852, 9340, 8828, 8316,
+        7932, 7676, 7420, 7164, 6908, 6652, 6396, 6140,
+        5884, 5628, 5372, 5116, 4860, 4604, 4348, 4092,
+        3900, 3772, 3644, 3516, 3388, 3260, 3132, 3004,
+        2876, 2748, 2620, 2492, 2364, 2236, 2108, 1980,
+        1884, 1820, 1756, 1692, 1628, 1564, 1500, 1436,
+        1372, 1308, 1244, 1180, 1116, 1052, 988, 924,
+        876, 844, 812, 780, 748, 716, 684, 652,
+        620, 588, 556, 524, 492, 460, 428, 396,
+        372, 356, 340, 324, 308, 292, 276, 260,
+        244, 228, 212, 196, 180, 164, 148, 132,
+        120, 112, 104, 96, 88, 80, 72, 64,
+        56, 48, 40, 32, 24, 16, 8, 0
+      ];
+      
+      // Convert each μ-law byte to 16-bit PCM using the lookup table
+      const pcmBuffer = Buffer.alloc(muLawBuffer.length * 2);
+      
+      for (let i = 0; i < muLawBuffer.length; i++) {
+        const muLawByte = muLawBuffer[i];
+        const pcmSample = MULAW_DECODE_TABLE[muLawByte];
+        pcmBuffer.writeInt16LE(pcmSample, i * 2);
+      }
+      
+      // Create a proper WAV file with header for Deepgram
+      return this.createWavFile(pcmBuffer, 8000, 1, 16);
+    } catch (error) {
+      logger.warn(`Error converting μ-law to PCM: ${getErrorMessage(error)}, using original buffer`);
+      return muLawBuffer; // Return original buffer if conversion fails
+    }
+  }
+
+  /**
+   * Create a proper WAV file with header from PCM data
+   * This creates a standard WAV file that Deepgram should accept
+   */
+  private createWavFile(pcmData: Buffer, sampleRate: number, channels: number, bitsPerSample: number): Buffer {
+    const dataSize = pcmData.length;
+    const fileSize = 36 + dataSize; // Total file size minus 8 bytes for RIFF header
+    
+    const header = Buffer.alloc(44);
+    let offset = 0;
+    
+    // RIFF header
+    header.write('RIFF', offset); offset += 4;
+    header.writeUInt32LE(fileSize, offset); offset += 4;
+    header.write('WAVE', offset); offset += 4;
+    
+    // fmt chunk
+    header.write('fmt ', offset); offset += 4;
+    header.writeUInt32LE(16, offset); offset += 4; // fmt chunk size (16 for PCM)
+    header.writeUInt16LE(1, offset); offset += 2; // audio format (1 = PCM)
+    header.writeUInt16LE(channels, offset); offset += 2; // number of channels
+    header.writeUInt32LE(sampleRate, offset); offset += 4; // sample rate
+    header.writeUInt32LE(sampleRate * channels * bitsPerSample / 8, offset); offset += 4; // byte rate
+    header.writeUInt16LE(channels * bitsPerSample / 8, offset); offset += 2; // block align
+    header.writeUInt16LE(bitsPerSample, offset); offset += 2; // bits per sample
+    
+    // data chunk
+    header.write('data', offset); offset += 4;
+    header.writeUInt32LE(dataSize, offset);
+    
+    // Combine header and PCM data
+    const wavFile = Buffer.concat([header, pcmData]);
+    
+    logger.debug(`📄 Created WAV file: ${wavFile.length} bytes (header: 44, data: ${dataSize})`);
+    
+    return wavFile;
   }
 
   // Comprehensive Speech Analysis

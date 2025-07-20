@@ -22,6 +22,7 @@ import campaignRoutes from './routes/campaignRoutes';
 import configurationRoutes from './routes/configurationRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import debugRoutes from './routes/debugRoutes';
+import deepgramMetricsRoutes from './routes/deepgramMetricsRoutes';
 import knowledgeRoutes from './routes/knowledgeRoutes';
 import leadRoutes from './routes/leadRoutes';
 import rootWebhookRoutes from './routes/rootWebhookRoutes';
@@ -30,6 +31,10 @@ import telephonyRoutes from './routes/telephonyRoutes';
 import transcriptionRoutes from './routes/transcriptionRoutes';
 import userRoutes from './routes/userRoutes';
 import voiceAIRoutes from './routes/voiceAIRoutes';
+import metricsRoutes from './routes/metricsRoutes';
+import deepgramTestRoutes, { setupDeepgramWebSocketServer } from './routes/deepgramTestRoutes';
+import callSimulatorRoutes, { setupCallSimulatorWebSocketServer } from './routes/callSimulatorRoutes';
+import fallbackCallSimulatorRoutes from './routes/fallbackCallSimulatorRoutes';
 
 // Twilio Media Streams WebSocket handler
 import { handleTwilioStreamWebhook } from './services/webhookHandlers';
@@ -139,6 +144,11 @@ const io = new SocketIOServer(server, {
     credentials: true,
   },
 });
+
+// Initialize Deepgram WebSocket server
+// Setup WebSocket servers
+setupDeepgramWebSocketServer(server);
+setupCallSimulatorWebSocketServer(server);
 
 // Enhanced middleware setup for production
 const corsOrigin = process.env.CORS_ORIGIN || process.env.CLIENT_URL || 'http://localhost:3000';
@@ -353,6 +363,11 @@ app.use('/api/ai', aiRoutes); // Core AI routes
 app.use('/api/ai-orchestration', aiOrchestrationRoutes); // AI orchestration layer routes
 app.use('/api/knowledge', knowledgeRoutes); // Knowledge management routes
 app.use('/api/transcription', transcriptionRoutes);
+app.use('/api/deepgram-metrics', deepgramMetricsRoutes); // Deepgram model compatibility metrics
+app.use('/api/metrics', metricsRoutes); // Advanced monitoring and metrics endpoints
+app.use('/api/deepgram', deepgramTestRoutes); // Deepgram testing routes
+app.use('/api/call-simulator', callSimulatorRoutes); // Call simulation routes
+app.use('/api/call-simulator/fallback', fallbackCallSimulatorRoutes); // HTTP fallback for call simulation
 
 // Debug routes only in development
 if (process.env.NODE_ENV !== 'production') {
@@ -473,7 +488,7 @@ const initializeServices = async () => {
       deepgramApiKey = config.deepgramConfig?.apiKey || '';
       logger.info('Deepgram API key ' + (deepgramApiKey ? 'found' : 'not found') + ' in configuration');
       
-      // Initialize and validate Deepgram auto-configuration
+      // Initialize and validate Deepgram auto-configuration with graceful startup
       if (deepgramApiKey) {
         try {
           logger.info('Initializing Deepgram auto-configuration service...');
@@ -481,52 +496,73 @@ const initializeServices = async () => {
           const autoConfigService = getDeepgramAutoConfigService();
           await autoConfigService.initialize(deepgramApiKey);
           
-          // Perform startup validation with enhanced error handling
-          logger.info('Validating Deepgram configuration at startup...');
-          const validationResult = await autoConfigService.validateStartupConfiguration();
+          // Perform graceful startup validation that won't fail the server
+          logger.info('Performing graceful Deepgram startup validation...');
+          const gracefulResult = await autoConfigService.performGracefulStartupValidation();
           
-          if (!validationResult.isValid) {
-            logger.warn(`Deepgram startup validation failed: ${validationResult.error}`);
-            logger.info('Attempting automatic model configuration...');
+          if (gracefulResult.success) {
+            logger.info(`Deepgram startup validation successful: ${gracefulResult.message}`);
             
-            // Try auto-configuration if validation fails
-            const autoConfigResult = await autoConfigService.autoConfigureOptimalModel();
-            if (autoConfigResult.success) {
-              logger.info(`Auto-configuration successful: using model ${autoConfigResult.model}`);
-              if (autoConfigResult.warnings.length > 0) {
-                autoConfigResult.warnings.forEach(warning => logger.warn(`Auto-config warning: ${warning}`));
-              }
+            // Log details about the configuration
+            if (gracefulResult.autoConfigResult) {
+              logger.info('Auto-configuration details:', {
+                model: gracefulResult.autoConfigResult.model,
+                accountTier: gracefulResult.autoConfigResult.accountTier,
+                availableModels: gracefulResult.autoConfigResult.availableModels.length,
+                warnings: gracefulResult.autoConfigResult.warnings
+              });
               
               // Update deepgramApiKey reference for service initialization
               const updatedConfig = await Configuration.findOne();
               if (updatedConfig?.deepgramConfig?.apiKey) {
                 deepgramApiKey = updatedConfig.deepgramConfig.apiKey;
               }
-            } else {
-              logger.error(`Auto-configuration failed: ${autoConfigResult.error}`);
-              logger.warn('Deepgram services will start with degraded functionality');
-              
-              // Don't fail startup - continue with graceful degradation
-              logger.info('Continuing startup with Deepgram in degraded mode');
             }
           } else {
-            logger.info(`Deepgram startup validation passed for model: ${validationResult.model}`);
+            logger.warn(`Deepgram startup validation issues: ${gracefulResult.message}`);
+            
+            // Log validation details for troubleshooting
+            if (gracefulResult.validationResult) {
+              logger.warn('Validation details:', {
+                model: gracefulResult.validationResult.model,
+                error: gracefulResult.validationResult.error,
+                suggestedAction: gracefulResult.validationResult.suggestedAction
+              });
+            }
+            
+            if (gracefulResult.autoConfigResult && !gracefulResult.autoConfigResult.success) {
+              logger.warn('Auto-configuration failed:', {
+                error: gracefulResult.autoConfigResult.error,
+                warnings: gracefulResult.autoConfigResult.warnings
+              });
+            }
+            
+            // Server continues regardless - graceful degradation
+            logger.info('Server will continue with Deepgram in degraded mode');
           }
           
-          // Start background validation
-          autoConfigService.startBackgroundValidation();
-          logger.info('Deepgram background validation started');
+          // Always start background validation if possible
+          try {
+            autoConfigService.startBackgroundValidation();
+            logger.info('Deepgram background validation started');
+          } catch (bgError) {
+            logger.warn(`Failed to start background validation: ${getErrorMessage(bgError)}`);
+          }
           
         } catch (error) {
           logger.error(`Deepgram auto-configuration initialization failed: ${getErrorMessage(error)}`);
-          logger.warn('Deepgram services will start without auto-configuration - manual configuration may be required');
+          logger.warn('Deepgram services will start without auto-configuration');
+          logger.info('Manual configuration may be required via the Configuration page');
           
-          // Continue startup even if auto-configuration fails
-          logger.info('Continuing startup without Deepgram auto-configuration');
+          // Server continues even if initialization completely fails
+          logger.info('Server startup continuing without Deepgram auto-configuration');
         }
       } else {
         logger.info('No Deepgram API key found - Deepgram services will be disabled');
-        logger.info('Configure Deepgram API key in the Configuration page to enable speech-to-text functionality');
+        logger.info('To enable speech-to-text functionality:');
+        logger.info('1. Configure Deepgram API key in the Configuration page');
+        logger.info('2. The system will automatically detect optimal model settings');
+        logger.info('3. Background validation will ensure continued compatibility');
       }
     } else {
       logger.warn('No configuration found in database, services will operate without API keys');
@@ -627,7 +663,7 @@ const startServer = async () => {
     // Step 2.5: Validate database-loaded configuration (optional)
     logger.info('Validating database configuration...');
     try {
-      const { validateDatabaseLoadedConfig } = await import('./config/database-validation');
+      const { validateDatabaseLoadedConfig, validateDeepgramStartupConfig } = await import('./config/database-validation');
       const Configuration = require('./models/Configuration').default;
       const config = await Configuration.findOne();
       
@@ -635,9 +671,40 @@ const startServer = async () => {
       if (!dbConfigValidation.isValid) {
         logger.warn('Database configuration has issues:', dbConfigValidation.error);
         logger.warn('Services will start with limited functionality. Configure API keys in the Configuration page.');
+        
+        // Log warnings if they exist
+        if (dbConfigValidation.details?.warnings) {
+          dbConfigValidation.details.warnings.forEach((warning: string) => {
+            logger.warn(`Configuration warning: ${warning}`);
+          });
+        }
       } else {
         logger.info('Database configuration is valid');
+        
+        // Log warnings even for valid configurations
+        if (dbConfigValidation.details?.warnings) {
+          dbConfigValidation.details.warnings.forEach((warning: string) => {
+            logger.warn(`Configuration warning: ${warning}`);
+          });
+        }
       }
+      
+      // Perform specific Deepgram startup validation
+      if (config?.deepgramConfig) {
+        logger.info('Performing Deepgram-specific startup validation...');
+        const deepgramValidation = validateDeepgramStartupConfig(config.deepgramConfig);
+        
+        if (!deepgramValidation.isValid) {
+          logger.warn(`Deepgram startup validation failed: ${deepgramValidation.error}`);
+          logger.info('Auto-configuration will attempt to resolve these issues during service initialization');
+        } else {
+          logger.info('Deepgram startup validation passed');
+          if (deepgramValidation.details) {
+            logger.info('Deepgram validation details:', deepgramValidation.details);
+          }
+        }
+      }
+      
     } catch (error) {
       logger.warn('Could not validate database configuration:', error);
       logger.warn('Services will start with empty credentials - configure via Configuration page');
@@ -749,6 +816,15 @@ const startServer = async () => {
         logger.info('Temporary file cleanup initialized');
       } catch (error) {
         logger.error(`Error initializing temp file cleanup: ${error.message}`);
+      }
+      
+      // Initialize monitoring and metrics systems
+      try {
+        const { initializeMonitoringSystems } = require('./monitoring/initializeMetrics');
+        initializeMonitoringSystems();
+        logger.info('Monitoring and metrics systems initialized');
+      } catch (error) {
+        logger.error(`Error initializing monitoring systems: ${error.message}`);
       }
     });
     

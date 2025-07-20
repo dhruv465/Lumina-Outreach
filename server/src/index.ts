@@ -472,6 +472,62 @@ const initializeServices = async () => {
       // Deepgram for STT (Nova-2)
       deepgramApiKey = config.deepgramConfig?.apiKey || '';
       logger.info('Deepgram API key ' + (deepgramApiKey ? 'found' : 'not found') + ' in configuration');
+      
+      // Initialize and validate Deepgram auto-configuration
+      if (deepgramApiKey) {
+        try {
+          logger.info('Initializing Deepgram auto-configuration service...');
+          const { getDeepgramAutoConfigService } = await import('./services/deepgramAutoConfigService');
+          const autoConfigService = getDeepgramAutoConfigService();
+          await autoConfigService.initialize(deepgramApiKey);
+          
+          // Perform startup validation with enhanced error handling
+          logger.info('Validating Deepgram configuration at startup...');
+          const validationResult = await autoConfigService.validateStartupConfiguration();
+          
+          if (!validationResult.isValid) {
+            logger.warn(`Deepgram startup validation failed: ${validationResult.error}`);
+            logger.info('Attempting automatic model configuration...');
+            
+            // Try auto-configuration if validation fails
+            const autoConfigResult = await autoConfigService.autoConfigureOptimalModel();
+            if (autoConfigResult.success) {
+              logger.info(`Auto-configuration successful: using model ${autoConfigResult.model}`);
+              if (autoConfigResult.warnings.length > 0) {
+                autoConfigResult.warnings.forEach(warning => logger.warn(`Auto-config warning: ${warning}`));
+              }
+              
+              // Update deepgramApiKey reference for service initialization
+              const updatedConfig = await Configuration.findOne();
+              if (updatedConfig?.deepgramConfig?.apiKey) {
+                deepgramApiKey = updatedConfig.deepgramConfig.apiKey;
+              }
+            } else {
+              logger.error(`Auto-configuration failed: ${autoConfigResult.error}`);
+              logger.warn('Deepgram services will start with degraded functionality');
+              
+              // Don't fail startup - continue with graceful degradation
+              logger.info('Continuing startup with Deepgram in degraded mode');
+            }
+          } else {
+            logger.info(`Deepgram startup validation passed for model: ${validationResult.model}`);
+          }
+          
+          // Start background validation
+          autoConfigService.startBackgroundValidation();
+          logger.info('Deepgram background validation started');
+          
+        } catch (error) {
+          logger.error(`Deepgram auto-configuration initialization failed: ${getErrorMessage(error)}`);
+          logger.warn('Deepgram services will start without auto-configuration - manual configuration may be required');
+          
+          // Continue startup even if auto-configuration fails
+          logger.info('Continuing startup without Deepgram auto-configuration');
+        }
+      } else {
+        logger.info('No Deepgram API key found - Deepgram services will be disabled');
+        logger.info('Configure Deepgram API key in the Configuration page to enable speech-to-text functionality');
+      }
     } else {
       logger.warn('No configuration found in database, services will operate without API keys');
       elevenLabsApiKey = '';
@@ -780,6 +836,16 @@ const gracefulShutdown = (signal: string) => {
       
       // Perform final cleanup of temp files
       TempFileCleanup.emergencyCleanup();
+      
+      // Stop Deepgram auto-configuration background validation
+      try {
+        const { getDeepgramAutoConfigService } = require('./services/deepgramAutoConfigService');
+        const autoConfigService = getDeepgramAutoConfigService();
+        autoConfigService.cleanup();
+        logger.info('Deepgram auto-configuration service cleaned up');
+      } catch (error) {
+        logger.warn(`Error cleaning up Deepgram auto-config service: ${getErrorMessage(error)}`);
+      }
       
       // Close database connections
       logger.info('Closing database connection...');

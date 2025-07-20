@@ -10,9 +10,24 @@ import {
   testVoiceSynthesis,
   makeTestCall,
   deleteApiKey,
-  verifyElevenLabsApiKey
+  verifyElevenLabsApiKey,
+  autoConfigureDeepgramModel,
+  validateDeepgramConfiguration,
+  getDeepgramValidationStatus,
+  testDeepgramModelCompatibility,
+  getSuggestedDeepgramModels,
+  validateCompleteDeepgramConfiguration,
+  batchTestDeepgramModels
 } from '../controllers/configurationController';
 import { testLLMChat, testLLMConnection, getAllLLMModels, getProviderLLMModels, getDynamicProviderModels } from '../controllers/llmControllers';
+import { 
+  testModelCompatibility,
+  getAvailableModels,
+  batchTestModels,
+  getModelRegistry,
+  updateModelConfiguration,
+  suggestOptimalConfiguration
+} from '../controllers/modelManagementController';
 import { logger } from '../index';
 
 const router = express.Router();
@@ -48,5 +63,24 @@ router.post('/test-elevenlabs', testElevenLabsConnection);
 router.post('/test-voice', testVoiceSynthesis);
 router.post('/test-call', makeTestCall);
 router.post('/verify/elevenlabs', verifyElevenLabsApiKey);
+
+// Deepgram auto-configuration routes
+router.post('/deepgram/auto-configure', autoConfigureDeepgramModel);
+router.post('/deepgram/validate', validateDeepgramConfiguration);
+router.get('/deepgram/status', getDeepgramValidationStatus);
+router.post('/deepgram/test-model', testDeepgramModelCompatibility);
+
+// Enhanced Deepgram configuration routes
+router.get('/deepgram/suggested-models', getSuggestedDeepgramModels);
+router.post('/deepgram/validate-config', validateCompleteDeepgramConfiguration);
+router.post('/deepgram/batch-test-models', batchTestDeepgramModels);
+
+// Model management API endpoints
+router.post('/models/test', testModelCompatibility);
+router.get('/models/available', getAvailableModels);
+router.post('/models/batch-test', batchTestModels);
+router.get('/models/registry', getModelRegistry);
+router.put('/models/update', updateModelConfiguration);
+router.post('/models/suggest-optimal', suggestOptimalConfiguration);
 
 export default router;

@@ -5,6 +5,14 @@ import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import Configuration from '../models/Configuration';
 import { getCircuitBreakerService, CircuitBreakerOptions } from './circuitBreakerService';
+import { 
+  ModelCompatibilityService, 
+  getModelCompatibilityService,
+  initializeModelCompatibilityService,
+  ModelValidationResult,
+  ModelPreferences,
+  DeepgramErrorType
+} from './modelCompatibilityService';
 
 export enum DeepgramEvent {
   TRANSCRIPT_RECEIVED = 'transcript-received',
@@ -51,8 +59,16 @@ interface DeepgramStreamOptions {
 interface DeepgramConfig {
   language?: string;
   model?: string;
+  primaryModel?: string;
   detectLanguage?: boolean;
   apiKey?: string;
+  fallbackModels?: string[];
+  autoFallback?: boolean;
+  accountTier?: 'free' | 'basic' | 'premium';
+  availableModels?: string[];
+  lastModelValidation?: Date;
+  status?: 'unverified' | 'verified' | 'failed' | 'degraded';
+  lastError?: string;
 }
 
 /**
@@ -64,6 +80,8 @@ export class DeepgramService extends EventEmitter {
   private client: DeepgramClient;
   private activeConnections: Map<string, any> = new Map();
   private defaultModel: string = 'nova-2';
+  private fallbackModels: string[] = ['nova', 'base'];
+  private modelCompatibilityService: ModelCompatibilityService;
   private defaultOptions: DeepgramStreamOptions = {
     language: 'en',
     model: 'nova-2',
@@ -75,6 +93,9 @@ export class DeepgramService extends EventEmitter {
   private fallbackProviders: string[] = [];
   // Local cache for transcription results
   private transcriptionCache: Map<string, any> = new Map();
+  // Model validation cache
+  private modelValidationCache: Map<string, { isValid: boolean; timestamp: number }> = new Map();
+  private readonly MODEL_VALIDATION_TTL = 5 * 60 * 1000; // 5 minutes
 
   /**
    * Create a new Deepgram Service instance
@@ -84,6 +105,9 @@ export class DeepgramService extends EventEmitter {
     super();
     this.apiKey = apiKey;
     this.client = createClient(apiKey);
+    
+    // Initialize model compatibility service
+    this.modelCompatibilityService = initializeModelCompatibilityService(apiKey);
     
     // Initialize circuit breaker options
     const circuitOptions: CircuitBreakerOptions = {
@@ -95,10 +119,15 @@ export class DeepgramService extends EventEmitter {
     // Get the circuit breaker service
     getCircuitBreakerService().getCircuit(this.CIRCUIT_NAME, circuitOptions);
     
-    logger.info('Deepgram Service initialized with in-memory caching and circuit breaker protection');
+    logger.info('Deepgram Service initialized with model compatibility support, in-memory caching and circuit breaker protection');
     
     // Set up periodic cache cleanup (every 30 minutes)
     setInterval(() => this.cleanupCache(), 30 * 60 * 1000);
+    
+    // Initialize with optimal model configuration
+    this.initializeOptimalModel().catch(error => {
+      logger.warn(`Failed to initialize optimal model: ${getErrorMessage(error)}`);
+    });
   }
   
   /**
@@ -124,11 +153,187 @@ export class DeepgramService extends EventEmitter {
   public updateApiKey(apiKey: string): void {
     this.apiKey = apiKey;
     this.client = createClient(apiKey);
+    this.modelCompatibilityService.updateApiKey(apiKey);
+    this.clearModelValidationCache();
     logger.info('Deepgram API key updated');
+    
+    // Re-initialize optimal model with new API key
+    this.initializeOptimalModel().catch(error => {
+      logger.warn(`Failed to re-initialize optimal model after API key update: ${getErrorMessage(error)}`);
+    });
   }
 
   /**
-   * Transcribe an audio file with high accuracy
+   * Initialize optimal model configuration based on account capabilities
+   */
+  private async initializeOptimalModel(): Promise<void> {
+    try {
+      const config = await Configuration.findOne();
+      const deepgramConfig = (config?.deepgramConfig || {}) as DeepgramConfig;
+      
+      // Use auto-configuration service if available
+      try {
+        const { getDeepgramAutoConfigService } = await import('./deepgramAutoConfigService');
+        const autoConfigService = getDeepgramAutoConfigService();
+        
+        // Initialize auto-config service if not already done
+        await autoConfigService.initialize(this.apiKey);
+        
+        // Get optimal configuration
+        const autoConfigResult = await autoConfigService.autoConfigureOptimalModel();
+        
+        if (autoConfigResult.success) {
+          this.defaultModel = autoConfigResult.model;
+          this.fallbackModels = autoConfigResult.fallbackModels;
+          this.defaultOptions.model = autoConfigResult.model;
+          
+          logger.info(`Auto-configured optimal model: primary=${autoConfigResult.model}, fallbacks=[${autoConfigResult.fallbackModels.join(', ')}]`);
+          return;
+        } else {
+          logger.warn(`Auto-configuration failed: ${autoConfigResult.error}, falling back to manual configuration`);
+        }
+      } catch (autoConfigError) {
+        logger.warn(`Auto-configuration service unavailable: ${getErrorMessage(autoConfigError)}, using manual configuration`);
+      }
+      
+      // Fallback to manual configuration
+      const capabilities = await this.modelCompatibilityService.getAccountCapabilities(this.apiKey);
+      
+      // Set up model preferences
+      const preferences: ModelPreferences = {
+        preferredModels: [deepgramConfig.primaryModel || deepgramConfig.model || this.defaultModel],
+        useCase: 'phone', // Default to phone use case for voice calls
+        language: deepgramConfig.language || 'en',
+        realtime: true
+      };
+      
+      // Select best available model
+      const bestModel = this.modelCompatibilityService.selectBestModel(
+        capabilities.availableModels,
+        preferences
+      );
+      
+      // Update default model and fallback models
+      this.defaultModel = bestModel;
+      this.fallbackModels = capabilities.availableModels.filter(model => model !== bestModel);
+      
+      // Update default options
+      this.defaultOptions.model = bestModel;
+      
+      logger.info(`Manually configured optimal model: primary=${bestModel}, fallbacks=[${this.fallbackModels.join(', ')}]`);
+      
+    } catch (error) {
+      logger.warn(`Failed to initialize optimal model, using defaults: ${getErrorMessage(error)}`);
+    }
+  }
+
+  /**
+   * Validate model access before use
+   */
+  public async validateAndSetModel(model: string): Promise<boolean> {
+    const cacheKey = `${this.apiKey.slice(-8)}-${model}`;
+    
+    // Check cache first
+    const cached = this.modelValidationCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp) < this.MODEL_VALIDATION_TTL) {
+      return cached.isValid;
+    }
+    
+    try {
+      const validation = await this.modelCompatibilityService.validateModelAccess(this.apiKey, model);
+      
+      // Cache the result
+      this.modelValidationCache.set(cacheKey, {
+        isValid: validation.isValid,
+        timestamp: Date.now()
+      });
+      
+      if (validation.isValid) {
+        this.defaultModel = model;
+        this.defaultOptions.model = model;
+        logger.info(`Model ${model} validated and set as default`);
+        return true;
+      } else {
+        logger.warn(`Model ${model} validation failed: ${validation.error}`);
+        return false;
+      }
+    } catch (error) {
+      logger.error(`Error validating model ${model}: ${getErrorMessage(error)}`);
+      return false;
+    }
+  }
+
+  /**
+   * Get account capabilities
+   */
+  public async getAccountCapabilities() {
+    return await this.modelCompatibilityService.getAccountCapabilities(this.apiKey);
+  }
+
+  /**
+   * Auto-configure optimal model based on account capabilities
+   */
+  public async autoConfigureModel(): Promise<string> {
+    try {
+      const capabilities = await this.getAccountCapabilities();
+      
+      const preferences: ModelPreferences = {
+        preferredModels: [this.defaultModel],
+        useCase: 'phone',
+        language: 'en',
+        realtime: true
+      };
+      
+      const optimalModel = this.modelCompatibilityService.selectBestModel(
+        capabilities.availableModels,
+        preferences
+      );
+      
+      await this.validateAndSetModel(optimalModel);
+      return optimalModel;
+    } catch (error) {
+      logger.error(`Error auto-configuring model: ${getErrorMessage(error)}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle model fallback when current model fails
+   */
+  private async handleModelFallback(currentModel: string, error: any): Promise<string> {
+    try {
+      const fallbackModel = this.modelCompatibilityService.handleModelFallback(currentModel, error);
+      
+      // Validate the fallback model
+      const isValid = await this.validateAndSetModel(fallbackModel);
+      if (isValid) {
+        this.emit(DeepgramEvent.FALLBACK_USED, {
+          originalModel: currentModel,
+          fallbackModel: fallbackModel,
+          reason: getErrorMessage(error)
+        });
+        
+        logger.info(`Successfully fell back from ${currentModel} to ${fallbackModel}`);
+        return fallbackModel;
+      } else {
+        throw new Error(`Fallback model ${fallbackModel} is also not accessible`);
+      }
+    } catch (fallbackError) {
+      logger.error(`Model fallback failed: ${getErrorMessage(fallbackError)}`);
+      throw fallbackError;
+    }
+  }
+
+  /**
+   * Clear model validation cache
+   */
+  private clearModelValidationCache(): void {
+    this.modelValidationCache.clear();
+    logger.debug('Model validation cache cleared');
+  }
+
+  /**
+   * Transcribe an audio file with high accuracy and automatic model fallback
    * @param audioBuffer Audio buffer to transcribe
    * @param options Transcription options
    * @returns Transcription result
@@ -145,66 +350,131 @@ export class DeepgramService extends EventEmitter {
     
     // Define the main function to execute with circuit breaker
     const transcribeFunction = async () => {
-      try {
-        const startTime = Date.now();
-        
-        // Get configuration from database
-        const config = await Configuration.findOne();
-        const deepgramConfig = (config?.deepgramConfig || {}) as DeepgramConfig;
-        
-        // Create transcription options
-        const transcriptionOptions = {
-          language: options?.language || deepgramConfig.language || 'en',
-          model: options?.model || deepgramConfig.model || this.defaultModel,
-          detect_language: options?.detectLanguage || deepgramConfig.detectLanguage || false,
-          punctuate: true,
-          smart_format: true
-        };
+      const startTime = Date.now();
+      
+      // Get configuration from database
+      const config = await Configuration.findOne();
+      const deepgramConfig = (config?.deepgramConfig || {}) as DeepgramConfig;
+      
+      // Determine the model to use
+      let modelToUse = options?.model || deepgramConfig.model || this.defaultModel;
+      
+      // Create transcription options
+      const transcriptionOptions = {
+        language: options?.language || deepgramConfig.language || 'en',
+        model: modelToUse,
+        detect_language: options?.detectLanguage || deepgramConfig.detectLanguage || false,
+        punctuate: true,
+        smart_format: true
+      };
 
-        // Try to get cached result first if available
-        const cacheKey = `transcribe:${Buffer.from(audioBuffer).toString('base64').slice(0, 50)}:${JSON.stringify(transcriptionOptions)}`;
-        const cachedResult = this.transcriptionCache.get(cacheKey);
-        if (cachedResult) {
-          logger.info('Using cached transcription result');
-          return cachedResult.data;
-        }
-
-        // Perform the transcription
-        const response = await this.client.listen.prerecorded.transcribeFile(audioBuffer, {
-          mimetype: 'audio/wav',
-          options: transcriptionOptions
-        });
-
-        const endTime = Date.now();
-        const latency = endTime - startTime;
-
-        logger.info(`Deepgram transcription completed in ${latency}ms`);
-
-        // Extract result with corrected property access
-        const channels = response.result?.results?.channels;
-        const result = channels && channels.length > 0 && channels[0].alternatives && channels[0].alternatives.length > 0 
-          ? channels[0].alternatives[0] 
-          : null;
-          
-        const transcriptionResult = {
-          transcript: result?.transcript || '',
-          confidence: result?.confidence || 0,
-          words: result?.words || [],
-          language: options?.language || 'en',
-          latency
-        };
-        
-        // Cache result in memory
-        this.transcriptionCache.set(cacheKey, {
-          data: transcriptionResult,
-          timestamp: Date.now()
-        });
-        
-        return transcriptionResult;
-      } catch (error) {
-        logger.error(`Error transcribing audio with Deepgram: ${getErrorMessage(error)}`);
-        throw new Error(`Transcription failed: ${getErrorMessage(error)}`);
+      // Try to get cached result first if available
+      const cacheKey = `transcribe:${Buffer.from(audioBuffer).toString('base64').slice(0, 50)}:${JSON.stringify(transcriptionOptions)}`;
+      const cachedResult = this.transcriptionCache.get(cacheKey);
+      if (cachedResult) {
+        logger.info('Using cached transcription result');
+        return cachedResult.data;
       }
+
+      // Attempt transcription with model fallback support
+      let lastError: any;
+      const modelsToTry = [modelToUse, ...this.fallbackModels].filter((model, index, arr) => arr.indexOf(model) === index);
+      
+      for (let i = 0; i < modelsToTry.length; i++) {
+        const currentModel = modelsToTry[i];
+        
+        try {
+          // Validate model before use (skip validation for fallback attempts to save time)
+          if (i === 0) {
+            const isModelValid = await this.validateAndSetModel(currentModel);
+            if (!isModelValid) {
+              logger.warn(`Primary model ${currentModel} validation failed, trying fallback`);
+              continue;
+            }
+          }
+          
+          // Update transcription options with current model
+          transcriptionOptions.model = currentModel;
+          
+          logger.info(`Attempting transcription with model: ${currentModel}`);
+          
+          // Perform the transcription
+          const response = await this.client.listen.prerecorded.transcribeFile(audioBuffer, {
+            mimetype: 'audio/wav',
+            options: transcriptionOptions
+          });
+
+          const endTime = Date.now();
+          const latency = endTime - startTime;
+
+          logger.info(`Deepgram transcription completed with model ${currentModel} in ${latency}ms`);
+
+          // Extract result with corrected property access
+          const channels = response.result?.results?.channels;
+          const result = channels && channels.length > 0 && channels[0].alternatives && channels[0].alternatives.length > 0 
+            ? channels[0].alternatives[0] 
+            : null;
+            
+          const transcriptionResult = {
+            transcript: result?.transcript || '',
+            confidence: result?.confidence || 0,
+            words: result?.words || [],
+            language: transcriptionOptions.language,
+            latency,
+            modelUsed: currentModel,
+            fallback: i > 0 // Mark as fallback if not the first model
+          };
+          
+          // Emit fallback event if we used a fallback model
+          if (i > 0) {
+            // Enhanced logging for fallback usage
+            logger.info(`Deepgram transcription fallback successful`, {
+              originalModel: modelToUse,
+              fallbackModel: currentModel,
+              attemptNumber: i + 1,
+              totalAttempts: modelsToTry.length,
+              reason: getErrorMessage(lastError),
+              latency,
+              context: 'deepgram-transcription-fallback'
+            });
+
+            this.emit(DeepgramEvent.FALLBACK_USED, {
+              originalModel: modelToUse,
+              fallbackModel: currentModel,
+              reason: getErrorMessage(lastError),
+              attemptNumber: i + 1,
+              totalAttempts: modelsToTry.length,
+              latency
+            });
+          }
+          
+          // Cache result in memory
+          this.transcriptionCache.set(cacheKey, {
+            data: transcriptionResult,
+            timestamp: Date.now()
+          });
+          
+          return transcriptionResult;
+          
+        } catch (error) {
+          lastError = error;
+          logger.warn(`Transcription failed with model ${currentModel}: ${getErrorMessage(error)}`);
+          
+          // If this was a permission or model error, try fallback
+          if (this.isModelCompatibilityError(error)) {
+            if (i < modelsToTry.length - 1) {
+              logger.info(`Trying fallback model due to compatibility error`);
+              continue;
+            }
+          } else {
+            // For non-compatibility errors, don't try fallback models
+            throw error;
+          }
+        }
+      }
+      
+      // If we get here, all models failed
+      throw new Error(`Transcription failed with all available models. Last error: ${getErrorMessage(lastError)}`);
     };
     
     // Define fallback function for when circuit is open
@@ -232,17 +502,36 @@ export class DeepgramService extends EventEmitter {
   }
 
   /**
-   * Create a real-time transcription stream with circuit breaker protection
+   * Check if error is related to model compatibility (permissions, invalid model, etc.)
+   */
+  private isModelCompatibilityError(error: any): boolean {
+    const errorMessage = getErrorMessage(error).toLowerCase();
+    const statusCode = error?.status || error?.response?.status;
+    
+    return (
+      statusCode === 403 || // Forbidden/insufficient permissions
+      statusCode === 400 || // Bad request (invalid model)
+      statusCode === 401 || // Unauthorized
+      errorMessage.includes('insufficient') ||
+      errorMessage.includes('permission') ||
+      errorMessage.includes('invalid model') ||
+      errorMessage.includes('model not found') ||
+      errorMessage.includes('unauthorized')
+    );
+  }
+
+  /**
+   * Create a real-time transcription stream with model validation and fallback support
    * @param callId Call ID for tracking
    * @param options Stream options
    * @returns Connection ID
    */
-  public createTranscriptionStream(
+  public async createTranscriptionStream(
     callId: string,
     options?: DeepgramStreamOptions
-  ): string {
+  ): Promise<string> {
     // Define the main function to execute with circuit breaker
-    const createStreamFunction = () => {
+    const createStreamFunction = async () => {
       try {
         const connectionId = uuidv4();
         
@@ -251,6 +540,52 @@ export class DeepgramService extends EventEmitter {
           ...this.defaultOptions,
           ...options
         };
+
+        // Validate model before creating stream
+        let modelToUse = streamOptions.model || this.defaultModel;
+        const isModelValid = await this.validateAndSetModel(modelToUse);
+        
+        if (!isModelValid) {
+          // Try to find a compatible fallback model
+          logger.warn(`Model ${modelToUse} is not valid, attempting fallback`);
+          
+          const modelsToTry = [this.defaultModel, ...this.fallbackModels].filter((model, index, arr) => arr.indexOf(model) === index);
+          let fallbackFound = false;
+          
+          for (const fallbackModel of modelsToTry) {
+            if (fallbackModel !== modelToUse) {
+              const isFallbackValid = await this.validateAndSetModel(fallbackModel);
+              if (isFallbackValid) {
+                modelToUse = fallbackModel;
+                streamOptions.model = fallbackModel;
+                fallbackFound = true;
+                
+                // Enhanced logging for stream fallback
+                logger.info(`Deepgram stream fallback successful`, {
+                  callId,
+                  originalModel: options?.model || this.defaultModel,
+                  fallbackModel: fallbackModel,
+                  reason: 'Model validation failed',
+                  context: 'deepgram-stream-fallback'
+                });
+
+                this.emit(DeepgramEvent.FALLBACK_USED, {
+                  callId,
+                  originalModel: options?.model || this.defaultModel,
+                  fallbackModel: fallbackModel,
+                  reason: 'Model validation failed'
+                });
+                
+                logger.info(`Using fallback model ${fallbackModel} for stream`);
+                break;
+              }
+            }
+          }
+          
+          if (!fallbackFound) {
+            throw new Error(`No compatible models available for streaming`);
+          }
+        }
 
         logger.info(`Creating Deepgram transcription stream for call ${callId}`, {
           model: streamOptions.model,
@@ -275,18 +610,24 @@ export class DeepgramService extends EventEmitter {
           keywords: streamOptions.keywords || []
         });
 
-        // Store connection for management
-        this.activeConnections.set(connectionId, connection);
+        // Store connection for management with metadata
+        this.activeConnections.set(connectionId, {
+          connection,
+          callId,
+          model: streamOptions.model,
+          createdAt: new Date()
+        });
 
         // Emit connection status
         this.emit(DeepgramEvent.CONNECTION_STATUS, {
           connectionId,
           callId,
-          status: 'connected'
+          status: 'connected',
+          model: streamOptions.model
         });
 
         // Set up event handlers for the connection
-        this.setupConnectionHandlers(connection, connectionId, callId);
+        this.setupConnectionHandlers(connection, connectionId, callId, streamOptions.model);
         
         return connectionId;
       } catch (error) {
@@ -310,17 +651,32 @@ export class DeepgramService extends EventEmitter {
         
         // Return a special connection ID that indicates we're in fallback mode
         const fallbackId = `fallback-${uuidv4()}`;
-        this.activeConnections.set(fallbackId, { isFallback: true });
+        this.activeConnections.set(fallbackId, { 
+          isFallback: true, 
+          callId,
+          createdAt: new Date()
+        });
         return fallbackId;
       }
       
-      return createStreamFunction();
+      return await createStreamFunction();
     } catch (error) {
       logger.error(`Failed to create transcription stream with circuit check: ${getErrorMessage(error)}`);
       
-      // Return a fallback ID if all else fails
+      // Try graceful degradation - return a fallback ID that provides minimal functionality
       const emergencyFallbackId = `emergency-${uuidv4()}`;
-      this.activeConnections.set(emergencyFallbackId, { isEmergencyFallback: true });
+      this.activeConnections.set(emergencyFallbackId, { 
+        isEmergencyFallback: true, 
+        callId,
+        createdAt: new Date()
+      });
+      
+      this.emit(DeepgramEvent.FALLBACK_USED, {
+        callId,
+        message: 'Using emergency fallback mode - transcription may be limited',
+        error: getErrorMessage(error)
+      });
+      
       return emergencyFallbackId;
     }
   }
@@ -329,7 +685,7 @@ export class DeepgramService extends EventEmitter {
    * Set up event handlers for a Deepgram connection
    * Extracted to a separate method for better code organization
    */
-  private setupConnectionHandlers(connection: any, connectionId: string, callId: string): void {
+  private setupConnectionHandlers(connection: any, connectionId: string, callId: string, model?: string): void {
     // Handle transcript results
     connection.on(LiveTranscriptionEvents.Transcript, (data) => {
       // Only process if we have valid results
@@ -361,7 +717,8 @@ export class DeepgramService extends EventEmitter {
           logger.info(`Deepgram final transcript for call ${callId}`, {
             text: result.text,
             confidence: result.confidence,
-            latency: result.metadata.processingLatency
+            latency: result.metadata.processingLatency,
+            model: model || 'unknown'
           });
           this.emit(DeepgramEvent.TRANSCRIPT_FINAL, result);
         } else {
@@ -373,7 +730,19 @@ export class DeepgramService extends EventEmitter {
 
     // Handle errors and mark the circuit as potentially failing
     connection.on(LiveTranscriptionEvents.Error, (error) => {
-      logger.error(`Deepgram stream error for call ${callId}: ${getErrorMessage(error)}`);
+      logger.error(`Deepgram stream error for call ${callId} with model ${model || 'unknown'}: ${getErrorMessage(error)}`);
+      
+      // Check if this is a model compatibility error
+      if (this.isModelCompatibilityError(error)) {
+        logger.warn(`Model compatibility error detected for ${model}, may need fallback`);
+        
+        this.emit(DeepgramEvent.FALLBACK_USED, {
+          callId,
+          connectionId,
+          originalModel: model,
+          reason: `Stream error: ${getErrorMessage(error)}`
+        });
+      }
       
       // Notify the circuit breaker of the failure for tracking
       try {
@@ -389,7 +758,8 @@ export class DeepgramService extends EventEmitter {
       this.emit(DeepgramEvent.ERROR, {
         connectionId,
         callId,
-        error: getErrorMessage(error)
+        error: getErrorMessage(error),
+        model: model || 'unknown'
       });
     });
 
@@ -421,11 +791,19 @@ export class DeepgramService extends EventEmitter {
    * @param audioData Audio data as Buffer
    */
   public sendAudioToStream(connectionId: string, audioData: Buffer): void {
-    const connection = this.activeConnections.get(connectionId);
-    if (!connection) {
+    const connectionData = this.activeConnections.get(connectionId);
+    if (!connectionData) {
       logger.warn(`No active Deepgram connection found for ID ${connectionId}`);
       return;
     }
+
+    // Handle fallback connections
+    if (connectionData.isFallback || connectionData.isEmergencyFallback) {
+      logger.debug(`Ignoring audio data for fallback connection ${connectionId}`);
+      return;
+    }
+
+    const connection = connectionData.connection || connectionData;
 
     try {
       // Check if connection is open before sending
@@ -436,6 +814,15 @@ export class DeepgramService extends EventEmitter {
       }
     } catch (error) {
       logger.error(`Error sending audio to Deepgram: ${getErrorMessage(error)}`);
+      
+      // If this is a model compatibility error, emit fallback event
+      if (this.isModelCompatibilityError(error)) {
+        this.emit(DeepgramEvent.FALLBACK_USED, {
+          connectionId,
+          callId: connectionData.callId,
+          reason: `Audio send error: ${getErrorMessage(error)}`
+        });
+      }
     }
   }
 
@@ -444,23 +831,34 @@ export class DeepgramService extends EventEmitter {
    * @param connectionId Connection ID
    */
   public closeTranscriptionStream(connectionId: string): void {
-    const connection = this.activeConnections.get(connectionId);
-    if (!connection) {
+    const connectionData = this.activeConnections.get(connectionId);
+    if (!connectionData) {
       logger.warn(`No active Deepgram connection found for ID ${connectionId}`);
       return;
     }
 
     try {
+      // Handle fallback connections
+      if (connectionData.isFallback || connectionData.isEmergencyFallback) {
+        logger.info(`Closing fallback connection ${connectionId}`);
+        this.activeConnections.delete(connectionId);
+        return;
+      }
+
+      const connection = connectionData.connection || connectionData;
+      
       // Close the connection if it's open
       if (connection.isOpen || connection.getReadyState() === 1) { // 1 = OPEN
         connection.finish();
-        logger.info(`Closed Deepgram connection ${connectionId}`);
+        logger.info(`Closed Deepgram connection ${connectionId} (model: ${connectionData.model || 'unknown'})`);
       }
       
       // Clean up the connection
       this.activeConnections.delete(connectionId);
     } catch (error) {
       logger.error(`Error closing Deepgram connection: ${getErrorMessage(error)}`);
+      // Still clean up the connection even if closing failed
+      this.activeConnections.delete(connectionId);
     }
   }
 
@@ -485,27 +883,26 @@ export class DeepgramService extends EventEmitter {
   }
 
   /**
-   * Validate the Deepgram API key
+   * Validate the Deepgram API key and find compatible models
    * @returns Promise<boolean> - True if the API key is valid
    */
   public async validateApiKey(): Promise<boolean> {
     try {
-      // Use a simple API call to test if the key is valid
-      const circuitBreaker = getCircuitBreakerService().getCircuit(this.CIRCUIT_NAME);
+      // Use model compatibility service to validate and find compatible models
+      const compatibleModels = await this.modelCompatibilityService.getCompatibleModels(this.apiKey);
       
-      const result = await circuitBreaker.fire(async () => {
-        // Simple request to check if key is valid
-        await this.client.listen.prerecorded.transcribeUrl(
-          { url: 'https://res.cloudinary.com/dvfrcaw1c/video/upload/v1711698492/test-samples/test-sample-en.mp3' },
-          { model: 'nova-2', language: 'en' }
-        );
-        return true;
-      });
+      if (compatibleModels.length === 0) {
+        logger.error('Deepgram API key validation failed: No compatible models found');
+        return false;
+      }
       
-      logger.info('Deepgram API key validation successful');
+      // Update our fallback models based on what's available
+      this.fallbackModels = compatibleModels.filter(model => model !== this.defaultModel);
+      
+      logger.info(`Deepgram API key validation successful. Compatible models: [${compatibleModels.join(', ')}]`);
       return true;
     } catch (error) {
-      logger.error(`Deepgram API key validation failed: ${error}`);
+      logger.error(`Deepgram API key validation failed: ${getErrorMessage(error)}`);
       return false;
     }
   }
@@ -515,7 +912,7 @@ export class DeepgramService extends EventEmitter {
 let deepgramServiceInstance: DeepgramService | null = null;
 
 /**
- * Initialize the Deepgram Service
+ * Initialize the Deepgram Service with model compatibility support
  * @param apiKey Deepgram API key
  * @returns Service instance
  */

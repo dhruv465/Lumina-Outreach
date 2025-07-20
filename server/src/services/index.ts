@@ -205,6 +205,20 @@ export {
   AdvancedCampaignService
 };
 
+// Export Model Compatibility Service
+export { 
+  ModelCompatibilityService,
+  initializeModelCompatibilityService,
+  getModelCompatibilityService
+} from './modelCompatibilityService';
+
+// Export Deepgram Validation Service
+export {
+  DeepgramValidationService,
+  initializeDeepgramValidationService,
+  getDeepgramValidationService
+} from './deepgramValidationService';
+
 // Export service instances
 export {
   advancedTelephonyService,

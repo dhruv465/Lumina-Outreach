@@ -790,8 +790,12 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
         config.deepgramConfig = {
           apiKey: '',
           isEnabled: false,
-          model: 'nova-2',
+          primaryModel: 'nova-2',
+          fallbackModels: ['nova', 'base'],
+          autoFallback: true,
           tier: 'enhanced',
+          retryAttempts: 3,
+          timeoutMs: 30000,
           status: 'unverified'
         };
       }
@@ -810,6 +814,50 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
               error: validation.error 
             });
           }
+
+          // Enhanced validation using model compatibility service
+          try {
+            const { initializeModelCompatibilityService } = await import('../services/modelCompatibilityService');
+            const compatibilityService = initializeModelCompatibilityService(updatedConfig.deepgramConfig.apiKey);
+            
+            // Test basic API access with a simple model validation
+            const testModel = updatedConfig.deepgramConfig.primaryModel || 'base';
+            const modelValidation = await compatibilityService.validateModelAccess(
+              updatedConfig.deepgramConfig.apiKey, 
+              testModel
+            );
+            
+            if (!modelValidation.isValid) {
+              logger.warn(`Primary model ${testModel} validation failed: ${modelValidation.error}`);
+              
+              // Try to find a compatible model automatically
+              const compatibleModels = await compatibilityService.getCompatibleModels(updatedConfig.deepgramConfig.apiKey);
+              
+              if (compatibleModels.length === 0) {
+                return res.status(400).json({
+                  message: 'Deepgram API key is valid but no compatible models found',
+                  error: 'No accessible models for this account'
+                });
+              }
+              
+              // Auto-suggest the best available model
+              logger.info(`Auto-selecting compatible model: ${compatibleModels[0]}`);
+              updatedConfig.deepgramConfig.primaryModel = compatibleModels[0];
+              updatedConfig.deepgramConfig.fallbackModels = compatibleModels.slice(1, 4); // Up to 3 fallbacks
+            }
+            
+            // Get account capabilities for enhanced configuration
+            const capabilities = await compatibilityService.getAccountCapabilities(updatedConfig.deepgramConfig.apiKey);
+            updatedConfig.deepgramConfig.tier = capabilities.tier;
+            updatedConfig.deepgramConfig.availableModels = capabilities.availableModels;
+            
+            logger.info(`Deepgram account validated: ${capabilities.tier} tier with ${capabilities.availableModels.length} models`);
+            
+          } catch (validationError) {
+            logger.warn(`Enhanced Deepgram validation failed: ${getErrorMessage(validationError)}`);
+            // Continue with basic validation - don't block configuration update
+          }
+          
           logger.info('Deepgram API key provided and validated, will update configuration');
         }
       }
@@ -818,11 +866,21 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
         ...existingConfig.deepgramConfig,
         apiKey: updateApiKeyIfChanged(updatedConfig.deepgramConfig.apiKey, existingConfig.deepgramConfig?.apiKey || ''),
         isEnabled: handleFieldUpdate(updatedConfig.deepgramConfig.isEnabled, existingConfig.deepgramConfig?.isEnabled || false),
-        model: handleFieldUpdate(updatedConfig.deepgramConfig.model, existingConfig.deepgramConfig?.model || 'nova-2'),
+        primaryModel: handleFieldUpdate(updatedConfig.deepgramConfig.primaryModel, existingConfig.deepgramConfig?.primaryModel || 'nova-2'),
+        fallbackModels: handleFieldUpdate(updatedConfig.deepgramConfig.fallbackModels, existingConfig.deepgramConfig?.fallbackModels || ['nova', 'base']),
+        autoFallback: handleFieldUpdate(updatedConfig.deepgramConfig.autoFallback, existingConfig.deepgramConfig?.autoFallback ?? true),
         tier: handleFieldUpdate(updatedConfig.deepgramConfig.tier, existingConfig.deepgramConfig?.tier || 'enhanced'),
+        availableModels: handleFieldUpdate(updatedConfig.deepgramConfig.availableModels, existingConfig.deepgramConfig?.availableModels || []),
+        retryAttempts: handleFieldUpdate(updatedConfig.deepgramConfig.retryAttempts, existingConfig.deepgramConfig?.retryAttempts || 3),
+        timeoutMs: handleFieldUpdate(updatedConfig.deepgramConfig.timeoutMs, existingConfig.deepgramConfig?.timeoutMs || 30000),
         status: updatedConfig.deepgramConfig.apiKey && updatedConfig.deepgramConfig.apiKey.trim() !== '' 
-          ? 'verified'  // Set to verified if API key is provided (can be enhanced with actual validation)
-          : existingConfig.deepgramConfig?.status || 'unverified'
+          && !enhancedIsMaskedApiKey(updatedConfig.deepgramConfig.apiKey)
+          ? 'verified'  // Set to verified if API key is provided and validated
+          : existingConfig.deepgramConfig?.status || 'unverified',
+        lastModelValidation: updatedConfig.deepgramConfig.apiKey && updatedConfig.deepgramConfig.apiKey.trim() !== '' 
+          && !enhancedIsMaskedApiKey(updatedConfig.deepgramConfig.apiKey)
+          ? new Date()
+          : existingConfig.deepgramConfig?.lastModelValidation
       };
       
       // Mark deepgramConfig as modified
@@ -831,7 +889,10 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
       logger.info('Deepgram configuration updated:', {
         isEnabled: config.deepgramConfig.isEnabled,
         hasApiKey: !!config.deepgramConfig.apiKey,
-        model: config.deepgramConfig.model,
+        primaryModel: config.deepgramConfig.primaryModel,
+        fallbackModels: config.deepgramConfig.fallbackModels,
+        availableModels: config.deepgramConfig.availableModels?.length || 0,
+        autoFallback: config.deepgramConfig.autoFallback,
         tier: config.deepgramConfig.tier,
         status: config.deepgramConfig.status
       });
@@ -1971,6 +2032,433 @@ export const makeTestCall = async (req: Request, res: Response) => {
       success: false,
       message: errorMessage,
       details: errorDetails
+    });
+  }
+};
+// @desc    Auto-configure Deepgram model
+// @route   POST /api/configuration/deepgram/auto-configure
+// @access  Private
+export const autoConfigureDeepgramModel = async (_req: Request, res: Response) => {
+  try {
+    logger.info('Starting Deepgram auto-configuration...');
+    
+    const { getDeepgramAutoConfigService } = await import('../services/deepgramAutoConfigService');
+    const autoConfigService = getDeepgramAutoConfigService();
+    
+    // Perform auto-configuration
+    const result = await autoConfigService.autoConfigureOptimalModel();
+    
+    if (result.success) {
+      logger.info(`Deepgram auto-configuration successful: ${result.model}`);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Deepgram model auto-configured successfully',
+        data: {
+          model: result.model,
+          previousModel: result.previousModel,
+          accountTier: result.accountTier,
+          availableModels: result.availableModels,
+          fallbackModels: result.fallbackModels,
+          warnings: result.warnings
+        }
+      });
+    } else {
+      logger.error(`Deepgram auto-configuration failed: ${result.error}`);
+      
+      res.status(400).json({
+        success: false,
+        message: 'Deepgram auto-configuration failed',
+        error: result.error,
+        warnings: result.warnings
+      });
+    }
+    
+  } catch (error) {
+    const errorMessage = handleError(error);
+    logger.error(`Deepgram auto-configuration error: ${errorMessage}`);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during auto-configuration',
+      error: errorMessage
+    });
+  }
+};
+
+// @desc    Validate Deepgram model configuration
+// @route   POST /api/configuration/deepgram/validate
+// @access  Private
+export const validateDeepgramConfiguration = async (_req: Request, res: Response) => {
+  try {
+    logger.info('Validating Deepgram configuration...');
+    
+    const { getDeepgramAutoConfigService } = await import('../services/deepgramAutoConfigService');
+    const autoConfigService = getDeepgramAutoConfigService();
+    
+    // Force immediate validation
+    const result = await autoConfigService.forceValidation();
+    
+    if (result.isValid) {
+      logger.info(`Deepgram validation successful for model: ${result.model}`);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Deepgram configuration is valid',
+        data: {
+          model: result.model,
+          timestamp: result.timestamp,
+          isValid: true
+        }
+      });
+    } else {
+      logger.warn(`Deepgram validation failed for model ${result.model}: ${result.error}`);
+      
+      res.status(400).json({
+        success: false,
+        message: 'Deepgram configuration validation failed',
+        data: {
+          model: result.model,
+          timestamp: result.timestamp,
+          isValid: false,
+          error: result.error,
+          suggestedAction: result.suggestedAction
+        }
+      });
+    }
+    
+  } catch (error) {
+    const errorMessage = handleError(error);
+    logger.error(`Deepgram validation error: ${errorMessage}`);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during validation',
+      error: errorMessage
+    });
+  }
+};
+
+// @desc    Get Deepgram validation status
+// @route   GET /api/configuration/deepgram/status
+// @access  Private
+export const getDeepgramValidationStatus = async (_req: Request, res: Response) => {
+  try {
+    const { getDeepgramAutoConfigService } = await import('../services/deepgramAutoConfigService');
+    const autoConfigService = getDeepgramAutoConfigService();
+    
+    // Get current validation status
+    const status = await autoConfigService.getValidationStatus();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Deepgram validation status retrieved',
+      data: status
+    });
+    
+  } catch (error) {
+    const errorMessage = handleError(error);
+    logger.error(`Error getting Deepgram validation status: ${errorMessage}`);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error getting validation status',
+      error: errorMessage
+    });
+  }
+};
+
+// @desc    Test Deepgram model compatibility
+// @route   POST /api/configuration/deepgram/test-model
+// @access  Private
+export const testDeepgramModelCompatibility = async (req: Request, res: Response) => {
+  try {
+    const { model } = req.body;
+    
+    if (!model) {
+      return res.status(400).json({
+        success: false,
+        message: 'Model name is required'
+      });
+    }
+    
+    logger.info(`Testing Deepgram model compatibility: ${model}`);
+    
+    // Get current configuration
+    const config = await Configuration.findOne();
+    if (!config || !config.deepgramConfig?.apiKey) {
+      return res.status(400).json({
+        success: false,
+        message: 'Deepgram API key not configured'
+      });
+    }
+    
+    const { getModelCompatibilityService } = await import('../services/modelCompatibilityService');
+    const compatibilityService = getModelCompatibilityService();
+    
+    if (!compatibilityService) {
+      return res.status(500).json({
+        success: false,
+        message: 'Model compatibility service not initialized'
+      });
+    }
+    
+    // Test model compatibility
+    const result = await compatibilityService.validateModelAccess(config.deepgramConfig.apiKey, model);
+    
+    if (result.isValid) {
+      logger.info(`Model ${model} is compatible`);
+      
+      res.status(200).json({
+        success: true,
+        message: `Model ${model} is compatible`,
+        data: {
+          model: result.model,
+          tier: result.tier,
+          isValid: true
+        }
+      });
+    } else {
+      logger.warn(`Model ${model} is not compatible: ${result.error}`);
+      
+      res.status(400).json({
+        success: false,
+        message: `Model ${model} is not compatible`,
+        data: {
+          model: result.model,
+          tier: result.tier,
+          isValid: false,
+          error: result.error,
+          suggestedAlternatives: result.suggestedAlternatives
+        }
+      });
+    }
+    
+  } catch (error) {
+    const errorMessage = handleError(error);
+    logger.error(`Error testing model compatibility: ${errorMessage}`);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during model compatibility test',
+      error: errorMessage
+    });
+  }
+};
+
+// @desc    Get suggested models based on account capabilities
+// @route   GET /api/configuration/deepgram/suggested-models
+// @access  Private
+export const getSuggestedDeepgramModels = async (req: Request, res: Response) => {
+  try {
+    logger.info('Getting suggested Deepgram models...');
+    
+    // Get current configuration
+    const config = await Configuration.findOne();
+    if (!config || !config.deepgramConfig?.apiKey) {
+      return res.status(400).json({
+        success: false,
+        message: 'Deepgram API key not configured'
+      });
+    }
+    
+    const { getDeepgramConfigValidator } = await import('../services/deepgramConfigValidator');
+    const configValidator = getDeepgramConfigValidator();
+    
+    // Get query parameters for preferences
+    const useCase = req.query.useCase as 'general' | 'meeting' | 'phone' || 'general';
+    const language = req.query.language as string || 'en';
+    const prioritizeAccuracy = req.query.prioritizeAccuracy === 'true';
+    const prioritizeSpeed = req.query.prioritizeSpeed === 'true';
+    const prioritizeCost = req.query.prioritizeCost === 'true';
+    
+    // Get optimal configuration suggestions
+    const optimalConfig = await configValidator.suggestOptimalConfiguration(
+      config.deepgramConfig.apiKey,
+      {
+        useCase,
+        language,
+        prioritizeAccuracy,
+        prioritizeSpeed,
+        prioritizeCost
+      }
+    );
+    
+    logger.info(`Generated optimal configuration suggestions for ${useCase} use case`);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Suggested models retrieved successfully',
+      data: {
+        primaryModel: optimalConfig.config.model,
+        fallbackModels: optimalConfig.config.fallbackModels || [],
+        accountTier: optimalConfig.config.accountTier,
+        availableModels: optimalConfig.config.availableModels || [],
+        reasoning: optimalConfig.reasoning,
+        warnings: optimalConfig.warnings,
+        configuration: {
+          language: optimalConfig.config.language,
+          autoFallback: optimalConfig.config.autoFallback,
+          punctuate: optimalConfig.config.punctuate,
+          diarize: optimalConfig.config.diarize,
+          endpointing: optimalConfig.config.endpointing,
+          utteranceEndMs: optimalConfig.config.utteranceEndMs
+        }
+      }
+    });
+    
+  } catch (error) {
+    const errorMessage = handleError(error);
+    logger.error(`Error getting suggested models: ${errorMessage}`);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error getting suggested models',
+      error: errorMessage
+    });
+  }
+};
+
+// @desc    Validate complete Deepgram configuration
+// @route   POST /api/configuration/deepgram/validate-config
+// @access  Private
+export const validateCompleteDeepgramConfiguration = async (req: Request, res: Response) => {
+  try {
+    logger.info('Validating complete Deepgram configuration...');
+    
+    // Get current configuration
+    const config = await Configuration.findOne();
+    if (!config || !config.deepgramConfig?.apiKey) {
+      return res.status(400).json({
+        success: false,
+        message: 'Deepgram API key not configured'
+      });
+    }
+    
+    const { getDeepgramConfigValidator } = await import('../services/deepgramConfigValidator');
+    const configValidator = getDeepgramConfigValidator();
+    
+    // Prepare configuration for validation
+    const configForValidation = {
+      apiKey: config.deepgramConfig.apiKey,
+      model: config.deepgramConfig.primaryModel,
+      language: req.body.language || 'en',
+      fallbackModels: config.deepgramConfig.fallbackModels,
+      accountTier: config.deepgramConfig.tier,
+      availableModels: config.deepgramConfig.availableModels,
+      autoFallback: config.deepgramConfig.autoFallback,
+      status: config.deepgramConfig.status,
+      lastModelValidation: config.deepgramConfig.lastModelValidation,
+      lastError: config.deepgramConfig.lastError,
+      ...req.body // Allow override of specific settings for validation
+    };
+    
+    // Validate the configuration
+    const validationResult = await configValidator.validateConfiguration(configForValidation);
+    
+    logger.info(`Configuration validation completed: ${validationResult.isValid ? 'PASSED' : 'FAILED'}`);
+    
+    res.status(validationResult.isValid ? 200 : 400).json({
+      success: validationResult.isValid,
+      message: validationResult.isValid 
+        ? 'Deepgram configuration is valid' 
+        : 'Deepgram configuration has issues',
+      data: {
+        isValid: validationResult.isValid,
+        issues: validationResult.issues,
+        suggestions: validationResult.suggestions,
+        accountInfo: validationResult.accountInfo
+      }
+    });
+    
+  } catch (error) {
+    const errorMessage = handleError(error);
+    logger.error(`Error validating complete configuration: ${errorMessage}`);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during configuration validation',
+      error: errorMessage
+    });
+  }
+};
+
+// @desc    Batch test multiple models
+// @route   POST /api/configuration/deepgram/batch-test-models
+// @access  Private
+export const batchTestDeepgramModels = async (req: Request, res: Response) => {
+  try {
+    const { models } = req.body;
+    
+    if (!models || !Array.isArray(models) || models.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Models array is required and must not be empty'
+      });
+    }
+    
+    if (models.length > 10) {
+      return res.status(400).json({
+        success: false,
+        message: 'Maximum 10 models can be tested at once'
+      });
+    }
+    
+    logger.info(`Batch testing ${models.length} Deepgram models: ${models.join(', ')}`);
+    
+    // Get current configuration
+    const config = await Configuration.findOne();
+    if (!config || !config.deepgramConfig?.apiKey) {
+      return res.status(400).json({
+        success: false,
+        message: 'Deepgram API key not configured'
+      });
+    }
+    
+    const { getDeepgramConfigValidator } = await import('../services/deepgramConfigValidator');
+    const configValidator = getDeepgramConfigValidator();
+    
+    // Batch test models
+    const testResults = await configValidator.batchTestModels(config.deepgramConfig.apiKey, models);
+    
+    // Convert Map to object for JSON response
+    const resultsObject: { [key: string]: any } = {};
+    testResults.forEach((result, model) => {
+      resultsObject[model] = result;
+    });
+    
+    // Calculate summary statistics
+    const totalModels = models.length;
+    const accessibleModels = Array.from(testResults.values()).filter(result => result.isAccessible).length;
+    const averageResponseTime = Array.from(testResults.values())
+      .filter(result => result.responseTime)
+      .reduce((sum, result) => sum + (result.responseTime || 0), 0) / totalModels;
+    
+    logger.info(`Batch testing completed: ${accessibleModels}/${totalModels} models accessible`);
+    
+    res.status(200).json({
+      success: true,
+      message: `Batch testing completed for ${totalModels} models`,
+      data: {
+        results: resultsObject,
+        summary: {
+          totalModels,
+          accessibleModels,
+          inaccessibleModels: totalModels - accessibleModels,
+          averageResponseTime: Math.round(averageResponseTime),
+          successRate: Math.round((accessibleModels / totalModels) * 100)
+        }
+      }
+    });
+    
+  } catch (error) {
+    const errorMessage = handleError(error);
+    logger.error(`Error in batch model testing: ${errorMessage}`);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during batch model testing',
+      error: errorMessage
     });
   }
 };

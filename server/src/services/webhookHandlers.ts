@@ -139,7 +139,9 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
       deepgramConfig: {
         isEnabled: configuration?.deepgramConfig?.isEnabled,
         hasApiKey: !!configuration?.deepgramConfig?.apiKey,
-        model: configuration?.deepgramConfig?.model
+        primaryModel: configuration?.deepgramConfig?.primaryModel,
+        fallbackModels: configuration?.deepgramConfig?.fallbackModels,
+        autoFallback: configuration?.deepgramConfig?.autoFallback
       },
       elevenLabsConfig: {
         isEnabled: configuration?.elevenLabsConfig?.isEnabled,

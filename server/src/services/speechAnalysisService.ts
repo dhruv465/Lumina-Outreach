@@ -2,6 +2,9 @@ import axios from 'axios';
 import { logger } from '../index';
 import { createClient } from '@deepgram/sdk';
 import { getErrorMessage } from '../utils/logger';
+import { ModelCompatibilityService, ModelValidationResult, ModelPreferences } from './modelCompatibilityService';
+import { deepgramErrorHandler, ErrorClassificationResult } from './deepgramErrorHandler';
+import { DeepgramErrorType } from '../types/deepgram';
 
 export interface SpeechAnalysis {
   transcript: string;
@@ -42,6 +45,11 @@ export class SpeechAnalysisService {
   private googleSpeechKey?: string;
   private deepgramApiKey?: string;
   private deepgramClient?: any;
+  private modelCompatibilityService?: ModelCompatibilityService;
+  private currentModel: string = 'nova-2';
+  private fallbackModels: string[] = ['nova', 'base', 'base-general'];
+  private modelValidationCache: Map<string, { isValid: boolean; timestamp: number }> = new Map();
+  private readonly VALIDATION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor(openAIApiKey: string, googleSpeechKey?: string, deepgramApiKey?: string) {
     this.openAIApiKey = openAIApiKey;
@@ -50,6 +58,7 @@ export class SpeechAnalysisService {
     
     if (deepgramApiKey) {
       this.initializeDeepgram(deepgramApiKey);
+      this.initializeModelCompatibilityService(deepgramApiKey);
     }
   }
 
@@ -75,6 +84,19 @@ export class SpeechAnalysisService {
   }
 
   /**
+   * Initialize Model Compatibility Service for handling model fallbacks
+   */
+  private initializeModelCompatibilityService(apiKey: string): void {
+    try {
+      this.modelCompatibilityService = new ModelCompatibilityService(apiKey);
+      logger.info('Model Compatibility Service initialized successfully');
+    } catch (error) {
+      logger.error(`Failed to initialize Model Compatibility Service: ${getErrorMessage(error)}`);
+      this.modelCompatibilityService = undefined;
+    }
+  }
+
+  /**
    * Check if Deepgram is properly configured and ready to use
    */
   public isDeepgramConfigured(): boolean {
@@ -94,6 +116,9 @@ export class SpeechAnalysisService {
     if (deepgramApiKey) {
       this.deepgramApiKey = deepgramApiKey;
       this.initializeDeepgram(deepgramApiKey);
+      this.initializeModelCompatibilityService(deepgramApiKey);
+      // Clear validation cache when API key changes
+      this.modelValidationCache.clear();
     }
     logger.info('SpeechAnalysisService API keys updated');
   }
@@ -117,6 +142,165 @@ export class SpeechAnalysisService {
    */
   public getDeepgramApiKey(): string | undefined {
     return this.deepgramApiKey;
+  }
+
+  /**
+   * Validate model access with caching to avoid repeated API calls
+   */
+  private async validateModelAccess(model: string): Promise<boolean> {
+    if (!this.modelCompatibilityService || !this.deepgramApiKey) {
+      return false;
+    }
+
+    const cacheKey = `${model}-${this.deepgramApiKey.slice(-8)}`;
+    const cached = this.modelValidationCache.get(cacheKey);
+    
+    // Return cached result if still valid
+    if (cached && (Date.now() - cached.timestamp) < this.VALIDATION_CACHE_TTL) {
+      logger.debug(`Using cached validation result for model ${model}: ${cached.isValid}`);
+      return cached.isValid;
+    }
+
+    try {
+      const validation = await this.modelCompatibilityService.validateModelAccess(this.deepgramApiKey, model);
+      
+      // Cache the result
+      this.modelValidationCache.set(cacheKey, {
+        isValid: validation.isValid,
+        timestamp: Date.now()
+      });
+
+      logger.info(`Model ${model} validation result: ${validation.isValid}`, {
+        tier: validation.tier,
+        alternatives: validation.suggestedAlternatives
+      });
+
+      return validation.isValid;
+    } catch (error) {
+      logger.warn(`Model validation failed for ${model}: ${getErrorMessage(error)}`);
+      
+      // Cache negative result for shorter time
+      this.modelValidationCache.set(cacheKey, {
+        isValid: false,
+        timestamp: Date.now()
+      });
+      
+      return false;
+    }
+  }
+
+  /**
+   * Select the best available model based on preferences and account capabilities
+   */
+  private async selectBestAvailableModel(preferredModel?: string): Promise<string> {
+    if (!this.modelCompatibilityService || !this.deepgramApiKey) {
+      logger.warn('Model compatibility service not available, using fallback model');
+      return 'base';
+    }
+
+    try {
+      // Get all compatible models for the account
+      const compatibleModels = await this.modelCompatibilityService.getCompatibleModels(this.deepgramApiKey);
+      
+      if (compatibleModels.length === 0) {
+        logger.warn('No compatible models found, using ultimate fallback');
+        return 'base';
+      }
+
+      // Define preferences for speech analysis use case
+      const preferences: ModelPreferences = {
+        preferredModels: preferredModel ? [preferredModel, ...this.fallbackModels] : [this.currentModel, ...this.fallbackModels],
+        useCase: 'phone', // Optimized for phone call transcription
+        language: 'en',
+        realtime: true
+      };
+
+      const selectedModel = this.modelCompatibilityService.selectBestModel(compatibleModels, preferences);
+      
+      logger.info(`Selected best available model: ${selectedModel}`, {
+        compatibleModels: compatibleModels.length,
+        preferredModel,
+        fallbackUsed: selectedModel !== (preferredModel || this.currentModel)
+      });
+
+      return selectedModel;
+    } catch (error) {
+      logger.error(`Error selecting best model: ${getErrorMessage(error)}`);
+      return 'base'; // Ultimate fallback
+    }
+  }
+
+  /**
+   * Handle model compatibility errors and implement fallback logic
+   */
+  private async handleModelCompatibilityError(error: any, currentModel: string): Promise<string> {
+    if (!this.modelCompatibilityService) {
+      logger.warn('Model compatibility service not available for error handling');
+      return this.fallbackModels[0] || 'base';
+    }
+
+    try {
+      // Classify the error to determine appropriate response
+      const classification: ErrorClassificationResult = deepgramErrorHandler.classifyError(error);
+      
+      logger.warn('Handling model compatibility error', {
+        currentModel,
+        errorType: classification.errorType,
+        isRecoverable: classification.isRecoverable,
+        suggestedAction: classification.suggestedAction
+      });
+
+      // Use model compatibility service to get fallback model
+      const fallbackModel = this.modelCompatibilityService.handleModelFallback(currentModel, error);
+      
+      // Validate the fallback model before using it
+      const isFallbackValid = await this.validateModelAccess(fallbackModel);
+      
+      if (isFallbackValid) {
+        logger.info(`Successfully selected fallback model: ${fallbackModel}`, {
+          originalModel: currentModel,
+          errorType: classification.errorType
+        });
+        return fallbackModel;
+      } else {
+        // If suggested fallback is also invalid, try our predefined fallback chain
+        for (const model of this.fallbackModels) {
+          const isValid = await this.validateModelAccess(model);
+          if (isValid) {
+            logger.info(`Using predefined fallback model: ${model}`, {
+              originalModel: currentModel,
+              suggestedFallback: fallbackModel
+            });
+            return model;
+          }
+        }
+        
+        // Ultimate fallback
+        logger.warn('All fallback models failed validation, using ultimate fallback: base');
+        return 'base';
+      }
+    } catch (fallbackError) {
+      logger.error(`Error in fallback handling: ${getErrorMessage(fallbackError)}`);
+      return 'base'; // Ultimate fallback
+    }
+  }
+
+  /**
+   * Ensure consistent user experience during model transitions
+   */
+  private logModelTransition(fromModel: string, toModel: string, reason: string): void {
+    if (fromModel !== toModel) {
+      logger.info('Model transition occurred', {
+        fromModel,
+        toModel,
+        reason,
+        timestamp: new Date().toISOString(),
+        userImpact: 'Transcription continues with alternative model'
+      });
+      
+      // This could be extended to emit events for UI notifications
+      // or to update user-facing status indicators
+    }
   }
 
   /**
@@ -215,11 +399,15 @@ export class SpeechAnalysisService {
     }
   }
 
-  // Speech-to-Text with Language Detection using Deepgram Nova-2
+  // Speech-to-Text with Language Detection using Deepgram with Model Compatibility
   async transcribeAudio(
     audioBuffer: Buffer,
     language?: 'English' | 'Hindi'
-  ): Promise<{ transcript: string; language: string; confidence: number; hasVoiceActivity: boolean }> {
+  ): Promise<{ transcript: string; language: string; confidence: number; hasVoiceActivity: boolean; modelUsed?: string; fallbackUsed?: boolean }> {
+    const startTime = Date.now();
+    let modelUsed = this.currentModel;
+    let fallbackUsed = false;
+
     try {
       // Check if Deepgram is properly configured
       if (!this.isDeepgramConfigured()) {
@@ -228,43 +416,85 @@ export class SpeechAnalysisService {
         throw new Error(errorMsg);
       }
 
-      logger.info(`🔧 UPDATED SpeechAnalysisService - Using Deepgram Nova-2 for transcription with API key length: ${this.deepgramApiKey!.length}`);
-      
       // Check for voice activity first to avoid unnecessary API calls
       const hasVoiceActivity = this.detectVoiceActivity(audioBuffer);
       
       logger.info(`🔊 Voice Activity Check: ${hasVoiceActivity ? 'DETECTED' : 'NOT DETECTED'} for buffer size ${audioBuffer.length} bytes`);
       
-      // Temporarily disable early return to debug Deepgram responses
-      // if (!hasVoiceActivity) {
-      //   logger.debug('No voice activity detected, skipping transcription');
-      //   return {
-      //     transcript: '',
-      //     language: language || 'English',
-      //     confidence: 0,
-      //     hasVoiceActivity: false
-      //   };
-      // }
+      // Select the best available model for transcription
+      const selectedModel = await this.selectBestAvailableModel();
+      modelUsed = selectedModel;
+      
+      if (selectedModel !== this.currentModel) {
+        fallbackUsed = true;
+        this.logModelTransition(this.currentModel, selectedModel, 'Model compatibility check');
+      }
+
+      logger.info(`🔧 Using Deepgram model: ${selectedModel} for transcription (fallback: ${fallbackUsed})`);
       
       // Convert μ-law audio from Twilio to PCM format for better Deepgram compatibility
       const processedAudioBuffer = this.convertMuLawToPCM(audioBuffer);
       
       logger.info(`🎵 Audio Conversion: μ-law ${audioBuffer.length} bytes → WAV ${processedAudioBuffer.length} bytes`);
       
-      // Prepare transcription options for Deepgram v4 - optimized for real-time audio
-      const options = {
-        model: 'nova-2',
-        smart_format: true,
-        language: 'en', // Force English for now to avoid language detection issues
-        punctuate: true,
-        // Simplified options for better compatibility
-        tier: 'enhanced'
+      // Attempt transcription with error handling and fallback
+      return await this.attemptTranscriptionWithFallback(
+        processedAudioBuffer,
+        audioBuffer,
+        selectedModel,
+        language,
+        hasVoiceActivity,
+        startTime
+      );
+
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logger.error(`Error transcribing audio after ${duration}ms: ${getErrorMessage(error)}`);
+      
+      // Return a result indicating failure but with voice activity info
+      return {
+        transcript: '',
+        language: language || 'English',
+        confidence: 0,
+        hasVoiceActivity: this.detectVoiceActivity(audioBuffer),
+        modelUsed,
+        fallbackUsed
       };
+    }
+  }
+
+  /**
+   * Attempt transcription with automatic model fallback on errors
+   */
+  private async attemptTranscriptionWithFallback(
+    processedAudioBuffer: Buffer,
+    originalAudioBuffer: Buffer,
+    initialModel: string,
+    language?: 'English' | 'Hindi',
+    hasVoiceActivity: boolean = true,
+    startTime: number = Date.now()
+  ): Promise<{ transcript: string; language: string; confidence: number; hasVoiceActivity: boolean; modelUsed?: string; fallbackUsed?: boolean }> {
+    let currentModel = initialModel;
+    let fallbackUsed = initialModel !== this.currentModel;
+    const maxAttempts = 3;
+    let attempt = 0;
+
+    while (attempt < maxAttempts) {
+      attempt++;
       
       try {
-        // Use the Deepgram SDK v4 API with proper audio format specification
-        logger.info(`🚀 Sending ${processedAudioBuffer.length} bytes to Deepgram API`);
+        logger.info(`🚀 Transcription attempt ${attempt}/${maxAttempts} with model: ${currentModel}`);
         
+        // Prepare transcription options optimized for the selected model
+        const options = {
+          model: currentModel,
+          smart_format: true,
+          language: 'en', // Force English for now to avoid language detection issues
+          punctuate: true,
+          tier: this.getTierForModel(currentModel)
+        };
+        
+        // Attempt transcription with current model
         const response = await this.deepgramClient.listen.prerecorded.transcribeFile(
           processedAudioBuffer,
           {
@@ -273,143 +503,357 @@ export class SpeechAnalysisService {
           }
         );
         
-        logger.info(`📥 Deepgram API Response received:`, {
-          hasResponse: !!response,
-          hasResult: !!response?.result,
-          responseKeys: response ? Object.keys(response) : [],
-          resultKeys: response?.result ? Object.keys(response.result) : [],
-          error: response?.error ? response.error : null,
-          fullResponse: JSON.stringify(response, null, 2)
-        });
+        // Extract and validate response
+        const result = this.extractTranscriptionResult(response, language, hasVoiceActivity, currentModel, fallbackUsed);
         
-        // Extract the transcript from response with better error handling
-        const channels = response.result?.results?.channels;
-        const alternatives = channels?.[0]?.alternatives;
-        const transcript = alternatives?.[0]?.transcript || '';
-        const confidence = alternatives?.[0]?.confidence || 0;
+        const duration = Date.now() - startTime;
+        logger.info(`🎯 Transcription successful with model ${currentModel} after ${duration}ms: "${result.transcript}"`);
         
-        // Debug logging for Deepgram response
-        logger.info(`🔍 Deepgram Response Debug:`, {
-          hasResult: !!response.result,
-          hasChannels: !!channels,
-          channelCount: channels?.length || 0,
-          hasAlternatives: !!alternatives,
-          alternativeCount: alternatives?.length || 0,
-          transcript: transcript,
-          confidence: confidence,
-          rawResponse: JSON.stringify(response.result, null, 2)
-        });
+        return result;
+
+      } catch (error) {
+        logger.warn(`Transcription attempt ${attempt} failed with model ${currentModel}: ${getErrorMessage(error)}`);
         
-        // Get detected language or use the provided one
-        let detectedLanguage: 'English' | 'Hindi';
-        if (response.result?.results?.channels?.[0]?.detected_language === 'hi') {
-          detectedLanguage = 'Hindi';
-        } else {
-          detectedLanguage = 'English';
+        // Classify the error to determine if we should try fallback
+        const classification = deepgramErrorHandler.classifyError(error);
+        
+        if (attempt === maxAttempts || !classification.isRecoverable) {
+          // If this is the last attempt or error is not recoverable, try format fallback
+          if (attempt < maxAttempts) {
+            logger.info('Attempting format fallback with μ-law audio');
+            return await this.attemptFormatFallback(originalAudioBuffer, currentModel, language, hasVoiceActivity, fallbackUsed);
+          }
+          throw error;
         }
+
+        // Handle model compatibility error and get fallback model
+        const fallbackModel = await this.handleModelCompatibilityError(error, currentModel);
         
-        logger.info(`🎯 UPDATED SERVICE - Deepgram transcription completed successfully: "${transcript}" (Voice activity: ${hasVoiceActivity ? 'YES' : 'NO'})`);
+        if (fallbackModel === currentModel) {
+          // If no different fallback model is available, try format fallback
+          logger.info('No different model available, attempting format fallback');
+          return await this.attemptFormatFallback(originalAudioBuffer, currentModel, language, hasVoiceActivity, fallbackUsed);
+        }
+
+        // Update model for next attempt
+        this.logModelTransition(currentModel, fallbackModel, `Error: ${classification.errorType}`);
+        currentModel = fallbackModel;
+        fallbackUsed = true;
         
-        return {
-          transcript,
-          language: detectedLanguage,
-          confidence,
-          hasVoiceActivity: true // We already confirmed voice activity above
-        };
-      } catch (deepgramError) {
-        logger.error(`Deepgram SDK error: ${getErrorMessage(deepgramError)}`);
-        logger.warn('Attempting fallback with raw μ-law audio');
-        
-        // Try with raw μ-law audio as a fallback
-        try {
-          const fallbackResponse = await this.deepgramClient.listen.prerecorded.transcribeFile(
-            audioBuffer, // Use original μ-law buffer
-            {
-              mimetype: 'audio/mulaw',
-              model: 'nova-2',
+        // Add delay between attempts to avoid rate limiting
+        if (attempt < maxAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // Exponential backoff, max 5s
+          logger.info(`Waiting ${delay}ms before retry attempt ${attempt + 1}`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    // This should not be reached, but TypeScript requires it
+    throw new Error('All transcription attempts failed');
+  }
+
+  /**
+   * Attempt transcription with different audio formats as fallback
+   */
+  private async attemptFormatFallback(
+    originalAudioBuffer: Buffer,
+    model: string,
+    language?: 'English' | 'Hindi',
+    hasVoiceActivity: boolean = true,
+    fallbackUsed: boolean = false
+  ): Promise<{ transcript: string; language: string; confidence: number; hasVoiceActivity: boolean; modelUsed?: string; fallbackUsed?: boolean }> {
+    
+    try {
+      logger.info('🔄 Attempting μ-law format fallback');
+      
+      const fallbackResponse = await this.deepgramClient.listen.prerecorded.transcribeFile(
+        originalAudioBuffer, // Use original μ-law buffer
+        {
+          mimetype: 'audio/mulaw',
+          model: model,
+          language: 'en',
+          smart_format: true,
+          punctuate: true,
+          tier: this.getTierForModel(model),
+          encoding: 'mulaw',
+          sample_rate: 8000,
+          channels: 1
+        }
+      );
+      
+      const result = this.extractTranscriptionResult(fallbackResponse, language, hasVoiceActivity, model, fallbackUsed);
+      logger.info(`🎯 μ-law format fallback successful: "${result.transcript}"`);
+      
+      return result;
+      
+    } catch (formatError) {
+      logger.error(`μ-law format fallback failed: ${getErrorMessage(formatError)}`);
+      
+      // Final fallback to direct API call
+      logger.warn('Attempting final direct API fallback');
+      
+      try {
+        const response = await axios.post(
+          'https://api.deepgram.com/v1/listen',
+          originalAudioBuffer,
+          {
+            params: {
+              model: model,
               language: 'en',
               smart_format: true,
               punctuate: true,
-              tier: 'enhanced',
-              encoding: 'mulaw',
-              sample_rate: 8000,
-              channels: 1
-            }
-          );
-          
-          logger.info(`🔄 Fallback μ-law transcription attempt completed`);
-          
-          const channels = fallbackResponse.result?.results?.channels;
-          const alternatives = channels?.[0]?.alternatives;
-          const transcript = alternatives?.[0]?.transcript || '';
-          const confidence = alternatives?.[0]?.confidence || 0;
-          
-          logger.info(`🎯 UPDATED SERVICE - Deepgram μ-law fallback completed: "${transcript}" (Voice activity: ${hasVoiceActivity ? 'YES' : 'NO'})`);
-          
-          return {
-            transcript,
-            language: 'English',
-            confidence,
-            hasVoiceActivity: true
-          };
-          
-        } catch (fallbackError) {
-          logger.error(`μ-law fallback also failed: ${getErrorMessage(fallbackError)}`);
-          
-          // Final fallback to direct API call with axios
-          logger.warn('Attempting final fallback to direct API call');
-          
-          const response = await axios.post(
-            'https://api.deepgram.com/v1/listen',
-            processedAudioBuffer,
-            {
-              params: {
-                model: 'nova-2',
-                language: 'en',
-                smart_format: true,
-                punctuate: true,
-                tier: 'enhanced'
-              },
-              headers: {
-                'Authorization': `Token ${this.deepgramApiKey}`,
-                'Content-Type': 'audio/wav',
-                'Accept': 'application/json'
-              },
-              timeout: 10000 // 10 second timeout
-            }
-          );
-        
-          // Extract the transcript from response
-          const transcript = response.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
-          const confidence = response.data?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
-          
-          // Get detected language or use the provided one
-          let detectedLanguage: 'English' | 'Hindi';
-          if (response.data?.results?.channels?.[0]?.detected_language === 'hi') {
-            detectedLanguage = 'Hindi';
-          } else {
-            detectedLanguage = 'English';
+              tier: this.getTierForModel(model)
+            },
+            headers: {
+              'Authorization': `Token ${this.deepgramApiKey}`,
+              'Content-Type': 'audio/mulaw',
+              'Accept': 'application/json'
+            },
+            timeout: 10000 // 10 second timeout
           }
-          
-          logger.info(`🎯 UPDATED SERVICE - Deepgram transcription completed via direct API: "${transcript}" (Voice activity: ${hasVoiceActivity ? 'YES' : 'NO'})`);
-          
-          return {
-            transcript,
-            language: detectedLanguage,
-            confidence,
-            hasVoiceActivity: true
-          };
-        }
+        );
+      
+        const result = this.extractTranscriptionResultFromAxios(response.data, language, hasVoiceActivity, model, fallbackUsed);
+        logger.info(`🎯 Direct API fallback successful: "${result.transcript}"`);
+        
+        return result;
+        
+      } catch (directApiError) {
+        logger.error(`Direct API fallback failed: ${getErrorMessage(directApiError)}`);
+        throw directApiError;
+      }
+    }
+  }
+
+  /**
+   * Extract transcription result from Deepgram SDK response
+   */
+  private extractTranscriptionResult(
+    response: any,
+    language?: 'English' | 'Hindi',
+    hasVoiceActivity: boolean = true,
+    modelUsed: string = this.currentModel,
+    fallbackUsed: boolean = false
+  ): { transcript: string; language: string; confidence: number; hasVoiceActivity: boolean; modelUsed?: string; fallbackUsed?: boolean } {
+    
+    const channels = response.result?.results?.channels;
+    const alternatives = channels?.[0]?.alternatives;
+    const transcript = alternatives?.[0]?.transcript || '';
+    const confidence = alternatives?.[0]?.confidence || 0;
+    
+    // Get detected language or use the provided one
+    let detectedLanguage: 'English' | 'Hindi';
+    if (response.result?.results?.channels?.[0]?.detected_language === 'hi') {
+      detectedLanguage = 'Hindi';
+    } else {
+      detectedLanguage = 'English';
+    }
+    
+    return {
+      transcript,
+      language: detectedLanguage,
+      confidence,
+      hasVoiceActivity,
+      modelUsed,
+      fallbackUsed
+    };
+  }
+
+  /**
+   * Extract transcription result from direct API response
+   */
+  private extractTranscriptionResultFromAxios(
+    responseData: any,
+    language?: 'English' | 'Hindi',
+    hasVoiceActivity: boolean = true,
+    modelUsed: string = this.currentModel,
+    fallbackUsed: boolean = false
+  ): { transcript: string; language: string; confidence: number; hasVoiceActivity: boolean; modelUsed?: string; fallbackUsed?: boolean } {
+    
+    const transcript = responseData?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+    const confidence = responseData?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
+    
+    // Get detected language or use the provided one
+    let detectedLanguage: 'English' | 'Hindi';
+    if (responseData?.results?.channels?.[0]?.detected_language === 'hi') {
+      detectedLanguage = 'Hindi';
+    } else {
+      detectedLanguage = 'English';
+    }
+    
+    return {
+      transcript,
+      language: detectedLanguage,
+      confidence,
+      hasVoiceActivity,
+      modelUsed,
+      fallbackUsed
+    };
+  }
+
+  /**
+   * Get appropriate tier setting for a given model
+   */
+  private getTierForModel(model: string): string {
+    // Map models to their appropriate tier settings
+    const tierMap: { [key: string]: string } = {
+      'nova-2': 'enhanced',
+      'nova-2-general': 'enhanced',
+      'nova-2-meeting': 'enhanced',
+      'nova-2-phonecall': 'enhanced',
+      'nova': 'base',
+      'nova-general': 'base',
+      'base': 'base',
+      'base-general': 'base'
+    };
+    
+    return tierMap[model] || 'base';
+  }
+
+  /**
+   * Update the preferred model and validate its availability
+   */
+  public async updatePreferredModel(model: string): Promise<{ success: boolean; actualModel: string; message: string }> {
+    try {
+      logger.info(`Updating preferred model from ${this.currentModel} to ${model}`);
+      
+      // Validate the new model
+      const isValid = await this.validateModelAccess(model);
+      
+      if (isValid) {
+        this.currentModel = model;
+        logger.info(`Successfully updated preferred model to ${model}`);
+        return {
+          success: true,
+          actualModel: model,
+          message: `Model updated to ${model}`
+        };
+      } else {
+        // Find the best available alternative
+        const alternativeModel = await this.selectBestAvailableModel(model);
+        this.currentModel = alternativeModel;
+        
+        logger.warn(`Requested model ${model} not available, using ${alternativeModel} instead`);
+        return {
+          success: false,
+          actualModel: alternativeModel,
+          message: `Requested model ${model} not available. Using ${alternativeModel} instead.`
+        };
       }
     } catch (error) {
-      logger.error(`Error transcribing audio: ${getErrorMessage(error)}`);
-      
-      // Return a result indicating failure but with voice activity info
+      logger.error(`Error updating preferred model: ${getErrorMessage(error)}`);
       return {
-        transcript: '',
-        language: language || 'English',
-        confidence: 0,
-        hasVoiceActivity: this.detectVoiceActivity(audioBuffer)
+        success: false,
+        actualModel: this.currentModel,
+        message: `Failed to update model: ${getErrorMessage(error)}`
+      };
+    }
+  }
+
+  /**
+   * Get current model status and compatibility information
+   */
+  public async getModelStatus(): Promise<{
+    currentModel: string;
+    isValid: boolean;
+    compatibleModels: string[];
+    accountTier?: string;
+    lastValidation?: Date;
+  }> {
+    try {
+      const isCurrentModelValid = await this.validateModelAccess(this.currentModel);
+      
+      let compatibleModels: string[] = [];
+      let accountTier: string | undefined;
+      
+      if (this.modelCompatibilityService && this.deepgramApiKey) {
+        compatibleModels = await this.modelCompatibilityService.getCompatibleModels(this.deepgramApiKey);
+        const capabilities = await this.modelCompatibilityService.getAccountCapabilities(this.deepgramApiKey);
+        accountTier = capabilities.tier;
+      }
+      
+      return {
+        currentModel: this.currentModel,
+        isValid: isCurrentModelValid,
+        compatibleModels,
+        accountTier,
+        lastValidation: new Date()
+      };
+    } catch (error) {
+      logger.error(`Error getting model status: ${getErrorMessage(error)}`);
+      return {
+        currentModel: this.currentModel,
+        isValid: false,
+        compatibleModels: [],
+        lastValidation: new Date()
+      };
+    }
+  }
+
+  /**
+   * Validate current configuration and suggest improvements
+   */
+  public async validateConfiguration(): Promise<{
+    isValid: boolean;
+    issues: string[];
+    recommendations: string[];
+    modelStatus: any;
+  }> {
+    const issues: string[] = [];
+    const recommendations: string[] = [];
+    
+    try {
+      // Check basic configuration
+      if (!this.isDeepgramConfigured()) {
+        issues.push('Deepgram is not properly configured');
+        recommendations.push('Check API key and client initialization');
+      }
+      
+      // Get model status
+      const modelStatus = await this.getModelStatus();
+      
+      if (!modelStatus.isValid) {
+        issues.push(`Current model ${modelStatus.currentModel} is not accessible`);
+        
+        if (modelStatus.compatibleModels.length > 0) {
+          recommendations.push(`Consider using one of these compatible models: ${modelStatus.compatibleModels.slice(0, 3).join(', ')}`);
+        } else {
+          recommendations.push('Check your Deepgram account status and API key permissions');
+        }
+      }
+      
+      // Check if using optimal model for account tier
+      if (modelStatus.accountTier && modelStatus.compatibleModels.length > 0) {
+        const optimalModel = modelStatus.compatibleModels[0]; // First model is typically the best available
+        if (this.currentModel !== optimalModel && modelStatus.compatibleModels.includes(optimalModel)) {
+          recommendations.push(`Consider upgrading to ${optimalModel} for better transcription quality`);
+        }
+      }
+      
+      const isValid = issues.length === 0;
+      
+      logger.info('Configuration validation completed', {
+        isValid,
+        issuesCount: issues.length,
+        recommendationsCount: recommendations.length,
+        currentModel: this.currentModel
+      });
+      
+      return {
+        isValid,
+        issues,
+        recommendations,
+        modelStatus
+      };
+    } catch (error) {
+      logger.error(`Configuration validation failed: ${getErrorMessage(error)}`);
+      
+      return {
+        isValid: false,
+        issues: [`Validation failed: ${getErrorMessage(error)}`],
+        recommendations: ['Check service configuration and try again'],
+        modelStatus: { currentModel: this.currentModel, isValid: false, compatibleModels: [] }
       };
     }
   }

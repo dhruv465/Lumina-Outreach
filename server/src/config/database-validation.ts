@@ -133,6 +133,7 @@ export function validateDatabaseLoadedConfig(config: any): ValidationResult {
   }
 
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   // Validate LLM providers if they exist
   if (config.llmConfig?.providers) {
@@ -156,6 +157,45 @@ export function validateDatabaseLoadedConfig(config: any): ValidationResult {
     errors.push('ElevenLabs is enabled but API key is missing');
   }
 
+  // Validate Deepgram configuration
+  if (config.deepgramConfig) {
+    if (config.deepgramConfig.isEnabled) {
+      if (!config.deepgramConfig.apiKey || config.deepgramConfig.apiKey.trim() === '') {
+        errors.push('Deepgram is enabled but API key is missing');
+      } else {
+        // Check for model configuration issues
+        if (!config.deepgramConfig.primaryModel) {
+          warnings.push('Deepgram primary model not configured - will use default');
+        }
+        
+        // Check validation status
+        if (config.deepgramConfig.status === 'failed') {
+          warnings.push(`Deepgram model validation failed: ${config.deepgramConfig.lastError || 'Unknown error'}`);
+        } else if (config.deepgramConfig.status === 'unverified') {
+          warnings.push('Deepgram configuration has not been validated');
+        }
+        
+        // Check for account tier limitations
+        if (config.deepgramConfig.accountTier === 'free') {
+          warnings.push('Deepgram free tier detected - limited model access and features');
+        }
+        
+        // Check for outdated validation
+        if (config.deepgramConfig.lastModelValidation) {
+          const lastValidation = new Date(config.deepgramConfig.lastModelValidation);
+          const daysSinceValidation = (Date.now() - lastValidation.getTime()) / (1000 * 60 * 60 * 24);
+          if (daysSinceValidation > 7) {
+            warnings.push(`Deepgram model validation is ${Math.floor(daysSinceValidation)} days old - consider re-validation`);
+          }
+        }
+      }
+    } else {
+      warnings.push('Deepgram is disabled - speech-to-text functionality will not be available');
+    }
+  } else {
+    warnings.push('Deepgram configuration not found - speech-to-text functionality will not be available');
+  }
+
   // Validate Twilio if enabled
   if (config.twilioConfig?.isEnabled) {
     if (!config.twilioConfig.accountSid || config.twilioConfig.accountSid.trim() === '') {
@@ -170,9 +210,62 @@ export function validateDatabaseLoadedConfig(config: any): ValidationResult {
     return {
       isValid: false,
       error: `Configuration validation failed: ${errors.join(', ')}`,
-      details: errors
+      details: { errors, warnings }
     };
   }
 
-  return { isValid: true };
+  // Return success with warnings if any
+  return { 
+    isValid: true,
+    details: warnings.length > 0 ? { warnings } : undefined
+  };
+}
+
+/**
+ * Validate Deepgram-specific configuration for startup
+ */
+export function validateDeepgramStartupConfig(deepgramConfig: any): ValidationResult {
+  if (!deepgramConfig) {
+    return {
+      isValid: false,
+      error: 'Deepgram configuration not found',
+      details: 'No Deepgram configuration exists in database'
+    };
+  }
+
+  if (!deepgramConfig.isEnabled) {
+    return {
+      isValid: true,
+      details: 'Deepgram is disabled - validation skipped'
+    };
+  }
+
+  if (!deepgramConfig.apiKey || deepgramConfig.apiKey.trim() === '') {
+    return {
+      isValid: false,
+      error: 'Deepgram API key is missing',
+      details: 'API key is required for Deepgram functionality'
+    };
+  }
+
+  // Check for known configuration issues
+  const issues: string[] = [];
+  
+  if (deepgramConfig.status === 'failed') {
+    issues.push(`Previous validation failed: ${deepgramConfig.lastError || 'Unknown error'}`);
+  }
+  
+  if (!deepgramConfig.primaryModel) {
+    issues.push('Primary model not configured');
+  }
+  
+  if (deepgramConfig.accountTier === 'free' && deepgramConfig.primaryModel?.includes('nova-2')) {
+    issues.push('Free tier account cannot access nova-2 models');
+  }
+
+  return {
+    isValid: issues.length === 0,
+    error: issues.length > 0 ? `Deepgram configuration issues: ${issues.join(', ')}` : undefined,
+    details: issues.length > 0 ? { issues } : undefined
+  };
 }

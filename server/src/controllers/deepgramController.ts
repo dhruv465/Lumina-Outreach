@@ -201,7 +201,7 @@ export async function startTranscription(req: Request, res: Response): Promise<v
     }
 
     // Create a transcription stream
-    const connectionId = deepgramService.createTranscriptionStream(callId, {
+    const connectionId = await deepgramService.createTranscriptionStream(callId, {
       language,
       model,
       punctuate: true,

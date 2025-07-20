@@ -152,11 +152,33 @@ export interface VoiceAIConfig {
 export interface DeepgramConfig {
   apiKey: string;
   isEnabled: boolean;
-  model: string;
-  tier: string;
-  lastVerified?: Date;
-  status?: 'unverified' | 'verified' | 'failed';
+  
+  // Model configuration with fallback support
+  primaryModel: string;
+  fallbackModels: string[];
+  autoFallback: boolean;
+  
+  // Account information
+  accountTier?: 'free' | 'basic' | 'premium';
+  availableModels?: string[];
+  lastModelValidation?: Date | null;
+  
+  // Validation status
+  lastVerified?: Date | null;
+  status?: 'unverified' | 'verified' | 'failed' | 'degraded';
   lastError?: string;
+  
+  // Performance settings
+  tier: string; // Kept for backward compatibility
+  retryAttempts: number;
+  timeoutMs: number;
+  
+  // Model compatibility tracking
+  modelCompatibilityStatus?: Map<string, {
+    isCompatible: boolean;
+    lastTested: Date;
+    error?: string;
+  }>;
 }
 
 // Full Configuration Interface

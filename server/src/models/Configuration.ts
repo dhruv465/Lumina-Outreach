@@ -50,11 +50,35 @@ export interface IConfiguration extends mongoose.Document {
   deepgramConfig: {
     apiKey: string;
     isEnabled: boolean;
-    model: string; // 'nova-2' by default
-    tier: string; // 'enhanced' by default
+    
+    // Model configuration with fallback support
+    primaryModel: string; // Primary model to use (e.g., 'nova-2')
+    fallbackModels: string[]; // Array of fallback models in order of preference
+    autoFallback: boolean; // Whether to automatically fallback on model errors
+    
+    // Account information
+    accountTier?: 'free' | 'basic' | 'premium';
+    availableModels?: string[]; // Models available for this account
+    lastModelValidation?: Date | null;
+    
+    // Validation status
     lastVerified?: Date | null;
-    status?: 'unverified' | 'verified' | 'failed';
+    status?: 'unverified' | 'verified' | 'failed' | 'degraded';
     lastError?: string;
+    
+    // Performance settings
+    tier: string; // 'enhanced' by default - kept for backward compatibility
+    retryAttempts: number; // Number of retry attempts for failed requests
+    timeoutMs: number; // Request timeout in milliseconds
+    
+    // Model compatibility tracking
+    modelCompatibilityStatus?: {
+      [modelName: string]: {
+        isCompatible: boolean;
+        lastTested: Date;
+        error?: string;
+      };
+    };
   };
   voiceAIConfig: {
     personalities: {
@@ -316,25 +340,85 @@ const ConfigurationSchema = new mongoose.Schema(
         type: Boolean,
         default: false,
       },
-      model: {
+      
+      // Model configuration with fallback support
+      primaryModel: {
         type: String,
         default: 'nova-2',
       },
-      tier: {
-        type: String,
-        default: 'enhanced',
+      fallbackModels: {
+        type: [String],
+        default: ['nova', 'base'],
       },
+      autoFallback: {
+        type: Boolean,
+        default: true,
+      },
+      
+      // Account information
+      accountTier: {
+        type: String,
+        enum: ['free', 'basic', 'premium'],
+        required: false,
+      },
+      availableModels: {
+        type: [String],
+        default: [],
+      },
+      lastModelValidation: {
+        type: Date,
+        default: null,
+      },
+      
+      // Validation status
       lastVerified: {
         type: Date,
         default: null,
       },
       status: {
         type: String,
-        enum: ['unverified', 'verified', 'failed'],
+        enum: ['unverified', 'verified', 'failed', 'degraded'],
         default: 'unverified',
       },
       lastError: {
         type: String,
+      },
+      
+      // Performance settings
+      tier: {
+        type: String,
+        default: 'enhanced',
+      },
+      retryAttempts: {
+        type: Number,
+        default: 3,
+        min: 1,
+        max: 10,
+      },
+      timeoutMs: {
+        type: Number,
+        default: 30000,
+        min: 5000,
+        max: 120000,
+      },
+      
+      // Model compatibility tracking
+      modelCompatibilityStatus: {
+        type: Map,
+        of: {
+          isCompatible: {
+            type: Boolean,
+            required: true,
+          },
+          lastTested: {
+            type: Date,
+            required: true,
+          },
+          error: {
+            type: String,
+          },
+        },
+        default: new Map(),
       },
     },
     ragConfig: {

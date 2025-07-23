@@ -55,6 +55,7 @@ export interface Campaign {
     };
   };
   callRecords: string[]; // IDs of call records
+  systemPrompt?: string;
 }
 
 export interface CallRecord {
@@ -184,7 +185,8 @@ export class CampaignService {
         conversionRate: 0,
         variantPerformance: {}
       },
-      callRecords: []
+      callRecords: [],
+      settings: {}
     };
     
     // Initialize variant performance metrics

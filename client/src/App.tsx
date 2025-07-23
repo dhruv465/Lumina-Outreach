@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from '@/components/ui/sonner';
 import { useAuth } from '@/hooks/useAuth';
+import AuthDebugPanel from '@/components/AuthDebugPanel';
 
 // Layouts
 import DashboardLayout from '@/layouts/DashboardLayout';
@@ -15,6 +16,8 @@ import Analytics from '@/pages/Analytics';
 import Configuration from '@/pages/Configuration';
 import KnowledgeManagement from '@/pages/KnowledgeManagement';
 import DocumentDetail from '@/pages/DocumentDetail';
+import MonitoringDashboard from '@/pages/MonitoringDashboard';
+// import CallSimulator from '@/pages/DeepgramTest';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import NotFound from '@/pages/NotFound';
@@ -45,6 +48,9 @@ function App() {
           <Route path="register" element={<Register />} />
         </Route>
 
+        {/* Public routes */}
+        {/* <Route path="call-simulator" element={<CallSimulator />} /> */}
+
         {/* Dashboard routes */}
         <Route
           path="/"
@@ -59,6 +65,7 @@ function App() {
           <Route path="campaigns" element={<Campaigns />} />
           <Route path="calls" element={<Calls />} />
           <Route path="analytics" element={<Analytics />} />
+          <Route path="monitoring" element={<MonitoringDashboard />} />
           <Route path="configuration" element={<Configuration />} />
           <Route path="knowledge" element={<KnowledgeManagement />} />
           <Route path="knowledge/document/:id" element={<DocumentDetail />} />
@@ -69,6 +76,8 @@ function App() {
       </Routes>
 
       <Toaster />
+      {/* Auth debug panel - press Alt+D to toggle */}
+      <AuthDebugPanel />
     </>
   );
 }

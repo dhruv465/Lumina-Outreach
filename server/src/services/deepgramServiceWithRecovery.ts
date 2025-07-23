@@ -14,6 +14,8 @@ import { DeepgramService, DeepgramEvent, TranscriptResult } from './deepgramServ
 import { deepgramRecoveryService, RecoveryResult } from './deepgramRecoveryService';
 import { deepgramErrorHandler } from './deepgramErrorHandler';
 import { DeepgramErrorType } from '../types/deepgram';
+import { deepgramModelMetrics } from '../monitoring/deepgramModelMetrics';
+import { AccountTier } from './modelCompatibilityService';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
 import { EventEmitter } from 'events';
@@ -55,6 +57,11 @@ export class DeepgramServiceWithRecovery extends EventEmitter {
     this.deepgramService.on(DeepgramEvent.FALLBACK_USED, (info) => {
       this.emit(DeepgramEvent.FALLBACK_USED, info);
     });
+
+    // Start metrics collection if not already started
+    if (!deepgramModelMetrics['reportingInterval']) {
+      deepgramModelMetrics.start();
+    }
 
     logger.info('Enhanced Deepgram Service with recovery initialized');
   }
@@ -116,6 +123,15 @@ export class DeepgramServiceWithRecovery extends EventEmitter {
         callId: recoveryResult.result.callId || 'unknown'
       };
 
+      // Record successful model usage metrics
+      const modelTier = this.getModelTier(recoveryResult.modelUsed || initialModel);
+      deepgramModelMetrics.recordModelUsage(
+        recoveryResult.modelUsed || initialModel,
+        modelTier,
+        true,
+        duration
+      );
+
       logger.info('Audio transcription completed successfully', {
         model: recoveryResult.modelUsed,
         fallbackUsed: recoveryResult.fallbackUsed,
@@ -136,6 +152,17 @@ export class DeepgramServiceWithRecovery extends EventEmitter {
       return enhancedResult;
     } else {
       const error = recoveryResult.error || new Error('Transcription failed');
+      const errorType = deepgramErrorHandler.classifyError(error).errorType;
+      
+      // Record failed model usage metrics
+      const modelTier = this.getModelTier(initialModel);
+      deepgramModelMetrics.recordModelUsage(
+        initialModel,
+        modelTier,
+        false,
+        duration,
+        errorType as any
+      );
       
       logger.error('Audio transcription failed permanently', {
         initialModel,
@@ -355,9 +382,64 @@ export class DeepgramServiceWithRecovery extends EventEmitter {
   public updateApiKey(apiKey: string): void {
     return this.deepgramService.updateApiKey(apiKey);
   }
+
+  /**
+   * Helper method to determine model tier based on model name
+   */
+  private getModelTier(model: string): AccountTier {
+    // Premium models
+    if (model.startsWith('nova-2')) {
+      return 'premium';
+    }
+    
+    // Basic models
+    if (model.startsWith('nova') && !model.startsWith('nova-2')) {
+      return 'basic';
+    }
+    
+    // Free models
+    if (model.startsWith('base')) {
+      return 'free';
+    }
+    
+    // Default to free for unknown models
+    return 'free';
+  }
 }
 
 // Export factory function for creating enhanced service
 export function createEnhancedDeepgramService(apiKey: string): DeepgramServiceWithRecovery {
   return new DeepgramServiceWithRecovery(apiKey);
+}
+
+// Singleton instance for use throughout the application
+let _deepgramServiceWithRecovery: DeepgramServiceWithRecovery | null = null;
+
+/**
+ * Get the singleton instance of DeepgramServiceWithRecovery
+ * This function will initialize the service with the API key from the database if not already initialized
+ */
+export async function getDeepgramServiceWithRecovery(): Promise<DeepgramServiceWithRecovery> {
+  if (!_deepgramServiceWithRecovery) {
+    try {
+      // Get API key from database
+      const Configuration = require('../models/Configuration').default;
+      const config = await Configuration.findOne();
+      const deepgramApiKey = config?.deepgramConfig?.apiKey || '';
+      
+      if (!deepgramApiKey) {
+        logger.warn('No Deepgram API key found in database, creating service with empty key');
+      } else {
+        logger.info('Creating Deepgram service with recovery using API key from database');
+      }
+      
+      _deepgramServiceWithRecovery = new DeepgramServiceWithRecovery(deepgramApiKey);
+    } catch (error) {
+      logger.error(`Error initializing Deepgram service with recovery: ${getErrorMessage(error)}`);
+      // Create with empty key as fallback
+      _deepgramServiceWithRecovery = new DeepgramServiceWithRecovery('');
+    }
+  }
+  
+  return _deepgramServiceWithRecovery;
 }

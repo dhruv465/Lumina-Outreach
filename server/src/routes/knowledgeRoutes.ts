@@ -5,9 +5,9 @@
 
 import express, { Request } from 'express';
 import * as knowledgeController from '../controllers/knowledgeController';
-import { protect } from '../middleware/authMiddleware';
-import { validateRequest } from '../middleware/validationMiddleware';
-import { rateLimiter } from '../middleware/rateLimitMiddleware';
+import { authenticate } from '../middleware/authMiddleware';
+import { validateWebCallRequest, validateRequest } from '../middleware/validationMiddleware';
+import { apiRateLimit } from '../middleware/rateLimitMiddleware';
 import multer from 'multer';
 
 // Extend the Express Request interface to include fileValidationError
@@ -62,8 +62,8 @@ const upload = multer({
 const router = express.Router();
 
 // Apply middleware to all routes
-router.use(protect);
-router.use(rateLimiter);
+router.use(authenticate);
+router.use(apiRateLimit);
 
 // Document Management
 router.post(

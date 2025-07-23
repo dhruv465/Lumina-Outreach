@@ -10,6 +10,7 @@ import {
   BarChart3,
   LogOut,
   BookOpen,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -145,6 +146,13 @@ const Sidebar: React.FC<SidebarProps> = ({ onNavigate, collapsed = false }) => {
             href="/analytics"
             icon={<BarChart3 size={19} />}
             title="Analytics"
+            onNavigate={onNavigate}
+            collapsed={collapsed}
+          />
+          <SidebarItem
+            href="/monitoring"
+            icon={<Activity size={19} />}
+            title="Monitoring"
             onNavigate={onNavigate}
             collapsed={collapsed}
           />

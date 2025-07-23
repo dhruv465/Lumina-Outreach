@@ -1,11 +1,3 @@
-/**
- * API Gateway Service
- * 
- * This service provides a unified entry point for client applications to access
- * various microservices. It handles routing, authentication, rate limiting,
- * and provides a consistent interface for clients.
- */
-
 import fastify, { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyCompress from '@fastify/compress';
@@ -22,6 +14,7 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import dotenv from 'dotenv';
 import pino from 'pino';
+import WebSocket from 'ws';
 
 // Load environment variables
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -143,7 +136,11 @@ async function getServiceUrl(serviceName: string): Promise<string | null> {
 // Authentication middleware
 async function authenticate(request: FastifyRequest, reply: FastifyReply) {
   try {
-    await request.jwtVerify();
+    if (request.jwtVerify) {
+      await request.jwtVerify();
+    } else {
+      reply.code(401).send({ error: 'JWT verification not available' });
+    }
   } catch (err) {
     reply.code(401).send({ error: 'Unauthorized' });
   }
@@ -173,7 +170,7 @@ async function registerGateway() {
       lastHeartbeat: new Date().toISOString(),
       healthCheckEndpoint: '/health',
       metrics: {
-        activeConnections: server.websocketServer?.clients.size || 0,
+        activeConnections: server.websocketServer?.clients ? server.websocketServer.clients.size : 0,
         cpuUsage: process.cpuUsage(),
         memoryUsage: process.memoryUsage()
       }
@@ -214,7 +211,7 @@ server.register(fastifyProxy, {
   prefix: '/media',
   http2: false,
   replyOptions: {
-    rewriteRequestHeaders: (req, headers) => {
+    rewriteRequestHeaders: (req: FastifyRequest, headers: Record<string, string>) => {
       return {
         ...headers,
         'x-forwarded-host': req.headers.host,
@@ -223,7 +220,7 @@ server.register(fastifyProxy, {
       };
     }
   },
-  preHandler: async (request, reply) => {
+  preHandler: async (request: FastifyRequest, reply: FastifyReply) => {
     const serviceUrl = await getServiceUrl('media');
     
     if (!serviceUrl) {
@@ -242,7 +239,7 @@ server.register(fastifyProxy, {
   prefix: '/api',
   http2: false,
   replyOptions: {
-    rewriteRequestHeaders: (req, headers) => {
+    rewriteRequestHeaders: (req: FastifyRequest, headers: Record<string, string>) => {
       return {
         ...headers,
         'x-forwarded-host': req.headers.host,
@@ -251,7 +248,7 @@ server.register(fastifyProxy, {
       };
     }
   },
-  preHandler: async (request, reply) => {
+  preHandler: async (request: FastifyRequest, reply: FastifyReply) => {
     const serviceUrl = await getServiceUrl('api');
     
     if (!serviceUrl) {
@@ -265,8 +262,8 @@ server.register(fastifyProxy, {
 });
 
 // WebSocket proxy for real-time communication
-server.register(async function (fastify) {
-  fastify.get('/ws', { websocket: true }, (socket: any, req: any) => {
+server.register(async function (fastify: FastifyInstance) {
+  fastify.get('/ws', { websocket: true }, (socket: WebSocket, req: FastifyRequest) => {
     // Handle WebSocket connections here or proxy them to the appropriate service
     socket.on('message', async (message: string) => {
     try {
@@ -315,7 +312,7 @@ server.register(async function (fastify) {
 });
 
 // Error handler
-server.setErrorHandler((error, request, reply) => {
+server.setErrorHandler((error: Error & { statusCode?: number }, request: FastifyRequest, reply: FastifyReply) => {
   logger.error(`Error handling request: ${error.message}`);
   
   // Don't expose internal server errors to the client
@@ -337,7 +334,8 @@ const start = async () => {
     
     logger.info(`API Gateway running at http://${host}:${port}`);
   } catch (err) {
-    logger.error(err);
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    logger.error(`Failed to start server: ${errorMessage}`);
     process.exit(1);
   }
 };

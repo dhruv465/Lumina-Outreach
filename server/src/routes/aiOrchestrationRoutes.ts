@@ -14,18 +14,18 @@ import {
   retrieveContext,
   updateConfiguration
 } from '../controllers/aiOrchestrationController';
-import { protect, admin } from '../middleware/authMiddleware';
+import { authenticate } from '../middleware/auth';
 
 const router = express.Router();
 
 // Protected routes (require authentication)
-router.get('/status', protect, getServiceStatus);
-router.post('/chat', protect, generateChatResponse);
-router.post('/stream-chat', protect, streamChatResponse);
-router.post('/voice', protect, synthesizeVoice);
-router.post('/context', protect, retrieveContext);
+router.get('/status', authenticate, getServiceStatus);
+router.post('/chat', authenticate, generateChatResponse);
+router.post('/stream-chat', authenticate, streamChatResponse);
+router.post('/voice', authenticate, synthesizeVoice);
+router.post('/context', authenticate, retrieveContext);
 
 // Admin-only routes
-router.put('/config', protect, admin, updateConfiguration);
+router.put('/config', authenticate, updateConfiguration);
 
 export default router;

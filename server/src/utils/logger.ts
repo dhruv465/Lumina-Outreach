@@ -28,6 +28,13 @@ const logStream = {
 };
 
 /**
+ * Create a logger with context information
+ */
+export function createLogger(context: string): winston.Logger {
+  return logger.child({ context });
+}
+
+/**
  * Safely extract error message from unknown error type
  */
 export function getErrorMessage(error: unknown): string {

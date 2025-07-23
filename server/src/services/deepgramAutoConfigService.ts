@@ -407,6 +407,157 @@ export class DeepgramAutoConfigService {
   }
 
   /**
+   * Detect if this is a first-time setup and perform auto-configuration
+   */
+  public async handleFirstTimeSetup(): Promise<{
+    isFirstTime: boolean;
+    autoConfigured: boolean;
+    result?: AutoConfigResult;
+  }> {
+    logger.info('Checking for first-time Deepgram setup...');
+
+    try {
+      const config = await Configuration.findOne();
+      
+      // Check if this is first-time setup
+      const isFirstTime = !config?.deepgramConfig?.lastModelValidation && 
+                         !config?.deepgramConfig?.status &&
+                         !!config?.deepgramConfig?.apiKey;
+
+      if (!isFirstTime) {
+        logger.debug('Not a first-time setup - skipping auto-configuration');
+        return { isFirstTime: false, autoConfigured: false };
+      }
+
+      logger.info('First-time Deepgram setup detected - performing automatic configuration...');
+
+      // Perform auto-configuration for first-time setup
+      const autoConfigResult = await this.autoConfigureOptimalModel();
+      
+      if (autoConfigResult.success) {
+        logger.info('First-time auto-configuration completed successfully', {
+          model: autoConfigResult.model,
+          accountTier: autoConfigResult.accountTier,
+          availableModels: autoConfigResult.availableModels.length
+        });
+
+        // Mark as configured
+        await Configuration.updateOne(
+          {},
+          { 
+            $set: { 
+              'deepgramConfig.firstTimeSetupCompleted': true,
+              'deepgramConfig.firstTimeSetupDate': new Date()
+            }
+          }
+        );
+
+        return {
+          isFirstTime: true,
+          autoConfigured: true,
+          result: autoConfigResult
+        };
+      } else {
+        logger.error('First-time auto-configuration failed', {
+          error: autoConfigResult.error,
+          warnings: autoConfigResult.warnings
+        });
+
+        return {
+          isFirstTime: true,
+          autoConfigured: false,
+          result: autoConfigResult
+        };
+      }
+
+    } catch (error) {
+      logger.error(`First-time setup handling failed: ${getErrorMessage(error)}`);
+      return {
+        isFirstTime: false,
+        autoConfigured: false
+      };
+    }
+  }
+
+  /**
+   * Perform graceful startup validation that doesn't fail the server
+   */
+  public async performGracefulStartupValidation(): Promise<{
+    success: boolean;
+    canContinue: boolean;
+    validationResult?: ValidationResult;
+    autoConfigResult?: AutoConfigResult;
+    message: string;
+  }> {
+    logger.info('Performing graceful Deepgram startup validation...');
+
+    try {
+      // Check for first-time setup
+      const firstTimeResult = await this.handleFirstTimeSetup();
+      
+      if (firstTimeResult.isFirstTime) {
+        if (firstTimeResult.autoConfigured) {
+          return {
+            success: true,
+            canContinue: true,
+            autoConfigResult: firstTimeResult.result,
+            message: 'First-time setup completed successfully with auto-configuration'
+          };
+        } else {
+          return {
+            success: false,
+            canContinue: true, // Continue anyway with degraded functionality
+            autoConfigResult: firstTimeResult.result,
+            message: 'First-time setup failed but server can continue with degraded Deepgram functionality'
+          };
+        }
+      }
+
+      // Perform regular validation
+      const validationResult = await this.validateStartupConfiguration();
+      
+      if (validationResult.isValid) {
+        return {
+          success: true,
+          canContinue: true,
+          validationResult,
+          message: 'Deepgram configuration validation passed'
+        };
+      } else {
+        // Try auto-recovery
+        logger.info('Validation failed - attempting auto-recovery...');
+        const autoConfigResult = await this.autoConfigureOptimalModel();
+        
+        if (autoConfigResult.success) {
+          return {
+            success: true,
+            canContinue: true,
+            validationResult,
+            autoConfigResult,
+            message: 'Validation failed but auto-recovery succeeded'
+          };
+        } else {
+          return {
+            success: false,
+            canContinue: true, // Continue with degraded functionality
+            validationResult,
+            autoConfigResult,
+            message: 'Validation and auto-recovery failed - continuing with degraded functionality'
+          };
+        }
+      }
+
+    } catch (error) {
+      logger.error(`Graceful startup validation failed: ${getErrorMessage(error)}`);
+      return {
+        success: false,
+        canContinue: true, // Always allow server to continue
+        message: `Startup validation error: ${getErrorMessage(error)} - continuing with degraded functionality`
+      };
+    }
+  }
+
+  /**
    * Cleanup resources
    */
   public cleanup(): void {

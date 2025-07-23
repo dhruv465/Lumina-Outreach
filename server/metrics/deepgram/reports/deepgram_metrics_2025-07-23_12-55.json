@@ -1,0 +1,143 @@
+{
+  "timestamp": "2025-07-23T07:25:52.205Z",
+  "period": {
+    "start": "2025-07-22T07:25:52.205Z",
+    "end": "2025-07-23T07:25:52.205Z"
+  },
+  "modelUsage": [],
+  "modelValidation": [
+    {
+      "model": "nova-2",
+      "validationAttempts": 4,
+      "validationSuccesses": 4,
+      "validationFailures": 0,
+      "successRate": 1,
+      "lastValidation": "2025-07-23T07:10:51.707Z",
+      "lastValidationResult": true,
+      "averageValidationTime": 556.75,
+      "totalValidationTime": 2227,
+      "errorTypes": {}
+    },
+    {
+      "model": "nova-2-general",
+      "validationAttempts": 1,
+      "validationSuccesses": 1,
+      "validationFailures": 0,
+      "successRate": 1,
+      "lastValidation": "2025-07-23T07:10:49.679Z",
+      "lastValidationResult": true,
+      "averageValidationTime": 280,
+      "totalValidationTime": 280,
+      "errorTypes": {}
+    },
+    {
+      "model": "nova-2-meeting",
+      "validationAttempts": 1,
+      "validationSuccesses": 1,
+      "validationFailures": 0,
+      "successRate": 1,
+      "lastValidation": "2025-07-23T07:10:49.982Z",
+      "lastValidationResult": true,
+      "averageValidationTime": 303,
+      "totalValidationTime": 303,
+      "errorTypes": {}
+    },
+    {
+      "model": "nova-2-phonecall",
+      "validationAttempts": 2,
+      "validationSuccesses": 2,
+      "validationFailures": 0,
+      "successRate": 1,
+      "lastValidation": "2025-07-23T07:10:50.401Z",
+      "lastValidationResult": true,
+      "averageValidationTime": 327,
+      "totalValidationTime": 654,
+      "errorTypes": {}
+    },
+    {
+      "model": "nova",
+      "validationAttempts": 2,
+      "validationSuccesses": 2,
+      "validationFailures": 0,
+      "successRate": 1,
+      "lastValidation": "2025-07-23T07:10:50.749Z",
+      "lastValidationResult": true,
+      "averageValidationTime": 336.5,
+      "totalValidationTime": 673,
+      "errorTypes": {}
+    },
+    {
+      "model": "nova-general",
+      "validationAttempts": 2,
+      "validationSuccesses": 2,
+      "validationFailures": 0,
+      "successRate": 1,
+      "lastValidation": "2025-07-23T07:10:51.031Z",
+      "lastValidationResult": true,
+      "averageValidationTime": 298.5,
+      "totalValidationTime": 597,
+      "errorTypes": {}
+    },
+    {
+      "model": "base",
+      "validationAttempts": 2,
+      "validationSuccesses": 2,
+      "validationFailures": 0,
+      "successRate": 1,
+      "lastValidation": "2025-07-23T07:10:51.367Z",
+      "lastValidationResult": true,
+      "averageValidationTime": 332,
+      "totalValidationTime": 664,
+      "errorTypes": {}
+    },
+    {
+      "model": "base-general",
+      "validationAttempts": 2,
+      "validationSuccesses": 2,
+      "validationFailures": 0,
+      "successRate": 1,
+      "lastValidation": "2025-07-23T07:10:52.129Z",
+      "lastValidationResult": true,
+      "averageValidationTime": 602,
+      "totalValidationTime": 1204,
+      "errorTypes": {}
+    }
+  ],
+  "fallbacks": [],
+  "accountTier": {
+    "tier": "premium",
+    "detectionCount": 1,
+    "lastDetection": "2025-07-23T07:10:51.691Z",
+    "availableModelsCount": 8,
+    "availableModels": [
+      "nova-2",
+      "nova-2-general",
+      "nova-2-meeting",
+      "nova-2-phonecall",
+      "nova",
+      "nova-general",
+      "base",
+      "base-general"
+    ],
+    "capabilityChanges": 0,
+    "lastCapabilityChange": ""
+  },
+  "overallStats": {
+    "totalRequests": 0,
+    "totalSuccesses": 0,
+    "totalFailures": 0,
+    "totalFallbacks": 0,
+    "overallSuccessRate": 0,
+    "overallFallbackRate": 0,
+    "mostUsedModel": "none",
+    "mostFailedModel": "none",
+    "averageResponseTime": 0
+  },
+  "alerts": {
+    "totalAlerts": 0,
+    "criticalAlerts": 0,
+    "warningAlerts": 0,
+    "infoAlerts": 0,
+    "recentAlerts": []
+  }
+}

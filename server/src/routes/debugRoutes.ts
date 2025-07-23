@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticate } from '../middleware/auth';
+import { authenticate } from '../middleware/authMiddleware';
 import mongoose from 'mongoose';
 import Lead from '../models/Lead';
 import Campaign from '../models/Campaign';

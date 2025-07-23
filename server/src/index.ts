@@ -12,44 +12,44 @@ import path from 'path';
 import { RateLimiterMemory } from 'rate-limiter-flexible';
 import { Server as SocketIOServer } from 'socket.io';
 import winston from 'winston';
-
-// Routes
-import analyticsRoutes from './routes/analyticsRoutes';
-import aiRoutes from './routes/aiRoutes';
 import aiOrchestrationRoutes from './routes/aiOrchestrationRoutes';
+import aiRoutes from './routes/aiRoutes';
+import analyticsRoutes from './routes/analyticsRoutes';
 import callRoutes from './routes/callRoutes';
 import campaignRoutes from './routes/campaignRoutes';
 import configurationRoutes from './routes/configurationRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import debugRoutes from './routes/debugRoutes';
 import deepgramMetricsRoutes from './routes/deepgramMetricsRoutes';
+import deepgramTestRoutes, { setupDeepgramWebSocketServer } from './routes/deepgramTestRoutes';
 import knowledgeRoutes from './routes/knowledgeRoutes';
 import leadRoutes from './routes/leadRoutes';
+import metricsRoutes from './routes/metricsRoutes';
 import rootWebhookRoutes from './routes/rootWebhookRoutes';
 import streamRoutes from './routes/streamRoutes';
 import telephonyRoutes from './routes/telephonyRoutes';
 import transcriptionRoutes from './routes/transcriptionRoutes';
 import userRoutes from './routes/userRoutes';
 import voiceAIRoutes from './routes/voiceAIRoutes';
-import metricsRoutes from './routes/metricsRoutes';
-import deepgramTestRoutes, { setupDeepgramWebSocketServer } from './routes/deepgramTestRoutes';
-import callSimulatorRoutes, { setupCallSimulatorWebSocketServer } from './routes/callSimulatorRoutes';
-import fallbackCallSimulatorRoutes from './routes/fallbackCallSimulatorRoutes';
+import webCallRoutes from './routes/webCallRoutes';
+import webCallMetricsRoutes from './routes/webCallMetricsRoutes';
 
 // Twilio Media Streams WebSocket handler
-import { handleTwilioStreamWebhook } from './services/webhookHandlers';
 import { handleLowLatencyVoiceStream } from './controllers/lowLatencyStreamController';
 
+// Web Call WebSocket handlers
+import { setupWebCallSocketHandlers } from './routes/webCallSocketRoutes';
+
 // Services initialization
+import { getAIOrchestrationService } from './services/aiOrchestrationService';
 import CampaignService from './services/campaignService';
 import ConversationEngineService from './services/conversationEngineService';
 import { EnhancedVoiceAIService } from './services/enhancedVoiceAIService';
 import leadService from './services/leadService';
 import { LLMService } from './services/llm/service';
+import { getRAGService } from './services/ragService';
 import { initializeSpeechService } from './services/realSpeechService';
 import SpeechAnalysisService from './services/speechAnalysisService';
-import { getAIOrchestrationService } from './services/aiOrchestrationService';
-import { getRAGService } from './services/ragService';
 
 // Configuration and health services
 import { validateStartupConfig } from './config/database-validation';
@@ -145,10 +145,12 @@ const io = new SocketIOServer(server, {
   },
 });
 
+// Set up WebSocket handlers for web call testing
+setupWebCallSocketHandlers(io);
+
 // Initialize Deepgram WebSocket server
 // Setup WebSocket servers
 setupDeepgramWebSocketServer(server);
-setupCallSimulatorWebSocketServer(server);
 
 // Enhanced middleware setup for production
 const corsOrigin = process.env.CORS_ORIGIN || process.env.CLIENT_URL || 'http://localhost:3000';
@@ -210,7 +212,7 @@ app.use('/fallbacks', express.static(path.join(__dirname, '../public/fallbacks')
 // Body parsing middleware with limits
 app.use(express.json({ 
   limit: '10mb',
-  verify: (req, res, buf) => {
+  verify: (req, _res, buf) => {
     if (buf && buf.length) {
       (req as any).rawBody = buf;
     }
@@ -363,11 +365,13 @@ app.use('/api/ai', aiRoutes); // Core AI routes
 app.use('/api/ai-orchestration', aiOrchestrationRoutes); // AI orchestration layer routes
 app.use('/api/knowledge', knowledgeRoutes); // Knowledge management routes
 app.use('/api/transcription', transcriptionRoutes);
-app.use('/api/deepgram-metrics', deepgramMetricsRoutes); // Deepgram model compatibility metrics
+app.use('/api/deepgram-metrics', (req, res) => {
+  res.status(503).json({ error: 'Deepgram metrics service temporarily unavailable' });
+}); // Temporarily disabled Deepgram metrics routes
 app.use('/api/metrics', metricsRoutes); // Advanced monitoring and metrics endpoints
 app.use('/api/deepgram', deepgramTestRoutes); // Deepgram testing routes
-app.use('/api/call-simulator', callSimulatorRoutes); // Call simulation routes
-app.use('/api/call-simulator/fallback', fallbackCallSimulatorRoutes); // HTTP fallback for call simulation
+app.use('/api/webcall', webCallRoutes); // Web call testing routes
+app.use('/api/webcall', webCallMetricsRoutes); // Web call metrics routes
 
 // Debug routes only in development
 if (process.env.NODE_ENV !== 'production') {

@@ -1,6 +1,6 @@
 /**
  * performance_metrics.ts
- * Monitors and tracks performance metrics for the application
+ * Collects and tracks performance metrics for the application
  */
 
 import * as os from 'os';
@@ -17,88 +17,69 @@ const fsAppend = promisify(fs.appendFile);
 const fsMkdir = promisify(fs.mkdir);
 
 export interface PerformanceMetrics {
-  cpuUsage: number;
-  memoryUsage: {
-    heapTotal: number;
-    heapUsed: number;
-    rss: number;
-    external: number;
-    arrayBuffers: number;
-    percentUsed: number;
-  };
-  systemMemory: {
+  timestamp: string;
+  memory: {
+    used: number;
     total: number;
-    free: number;
-    percentUsed: number;
+    heapUsed: number;
+    heapTotal: number;
+    external: number;
+    rss: number;
   };
-  eventLoopLag: number;
-  uptime: number;
-  requestRate: number;
-  responseTimes: {
-    avg: number;
-    min: number;
-    max: number;
-    p95: number;
+  cpu: {
+    usage: number;
+    loadAverage: number[];
   };
-  activeConnections: number;
-  errorRate: number;
+  system: {
+    uptime: number;
+    platform: string;
+    arch: string;
+    nodeVersion: string;
+  };
+  v8: {
+    heapSpaceStatistics: any[];
+    heapStatistics: any;
+  };
+  gc?: {
+    collections: number;
+    duration: number;
+  };
+  eventLoop?: {
+    lag: number;
+  };
+}
+
+export interface RequestMetrics {
+  requestId: string;
+  method: string;
+  url: string;
+  statusCode: number;
+  responseTime: number;
+  memoryUsage: number;
   timestamp: string;
 }
 
-export class PerformanceMonitor {
-  private static instance: PerformanceMonitor;
+export class PerformanceMonitor extends EventEmitter {
+  private static instance: PerformanceMonitor | null = null;
   private metrics: PerformanceMetrics;
-  private events: EventEmitter;
-  private responseTimeTracker: Map<string, number[]>;
-  private requestCounter: number;
-  private errorCounter: number;
-  private intervalId: NodeJS.Timeout | null;
-  private reportingIntervalId: NodeJS.Timeout | null;
-  private activeConnections: number;
-  private metricsHistory: PerformanceMetrics[];
-  private readonly maxHistoryItems: number;
-  private readonly thresholds: {
-    cpu: { warning: number; critical: number };
-    memory: { warning: number; critical: number };
-    responseTime: { warning: number; critical: number };
-  };
-  private metricsPath: string;
+  private metricsHistory: PerformanceMetrics[] = [];
+  private requestMetrics: RequestMetrics[] = [];
+  private intervalId: NodeJS.Timeout | null = null;
+  private isCollecting: boolean = false;
+  private metricsFilePath: string;
+  private maxHistorySize: number = 1000;
+  private collectionInterval: number = 60000; // 1 minute
+  private gcStats: { collections: number; duration: number } = { collections: 0, duration: 0 };
 
   private constructor() {
+    super();
+    this.metricsFilePath = './logs/performance_metrics.json';
     this.metrics = this.initializeMetrics();
-    this.events = new EventEmitter();
-    this.responseTimeTracker = new Map();
-    this.requestCounter = 0;
-    this.errorCounter = 0;
-    this.activeConnections = 0;
-    this.intervalId = null;
-    this.reportingIntervalId = null;
-    this.metricsHistory = [];
-    this.maxHistoryItems = 1000; // Keep last 1000 metrics readings
-    this.thresholds = {
-      cpu: { 
-        warning: parseFloat(process.env.CPU_WARNING_THRESHOLD || '70'), 
-        critical: parseFloat(process.env.CPU_CRITICAL_THRESHOLD || '90') 
-      },
-      memory: { 
-        warning: parseFloat(process.env.MEMORY_WARNING_THRESHOLD || '70'), 
-        critical: parseFloat(process.env.MEMORY_CRITICAL_THRESHOLD || '90') 
-      },
-      responseTime: { 
-        warning: parseInt(process.env.API_LATENCY_WARNING || '2000', 10), 
-        critical: parseInt(process.env.API_LATENCY_CRITICAL || '5000', 10) 
-      }
-    };
-    this.metricsPath = process.env.METRICS_PATH || './metrics';
-    
-    // Ensure metrics directory exists
-    if (!fs.existsSync(this.metricsPath)) {
-      fs.mkdirSync(this.metricsPath, { recursive: true });
-    }
+    this.ensureMetricsDirectory();
   }
 
   /**
-   * Get the singleton instance
+   * Get singleton instance
    */
   public static getInstance(): PerformanceMonitor {
     if (!PerformanceMonitor.instance) {
@@ -108,434 +89,341 @@ export class PerformanceMonitor {
   }
 
   /**
-   * Initialize the metrics object with default values
-   */
-  private initializeMetrics(): PerformanceMetrics {
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-    const memoryInfo = process.memoryUsage();
-
-    return {
-      cpuUsage: 0,
-      memoryUsage: {
-        heapTotal: memoryInfo.heapTotal / 1024 / 1024,
-        heapUsed: memoryInfo.heapUsed / 1024 / 1024,
-        rss: memoryInfo.rss / 1024 / 1024,
-        external: memoryInfo.external / 1024 / 1024,
-        arrayBuffers: (memoryInfo as any).arrayBuffers ? (memoryInfo as any).arrayBuffers / 1024 / 1024 : 0,
-        percentUsed: (memoryInfo.heapUsed / memoryInfo.heapTotal) * 100
-      },
-      systemMemory: {
-        total: totalMem / 1024 / 1024,
-        free: freeMem / 1024 / 1024,
-        percentUsed: ((totalMem - freeMem) / totalMem) * 100
-      },
-      eventLoopLag: 0,
-      uptime: process.uptime(),
-      requestRate: 0,
-      responseTimes: {
-        avg: 0,
-        min: 0,
-        max: 0,
-        p95: 0
-      },
-      activeConnections: 0,
-      errorRate: 0,
-      timestamp: new Date().toISOString()
-    };
-  }
-
-  /**
-   * Start monitoring performance metrics
+   * Start collecting performance metrics
    */
   public start(interval: number = 60000): void {
-    if (this.intervalId) {
-      this.stop();
+    if (this.isCollecting) {
+      logger.warn('Performance monitoring is already running');
+      return;
     }
 
-    // Collect metrics at specified interval
+    this.collectionInterval = interval;
+    this.isCollecting = true;
+
+    // Initial collection
+    this.collectMetrics();
+
+    // Set up periodic collection
     this.intervalId = setInterval(() => {
       this.collectMetrics();
-    }, interval);
+    }, this.collectionInterval);
 
-    // Report metrics every 15 minutes
-    const reportingInterval = 15 * 60 * 1000; // 15 minutes
-    this.reportingIntervalId = setInterval(() => {
-      this.reportMetrics();
-    }, reportingInterval);
+    this.setupGCMonitoring();
 
-    logger.info('Performance monitoring started');
+    logger.info(`Performance monitoring started (interval: ${interval}ms)`);
+    this.emit('started', { interval });
   }
 
   /**
-   * Stop monitoring
+   * Stop collecting performance metrics
    */
   public stop(): void {
+    if (!this.isCollecting) {
+      logger.warn('Performance monitoring is not running');
+      return;
+    }
+
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
 
-    if (this.reportingIntervalId) {
-      clearInterval(this.reportingIntervalId);
-      this.reportingIntervalId = null;
-    }
+    this.isCollecting = false;
 
     logger.info('Performance monitoring stopped');
+    this.emit('stopped');
   }
 
   /**
-   * Collect current performance metrics
+   * Get current metrics
    */
-  private async collectMetrics(): Promise<void> {
-    try {
-      // Get CPU usage
-      const cpuUsage = await this.getCpuUsage();
-      
-      // Get memory information
-      const memoryInfo = process.memoryUsage();
-      const totalMem = os.totalmem();
-      const freeMem = os.freemem();
-      
-      // Calculate event loop lag
-      const eventLoopLag = await this.measureEventLoopLag();
-      
-      // Calculate request rate (requests per minute)
-      const requestRate = this.requestCounter;
-      this.requestCounter = 0; // Reset counter
-      
-      // Calculate error rate
-      const errorRate = this.errorCounter > 0 
-        ? (this.errorCounter / (requestRate || 1)) * 100 
-        : 0;
-      this.errorCounter = 0; // Reset counter
-      
-      // Calculate response times
-      const responseTimes = this.calculateResponseTimes();
-      this.responseTimeTracker.clear(); // Clear after calculating
-
-      // Update metrics
-      this.metrics = {
-        cpuUsage,
-        memoryUsage: {
-          heapTotal: memoryInfo.heapTotal / 1024 / 1024,
-          heapUsed: memoryInfo.heapUsed / 1024 / 1024,
-          rss: memoryInfo.rss / 1024 / 1024,
-          external: memoryInfo.external / 1024 / 1024,
-          arrayBuffers: (memoryInfo as any).arrayBuffers ? (memoryInfo as any).arrayBuffers / 1024 / 1024 : 0,
-          percentUsed: (memoryInfo.heapUsed / memoryInfo.heapTotal) * 100
-        },
-        systemMemory: {
-          total: totalMem / 1024 / 1024,
-          free: freeMem / 1024 / 1024,
-          percentUsed: ((totalMem - freeMem) / totalMem) * 100
-        },
-        eventLoopLag,
-        uptime: process.uptime(),
-        requestRate,
-        responseTimes,
-        activeConnections: this.activeConnections,
-        errorRate,
-        timestamp: new Date().toISOString()
-      };
-
-      // Add to history
-      this.metricsHistory.push({ ...this.metrics });
-      
-      // Limit history size
-      if (this.metricsHistory.length > this.maxHistoryItems) {
-        this.metricsHistory.shift();
-      }
-
-      // Check for threshold violations
-      this.checkThresholds();
-
-      // Emit update event
-      this.events.emit('metrics-updated', this.metrics);
-      
-      // Save metrics to file
-      await this.saveMetricsToFile();
-    } catch (error) {
-      logger.error(`Error collecting performance metrics: ${getErrorMessage(error)}`);
-    }
+  public getCurrentMetrics(): PerformanceMetrics {
+    return this.metrics;
   }
 
   /**
-   * Get CPU usage percentage
+   * Get metrics history
    */
-  private async getCpuUsage(): Promise<number> {
-    return new Promise((resolve) => {
-      const startUsage = process.cpuUsage();
-      const startTime = process.hrtime();
-      
-      // Measure CPU usage over a short period
-      setTimeout(() => {
-        const elapUsage = process.cpuUsage(startUsage);
-        const elapTime = process.hrtime(startTime);
-        const elapTimeMS = elapTime[0] * 1000 + elapTime[1] / 1000000;
-        
-        // Calculate percentage of CPU used in the elapsed time
-        const cpuPercent = 100 * (elapUsage.user + elapUsage.system) / 1000 / elapTimeMS;
-        resolve(Math.min(100, cpuPercent));
-      }, 100);
-    });
+  public getMetricsHistory(limit: number = 100): PerformanceMetrics[] {
+    return this.metricsHistory.slice(-limit);
   }
 
   /**
-   * Measure event loop lag
+   * Check if performance monitor is active
    */
-  private async measureEventLoopLag(): Promise<number> {
-    return new Promise((resolve) => {
-      const start = Date.now();
-      
-      // Schedule a timer for the next tick of the event loop
-      setImmediate(() => {
-        const lag = Date.now() - start;
-        resolve(lag);
-      });
-    });
+  public isActive(): boolean {
+    return this.intervalId !== null;
   }
 
   /**
-   * Calculate response time statistics
+   * Record request metrics
    */
-  private calculateResponseTimes(): { avg: number; min: number; max: number; p95: number } {
-    const allResponseTimes: number[] = [];
+  public recordRequest(req: Request, res: Response, responseTime: number): void {
+    const memoryUsage = process.memoryUsage().rss;
     
-    // Collect all response times
-    this.responseTimeTracker.forEach((times) => {
-      allResponseTimes.push(...times);
-    });
-    
-    if (allResponseTimes.length === 0) {
-      return { avg: 0, min: 0, max: 0, p95: 0 };
-    }
-    
-    // Sort response times
-    allResponseTimes.sort((a, b) => a - b);
-    
-    // Calculate statistics
-    const avg = allResponseTimes.reduce((sum, time) => sum + time, 0) / allResponseTimes.length;
-    const min = allResponseTimes[0];
-    const max = allResponseTimes[allResponseTimes.length - 1];
-    const p95Index = Math.ceil(allResponseTimes.length * 0.95) - 1;
-    const p95 = allResponseTimes[p95Index];
-    
-    return { avg, min, max, p95 };
-  }
-
-  /**
-   * Check for threshold violations
-   */
-  private checkThresholds(): void {
-    // Check CPU usage
-    if (this.metrics.cpuUsage >= this.thresholds.cpu.critical) {
-      this.emitAlert('critical', 'cpu', `CPU usage is critical: ${this.metrics.cpuUsage.toFixed(2)}%`);
-    } else if (this.metrics.cpuUsage >= this.thresholds.cpu.warning) {
-      this.emitAlert('warning', 'cpu', `CPU usage is high: ${this.metrics.cpuUsage.toFixed(2)}%`);
-    }
-    
-    // Check memory usage
-    if (this.metrics.systemMemory.percentUsed >= this.thresholds.memory.critical) {
-      this.emitAlert('critical', 'memory', `System memory usage is critical: ${this.metrics.systemMemory.percentUsed.toFixed(2)}%`);
-    } else if (this.metrics.systemMemory.percentUsed >= this.thresholds.memory.warning) {
-      this.emitAlert('warning', 'memory', `System memory usage is high: ${this.metrics.systemMemory.percentUsed.toFixed(2)}%`);
-    }
-    
-    // Check response time
-    if (this.metrics.responseTimes.avg >= this.thresholds.responseTime.critical) {
-      this.emitAlert('critical', 'responseTime', `Average response time is critical: ${this.metrics.responseTimes.avg.toFixed(2)}ms`);
-    } else if (this.metrics.responseTimes.avg >= this.thresholds.responseTime.warning) {
-      this.emitAlert('warning', 'responseTime', `Average response time is high: ${this.metrics.responseTimes.avg.toFixed(2)}ms`);
-    }
-  }
-
-  /**
-   * Emit performance alert
-   */
-  private emitAlert(level: 'warning' | 'critical', type: string, message: string): void {
-    const alert = {
-      level,
-      type,
-      message,
-      timestamp: new Date().toISOString(),
-      metrics: this.metrics
+    const requestMetric: RequestMetrics = {
+      requestId: this.generateRequestId(),
+      method: req.method,
+      url: req.url,
+      statusCode: res.statusCode,
+      responseTime,
+      memoryUsage,
+      timestamp: new Date().toISOString()
     };
+
+    this.requestMetrics.push(requestMetric);
     
-    this.events.emit('performance-alert', alert);
-    
-    if (level === 'critical') {
-      logger.error(`PERFORMANCE ALERT: ${message}`, { alert });
-    } else {
-      logger.warn(`PERFORMANCE WARNING: ${message}`, { alert });
+    // Keep only recent request metrics
+    if (this.requestMetrics.length > this.maxHistorySize) {
+      this.requestMetrics = this.requestMetrics.slice(-this.maxHistorySize);
     }
+
+    this.emit('request-recorded', requestMetric);
   }
 
   /**
-   * Save metrics to file
+   * Get request metrics
    */
-  private async saveMetricsToFile(): Promise<void> {
-    try {
-      const date = new Date();
-      const fileName = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}.json`;
-      const filePath = `${this.metricsPath}/${fileName}`;
-      
-      const metricEntry = JSON.stringify(this.metrics) + '\n';
-      
-      if (fs.existsSync(filePath)) {
-        await fsAppend(filePath, metricEntry);
-      } else {
-        await fsWrite(filePath, metricEntry);
-      }
-    } catch (error) {
-      logger.error(`Error saving metrics to file: ${getErrorMessage(error)}`);
-    }
+  public getRequestMetrics(limit: number = 100): RequestMetrics[] {
+    return this.requestMetrics.slice(-limit);
   }
 
   /**
-   * Generate and save a performance report
+   * Get performance summary
    */
-  private async reportMetrics(): Promise<void> {
-    try {
-      if (this.metricsHistory.length === 0) {
-        return;
-      }
-      
-      const now = new Date();
-      const reportFileName = `performance_report_${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}-${now.getMinutes().toString().padStart(2, '0')}.json`;
-      const reportPath = `${this.metricsPath}/reports`;
-      
-      // Ensure reports directory exists
-      if (!fs.existsSync(reportPath)) {
-        await fsMkdir(reportPath, { recursive: true });
-      }
-      
-      // Calculate averages
-      const avgCpuUsage = this.metricsHistory.reduce((sum, m) => sum + m.cpuUsage, 0) / this.metricsHistory.length;
-      const avgMemUsage = this.metricsHistory.reduce((sum, m) => sum + m.systemMemory.percentUsed, 0) / this.metricsHistory.length;
-      const avgResponseTime = this.metricsHistory.reduce((sum, m) => sum + m.responseTimes.avg, 0) / this.metricsHistory.length;
-      const avgRequestRate = this.metricsHistory.reduce((sum, m) => sum + m.requestRate, 0) / this.metricsHistory.length;
-      
-      // Find maximum values
-      const maxCpuUsage = Math.max(...this.metricsHistory.map(m => m.cpuUsage));
-      const maxMemUsage = Math.max(...this.metricsHistory.map(m => m.systemMemory.percentUsed));
-      const maxResponseTime = Math.max(...this.metricsHistory.map(m => m.responseTimes.max));
-      const maxRequestRate = Math.max(...this.metricsHistory.map(m => m.requestRate));
-      
-      // Generate report
-      const report = {
-        period: {
-          start: this.metricsHistory[0].timestamp,
-          end: this.metricsHistory[this.metricsHistory.length - 1].timestamp
-        },
-        summary: {
-          averages: {
-            cpuUsage: avgCpuUsage,
-            memoryUsage: avgMemUsage,
-            responseTime: avgResponseTime,
-            requestRate: avgRequestRate
-          },
-          maximums: {
-            cpuUsage: maxCpuUsage,
-            memoryUsage: maxMemUsage,
-            responseTime: maxResponseTime,
-            requestRate: maxRequestRate
-          }
-        },
-        metrics: this.metricsHistory
+  public getPerformanceSummary(): any {
+    const recentMetrics = this.getMetricsHistory(10);
+    const recentRequests = this.getRequestMetrics(100);
+
+    if (recentMetrics.length === 0) {
+      return {
+        memory: { average: 0, peak: 0 },
+        cpu: { average: 0 },
+        requests: { total: 0, averageResponseTime: 0 },
+        uptime: process.uptime()
       };
-      
-      await fsWrite(`${reportPath}/${reportFileName}`, JSON.stringify(report, null, 2));
-      logger.info(`Performance report generated: ${reportFileName}`);
-    } catch (error) {
-      logger.error(`Error generating performance report: ${getErrorMessage(error)}`);
     }
+
+    const memoryUsage = recentMetrics.map(m => m.memory.used);
+    const cpuUsage = recentMetrics.map(m => m.cpu.usage);
+    const responseTimes = recentRequests.map(r => r.responseTime);
+
+    return {
+      memory: {
+        average: this.average(memoryUsage),
+        peak: Math.max(...memoryUsage),
+        current: this.metrics.memory.used
+      },
+      cpu: {
+        average: this.average(cpuUsage),
+        current: this.metrics.cpu.usage
+      },
+      requests: {
+        total: recentRequests.length,
+        averageResponseTime: responseTimes.length > 0 ? this.average(responseTimes) : 0,
+        totalRequests: this.requestMetrics.length
+      },
+      uptime: process.uptime(),
+      gc: this.gcStats,
+      eventLoop: this.metrics.eventLoop
+    };
   }
 
   /**
-   * Middleware to track request/response metrics
+   * Express middleware for automatic request tracking
    */
-  public metricsMiddleware() {
+  public middleware() {
     return (req: Request, res: Response, next: NextFunction) => {
-      // Increment connection counter
-      this.activeConnections++;
-      
-      // Track start time
       const startTime = Date.now();
-      
-      // Track endpoint
-      const endpoint = `${req.method} ${req.path}`;
-      
-      // Setup response end listener
+
       res.on('finish', () => {
-        // Decrement connection counter
-        this.activeConnections--;
-        
-        // Increment request counter
-        this.requestCounter++;
-        
-        // Calculate response time
         const responseTime = Date.now() - startTime;
-        
-        // Track response time by endpoint
-        if (!this.responseTimeTracker.has(endpoint)) {
-          this.responseTimeTracker.set(endpoint, []);
-        }
-        this.responseTimeTracker.get(endpoint)!.push(responseTime);
-        
-        // Track errors
-        if (res.statusCode >= 400) {
-          this.errorCounter++;
-        }
+        this.recordRequest(req, res, responseTime);
       });
-      
+
       next();
     };
   }
 
   /**
-   * Get the current metrics
+   * Save metrics to file
    */
-  public getMetrics(): PerformanceMetrics {
-    return { ...this.metrics };
+  public async saveMetricsToFile(): Promise<void> {
+    try {
+      const data = {
+        timestamp: new Date().toISOString(),
+        currentMetrics: this.metrics,
+        metricsHistory: this.metricsHistory,
+        requestMetrics: this.requestMetrics.slice(-100), // Save only recent requests
+        summary: this.getPerformanceSummary()
+      };
+
+      await fsWrite(this.metricsFilePath, JSON.stringify(data, null, 2));
+      logger.debug('Performance metrics saved to file');
+    } catch (error) {
+      logger.error('Failed to save performance metrics to file:', error);
+    }
   }
 
-  /**
-   * Get historical metrics
-   */
-  public getMetricsHistory(): PerformanceMetrics[] {
-    return [...this.metricsHistory];
+  private collectMetrics(): void {
+    try {
+      const memUsage = process.memoryUsage();
+      const cpuUsage = process.cpuUsage();
+      
+      this.metrics = {
+        timestamp: new Date().toISOString(),
+        memory: {
+          used: memUsage.rss,
+          total: os.totalmem(),
+          heapUsed: memUsage.heapUsed,
+          heapTotal: memUsage.heapTotal,
+          external: memUsage.external,
+          rss: memUsage.rss
+        },
+        cpu: {
+          usage: this.calculateCPUUsage(cpuUsage),
+          loadAverage: os.loadavg()
+        },
+        system: {
+          uptime: process.uptime(),
+          platform: os.platform(),
+          arch: os.arch(),
+          nodeVersion: process.version
+        },
+        v8: {
+          heapSpaceStatistics: v8.getHeapSpaceStatistics(),
+          heapStatistics: v8.getHeapStatistics()
+        },
+        gc: { ...this.gcStats },
+        eventLoop: {
+          lag: this.measureEventLoopLag()
+        }
+      };
+
+      this.metricsHistory.push({ ...this.metrics });
+      
+      // Keep history within limits
+      if (this.metricsHistory.length > this.maxHistorySize) {
+        this.metricsHistory = this.metricsHistory.slice(-this.maxHistorySize);
+      }
+
+      this.emit('metrics-collected', this.metrics);
+      
+      // Check for performance issues
+      this.checkPerformanceThresholds();
+      
+    } catch (error) {
+      logger.error('Error collecting performance metrics:', error);
+    }
   }
 
-  /**
-   * Subscribe to metrics updates
-   */
-  public onMetricsUpdated(listener: (metrics: PerformanceMetrics) => void): void {
-    this.events.on('metrics-updated', listener);
+  private initializeMetrics(): PerformanceMetrics {
+    const memUsage = process.memoryUsage();
+    
+    return {
+      timestamp: new Date().toISOString(),
+      memory: {
+        used: memUsage.rss,
+        total: os.totalmem(),
+        heapUsed: memUsage.heapUsed,
+        heapTotal: memUsage.heapTotal,
+        external: memUsage.external,
+        rss: memUsage.rss
+      },
+      cpu: {
+        usage: 0,
+        loadAverage: os.loadavg()
+      },
+      system: {
+        uptime: process.uptime(),
+        platform: os.platform(),
+        arch: os.arch(),
+        nodeVersion: process.version
+      },
+      v8: {
+        heapSpaceStatistics: v8.getHeapSpaceStatistics(),
+        heapStatistics: v8.getHeapStatistics()
+      }
+    };
   }
 
-  /**
-   * Unsubscribe from metrics updates
-   */
-  public offMetricsUpdated(listener: (metrics: PerformanceMetrics) => void): void {
-    this.events.off('metrics-updated', listener);
+  private calculateCPUUsage(cpuUsage: NodeJS.CpuUsage): number {
+    // Simple CPU usage calculation
+    const total = cpuUsage.user + cpuUsage.system;
+    return total / 1000000; // Convert to milliseconds
   }
 
-  /**
-   * Subscribe to performance alerts
-   */
-  public onPerformanceAlert(listener: (alert: any) => void): void {
-    this.events.on('performance-alert', listener);
+  private measureEventLoopLag(): number {
+    const start = process.hrtime();
+    setImmediate(() => {
+      const delta = process.hrtime(start);
+      const lag = delta[0] * 1e9 + delta[1] - 1e6; // 1ms in nanoseconds
+      return Math.max(0, lag / 1e6); // Convert to milliseconds
+    });
+    return 0; // Simplified for now
   }
 
-  /**
-   * Unsubscribe from performance alerts
-   */
-  public offPerformanceAlert(listener: (alert: any) => void): void {
-    this.events.off('performance-alert', listener);
+  private setupGCMonitoring(): void {
+    if (typeof (global as any).gc === 'function') {
+      const originalGC = (global as any).gc;
+      (global as any).gc = (...args: any[]) => {
+        const start = Date.now();
+        const result = originalGC.apply(this, args);
+        const duration = Date.now() - start;
+        
+        this.gcStats.collections++;
+        this.gcStats.duration += duration;
+        
+        return result;
+      };
+    }
+  }
+
+  private checkPerformanceThresholds(): void {
+    const memoryUsagePercent = (this.metrics.memory.used / this.metrics.memory.total) * 100;
+    const heapUsagePercent = (this.metrics.memory.heapUsed / this.metrics.memory.heapTotal) * 100;
+
+    // Emit warnings for high resource usage
+    if (memoryUsagePercent > 80) {
+      this.emit('high-memory-usage', {
+        percentage: memoryUsagePercent,
+        metrics: this.metrics
+      });
+    }
+
+    if (heapUsagePercent > 80) {
+      this.emit('high-heap-usage', {
+        percentage: heapUsagePercent,
+        metrics: this.metrics
+      });
+    }
+
+    if (this.metrics.cpu.usage > 80) {
+      this.emit('high-cpu-usage', {
+        usage: this.metrics.cpu.usage,
+        metrics: this.metrics
+      });
+    }
+  }
+
+  private async ensureMetricsDirectory(): Promise<void> {
+    try {
+      const dir = this.metricsFilePath.substring(0, this.metricsFilePath.lastIndexOf('/'));
+      await fsMkdir(dir, { recursive: true });
+    } catch (error) {
+      logger.error('Failed to create metrics directory:', error);
+    }
+  }
+
+  private generateRequestId(): string {
+    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  private average(numbers: number[]): number {
+    if (numbers.length === 0) return 0;
+    return numbers.reduce((sum, num) => sum + num, 0) / numbers.length;
   }
 }
 
-// Create and export singleton instance
+// Export singleton instance
 export const performanceMonitor = PerformanceMonitor.getInstance();
-export default performanceMonitor;

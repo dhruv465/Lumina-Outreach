@@ -10,6 +10,8 @@ import {
   BarChart3,
   LogOut,
   BookOpen,
+  Activity,
+  TestTube,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -149,6 +151,13 @@ const Sidebar: React.FC<SidebarProps> = ({ onNavigate, collapsed = false }) => {
             collapsed={collapsed}
           />
           <SidebarItem
+            href="/monitoring"
+            icon={<Activity size={19} />}
+            title="Monitoring"
+            onNavigate={onNavigate}
+            collapsed={collapsed}
+          />
+          <SidebarItem
             href="/configuration"
             icon={<Settings size={19} />}
             title="Configuration"
@@ -159,6 +168,13 @@ const Sidebar: React.FC<SidebarProps> = ({ onNavigate, collapsed = false }) => {
             href="/knowledge"
             icon={<BookOpen size={19} />}
             title="Knowledge Base"
+            onNavigate={onNavigate}
+            collapsed={collapsed}
+          />
+          <SidebarItem
+            href="/web-call-testing"
+            icon={<TestTube size={19} />}
+            title="Call Testing"
             onNavigate={onNavigate}
             collapsed={collapsed}
           />

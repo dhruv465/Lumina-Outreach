@@ -65,7 +65,7 @@ const CallLeadSheet = ({
   const [callStatus, setCallStatus] = useState<'idle' | 'connecting' | 'connected' | 'completed' | 'failed'>('idle');
   const [notes, setNotes] = useState('');
   const [configStatus, setConfigStatus] = useState<ConfigurationStatus | null>(null);
-  const [systemConfig, setSystemConfig] = useState<any>(null);
+  const [, setSystemConfig] = useState<any>(null);
 
   // Load campaigns when component mounts
   useEffect(() => {

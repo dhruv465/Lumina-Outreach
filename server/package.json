@@ -28,7 +28,13 @@
     "memory:monitor": "node --expose-gc --max-old-space-size=1536 --optimize-for-size dist/index.js",
     "migrate:deepgram": "ts-node src/migrations/deepgram-config-migration.ts migrate",
     "migrate:deepgram:rollback": "ts-node src/migrations/deepgram-config-migration.ts rollback",
-    "migrate:deepgram:validate": "ts-node src/migrations/deepgram-config-migration.ts validate"
+    "test:deepgram": "node quick-deepgram-test.js",
+    "test:deepgram-web": "node test-deepgram-web.js",
+    "migrate:deepgram:validate": "ts-node src/migrations/deepgram-config-migration.ts validate",
+    "migrate:deepgram:compatibility": "ts-node src/migrations/deepgram-model-compatibility-migration.ts migrate",
+    "migrate:deepgram:compatibility:rollback": "ts-node src/migrations/deepgram-model-compatibility-migration.ts rollback",
+    "migrate:deepgram:compatibility:report": "ts-node src/migrations/deepgram-model-compatibility-migration.ts report",
+    "migrate:deepgram:compatibility:check": "ts-node src/migrations/deepgram-model-compatibility-migration.ts compatibility"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
@@ -36,6 +42,7 @@
     "@google/genai": "^1.3.0",
     "@google/generative-ai": "^0.24.1",
     "@tensorflow/tfjs": "^4.22.0",
+    "@types/cron": "^2.0.1",
     "@types/redis": "^4.0.10",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.18.1",
@@ -45,6 +52,7 @@
     "cloudinary": "^2.6.1",
     "compression": "^1.8.0",
     "cors": "^2.8.5",
+    "cron": "^3.5.0",
     "csv-parser": "^3.2.0",
     "dotenv": "^16.5.0",
     "elevenlabs-node": "^2.0.3",

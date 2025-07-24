@@ -16,7 +16,7 @@ build/
 .env.production
 .env.development
 .env.test
-
+.kiro
 # Logs
 logs/
 *.log
@@ -728,3 +728,8 @@ deployment/backups/
 !tsconfig*.json
 !*.config.js
 !*.config.ts
+
+
+# remove kiros files
+
+.kiro/

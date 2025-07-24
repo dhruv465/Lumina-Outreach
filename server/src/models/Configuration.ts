@@ -71,6 +71,10 @@ export interface IConfiguration extends mongoose.Document {
     retryAttempts: number; // Number of retry attempts for failed requests
     timeoutMs: number; // Request timeout in milliseconds
     
+    // First-time setup tracking
+    firstTimeSetupCompleted?: boolean;
+    firstTimeSetupDate?: Date | null;
+    
     // Model compatibility tracking
     modelCompatibilityStatus?: {
       [modelName: string]: {
@@ -400,6 +404,16 @@ const ConfigurationSchema = new mongoose.Schema(
         default: 30000,
         min: 5000,
         max: 120000,
+      },
+      
+      // First-time setup tracking
+      firstTimeSetupCompleted: {
+        type: Boolean,
+        default: false,
+      },
+      firstTimeSetupDate: {
+        type: Date,
+        default: null,
       },
       
       // Model compatibility tracking

@@ -316,10 +316,12 @@ const Campaigns = () => {
     <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
         <h1 className="text-2xl sm:text-3xl font-bold">Campaigns</h1>
-        <Button onClick={handleCreateCampaign} size="sm">
-          <Plus size={16} className="mr-2" />
-          Create Campaign
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={handleCreateCampaign} size="sm">
+            <Plus size={16} className="mr-2" />
+            Create Campaign
+          </Button>
+        </div>
       </div>
 
       {/* Search and Filters */}
@@ -537,13 +539,9 @@ const Campaigns = () => {
                       <Edit size={16} className="mr-2" />
                       Edit
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleViewCampaign(campaign)}>
-                      <Info size={16} className="mr-2" />
-                      View Details
-                    </DropdownMenuItem>
                     <DropdownMenuItem 
-                      onClick={() => console.log('Delete campaign', campaign._id)}
                       className="text-destructive"
+                      onClick={() => console.log(`TODO: Delete campaign ${campaign._id}`)}
                     >
                       <Trash2 size={16} className="mr-2" />
                       Delete

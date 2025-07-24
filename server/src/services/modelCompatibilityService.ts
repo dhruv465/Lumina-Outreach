@@ -2,6 +2,7 @@ import { createClient, DeepgramClient } from '@deepgram/sdk';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
 import { alertSystem, AlertLevel, AlertType } from '../monitoring/alert_system';
+import { deepgramModelMetrics } from '../monitoring/deepgramModelMetrics';
 
 /**
  * Deepgram account tier types
@@ -235,6 +236,9 @@ export class ModelCompatibilityService {
         timestamp: Date.now()
       });
 
+      // Record validation metrics
+      deepgramModelMetrics.recordModelValidation(model, true, validationDuration);
+
       // Enhanced success logging
       logger.info(`Model validation successful for ${model}`, {
         model,
@@ -265,6 +269,9 @@ export class ModelCompatibilityService {
         result,
         timestamp: Date.now()
       });
+
+      // Record validation metrics
+      deepgramModelMetrics.recordModelValidation(model, false, validationDuration, errorType);
 
       // Enhanced failure logging
       logger.warn(`Model validation failed for ${model}`, {
@@ -360,6 +367,7 @@ export class ModelCompatibilityService {
    * Handle model fallback when current model fails
    */
   public handleModelFallback(currentModel: string, error: any): string {
+    const fallbackStartTime = Date.now();
     const errorType = this.classifyError(error);
     const alternatives = this.getSuggestedAlternatives(currentModel, errorType);
     const currentModelInfo = this.modelRegistry.models[currentModel];
@@ -377,6 +385,7 @@ export class ModelCompatibilityService {
     if (alternatives.length > 0) {
       const fallbackModel = alternatives[0];
       const fallbackModelInfo = this.modelRegistry.models[fallbackModel];
+      const fallbackDuration = Date.now() - fallbackStartTime;
       
       logger.info(`Model fallback successful: ${currentModel} → ${fallbackModel}`, {
         originalModel: currentModel,
@@ -388,6 +397,9 @@ export class ModelCompatibilityService {
         context: 'model-fallback-success'
       });
 
+      // Record fallback metrics
+      deepgramModelMetrics.recordModelFallback(currentModel, fallbackModel, fallbackDuration, errorType, true);
+
       // Create admin alert for model fallback
       this.createModelFallbackAlert(currentModel, fallbackModel, error, errorType);
       
@@ -397,6 +409,7 @@ export class ModelCompatibilityService {
     // Ultimate fallback
     const ultimateFallback = 'base';
     const ultimateFallbackInfo = this.modelRegistry.models[ultimateFallback];
+    const fallbackDuration = Date.now() - fallbackStartTime;
     
     logger.warn(`Using ultimate fallback model: ${ultimateFallback}`, {
       originalModel: currentModel,
@@ -407,6 +420,9 @@ export class ModelCompatibilityService {
       reason: 'No suitable alternatives found',
       context: 'model-ultimate-fallback'
     });
+
+    // Record ultimate fallback metrics
+    deepgramModelMetrics.recordModelFallback(currentModel, ultimateFallback, fallbackDuration, errorType, false);
 
     // Create critical alert for ultimate fallback usage
     this.createUltimateFallbackAlert(currentModel, ultimateFallback, error, errorType);
@@ -461,6 +477,9 @@ export class ModelCompatibilityService {
       },
       limits
     };
+
+    // Record account tier detection metrics
+    deepgramModelMetrics.recordAccountTierDetection(tier, availableModels, detectionDuration);
 
     // Enhanced logging for account capabilities
     logger.info('Account capabilities detected', {

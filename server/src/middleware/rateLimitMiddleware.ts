@@ -1,85 +1,149 @@
 /**
  * Rate Limiting Middleware
  * 
- * This middleware implements rate limiting for API requests,
- * preventing abuse and ensuring fair usage of the system.
+ * This middleware provides rate limiting for API endpoints to prevent abuse.
+ * It uses a token bucket algorithm to limit requests based on IP address or user ID.
  */
 
 import { Request, Response, NextFunction } from 'express';
 import { RateLimiterMemory } from 'rate-limiter-flexible';
-import { logger, getErrorMessage } from '../index';
+import logger from '../utils/logger';
 
-// Define interface for extended request
-interface RateLimitedRequest extends Request {
-  user?: {
-    id: string;
-    email: string;
-    role: string;
-  };
+// Define the rate limiter response interface
+interface RateLimiterResponse {
+  msBeforeNext: number;
+  remainingPoints: number;
+  consumedPoints: number;
+  isFirstInDuration: boolean;
 }
 
-// Different rate limits for different user roles
-const limiterOptions = {
-  default: {
-    points: 60, // Number of points
-    duration: 60, // Per X seconds
-    keyPrefix: 'rl_default'
-  },
-  admin: {
-    points: 200,
-    duration: 60,
-    keyPrefix: 'rl_admin'
-  },
-  premium: {
-    points: 120,
-    duration: 60,
-    keyPrefix: 'rl_premium'
-  }
-};
+// Rate limiter configurations
+const apiLimiter = new RateLimiterMemory({
+  points: 100,              // Number of points
+  duration: 60,             // Per 60 seconds
+  blockDuration: 60 * 2     // Block for 2 minutes if exceeded
+});
 
-// Create rate limiters
-const limiters = {
-  default: new RateLimiterMemory(limiterOptions.default),
-  admin: new RateLimiterMemory(limiterOptions.admin),
-  premium: new RateLimiterMemory(limiterOptions.premium)
+const webCallLimiter = new RateLimiterMemory({
+  points: 10,               // Number of points
+  duration: 60,             // Per 60 seconds
+  blockDuration: 60 * 5     // Block for 5 minutes if exceeded
+});
+
+const authLimiter = new RateLimiterMemory({
+  points: 5,                // Number of points
+  duration: 60,             // Per 60 seconds
+  blockDuration: 60 * 15    // Block for 15 minutes if exceeded
+});
+
+/**
+ * Get client identifier (IP address or user ID)
+ * @param req Express request
+ * @returns Client identifier
+ */
+const getClientIdentifier = (req: Request): string => {
+  // Use user ID if authenticated
+  if ((req as any).user?._id) {
+    return `user_${(req as any).user._id}`;
+  }
+  
+  // Use IP address as fallback
+  const ip = req.ip || 
+    req.connection.remoteAddress || 
+    req.headers['x-forwarded-for'] || 
+    'unknown';
+  
+  return `ip_${ip}`;
 };
 
 /**
- * Rate limiting middleware
+ * Rate limiting middleware factory
+ * @param limiter Rate limiter instance
+ * @param pointsToConsume Points to consume per request
+ * @returns Express middleware
  */
-export const rateLimiter = async (
-  req: RateLimitedRequest,
-  res: Response,
-  next: NextFunction
+const createRateLimitMiddleware = (
+  limiter: RateLimiterMemory,
+  pointsToConsume: number = 1
 ) => {
-  try {
-    // Determine which limiter to use based on user role
-    const userRole = req.user?.role || 'default';
-    const limiter = limiters[userRole as keyof typeof limiters] || limiters.default;
-    
-    // Use IP for non-authenticated requests, user ID for authenticated
-    const key = req.user?.id || req.ip || 'unknown';
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const clientId = getClientIdentifier(req);
     
     try {
-      // Check rate limit
-      await limiter.consume(key);
+      await limiter.consume(clientId, pointsToConsume);
       next();
-    } catch (rateLimitError) {
-      // Rate limit exceeded
-      const retryAfter = Math.floor((rateLimitError as any).msBeforeNext / 1000) || 60;
-      
-      logger.warn(`Rate limit exceeded for ${key} (${userRole})`);
-      
-      res.set('Retry-After', String(retryAfter));
-      return res.status(429).json({
-        success: false,
-        error: 'Too many requests, please try again later.',
-        retryAfter
-      });
+    } catch (error) {
+      if (error instanceof Error) {
+        // Handle unexpected errors
+        logger.error(`Rate limiter error: ${error.message}`);
+        next(error);
+      } else {
+        // Handle rate limit exceeded
+        const rateLimiterRes = error as RateLimiterResponse;
+        
+        logger.warn(`Rate limit exceeded for ${clientId}, path: ${req.path}`);
+        
+        res.status(429).json({
+          error: 'Too many requests',
+          retryAfter: Math.round(rateLimiterRes.msBeforeNext / 1000) || 1,
+          message: 'Please try again later'
+        });
+      }
     }
+  };
+};
+
+/**
+ * Standard API rate limiting middleware
+ */
+export const apiRateLimit = createRateLimitMiddleware(apiLimiter);
+
+/**
+ * Web call rate limiting middleware (stricter limits)
+ */
+export const webCallRateLimit = createRateLimitMiddleware(webCallLimiter);
+
+/**
+ * Authentication rate limiting middleware (very strict limits)
+ */
+export const authRateLimit = createRateLimitMiddleware(authLimiter);
+
+/**
+ * Custom rate limiting middleware with configurable points
+ * @param points Points to consume per request
+ * @returns Express middleware
+ */
+export const customRateLimit = (points: number) => createRateLimitMiddleware(apiLimiter, points);
+
+/**
+ * Reset rate limit for a client
+ * @param clientId Client identifier
+ * @param limiterType Limiter type ('api', 'webCall', 'auth')
+ */
+export const resetRateLimit = async (
+  clientId: string,
+  limiterType: 'api' | 'webCall' | 'auth' = 'api'
+): Promise<boolean> => {
+  try {
+    let limiter: RateLimiterMemory;
+    
+    switch (limiterType) {
+      case 'webCall':
+        limiter = webCallLimiter;
+        break;
+      case 'auth':
+        limiter = authLimiter;
+        break;
+      case 'api':
+      default:
+        limiter = apiLimiter;
+        break;
+    }
+    
+    await limiter.delete(clientId);
+    return true;
   } catch (error) {
-    // In case of unexpected error, allow the request to proceed
-    logger.error(`Rate limiter error: ${getErrorMessage(error)}`);
-    next();
+    logger.error(`Failed to reset rate limit for ${clientId}: ${error.message}`);
+    return false;
   }
 };

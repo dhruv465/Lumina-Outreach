@@ -1,4 +1,5 @@
 import axios from 'axios';
+import authDebug from '@/utils/authDebug';
 
 // For debugging configuration saves
 const logAPIOperation = (operation: string, url: string, data?: any) => {
@@ -40,8 +41,23 @@ api.interceptors.request.use(
     // Add authorization header if user is logged in
     const user = localStorage.getItem('user');
     if (user) {
-      const { token } = JSON.parse(user);
-      config.headers.Authorization = `Bearer ${token}`;
+      try {
+        const userData = JSON.parse(user);
+        if (userData && userData.token) {
+          // Ensure token is properly formatted
+          const token = userData.token.trim();
+          if (token) {
+            authDebug.log(`Setting Authorization header for ${config.url}`);
+            config.headers.Authorization = `Bearer ${token}`;
+          } else {
+            authDebug.warn('Token is empty after trimming');
+          }
+        } else {
+          authDebug.warn('User data found but token is missing');
+        }
+      } catch (error) {
+        authDebug.error('Failed to parse user data from localStorage:', error);
+      }
     }
     
     // Log the request for debugging
@@ -62,12 +78,17 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    // Production error handling - log error and pass it through
-    console.error('API Error:', error.message, {
+    // Enhanced error logging
+    authDebug.error('API Error Details:', {
       url: error.config?.url,
       method: error.config?.method,
       status: error.response?.status,
-      code: error.code
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      headers: error.response?.headers,
+      code: error.code,
+      message: error.message,
+      stack: error.stack
     });
     
     // For 404 Not Found errors related to data endpoints, return empty data
@@ -117,11 +138,53 @@ api.interceptors.response.use(
     
     // Handle unauthorized errors (401)
     if (error.response && error.response.status === 401) {
-      // Remove user from local storage
-      localStorage.removeItem('user');
-      // Redirect to login page if not already there
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+      // Get info about the current request
+      const requestUrl = error.config?.url || '';
+      const method = error.config?.method || '';
+      
+      // Check if this is a login-related request or other authentication endpoint
+      const isAuthEndpoint = 
+        requestUrl.includes('/users/login') || 
+        requestUrl.includes('/users/register') || 
+        requestUrl.includes('/auth');
+      
+      authDebug.warn(`401 error on ${method} ${requestUrl}, isAuthEndpoint: ${isAuthEndpoint}`);
+      
+      // Don't logout during login/register operations
+      if (isAuthEndpoint) {
+        authDebug.log('Ignoring 401 on auth endpoint');
+        return Promise.reject(error);
+      }
+      
+      // Check if we just logged in (grace period)
+      const lastLoginTime = localStorage.getItem('lastLoginTime');
+      const currentTime = Date.now();
+      const loginTimeDiff = lastLoginTime ? (currentTime - parseInt(lastLoginTime)) : Infinity;
+      const recentLogin = loginTimeDiff < 15000; // 15 seconds grace period
+      
+      authDebug.log(`Time since login: ${loginTimeDiff}ms, recentLogin: ${recentLogin}`);
+      
+      // Check if we're already on the login page
+      const isLoginPage = window.location.pathname === '/login';
+      
+      // Only logout if we're not in a safe condition and it's not a recent login
+      if (!recentLogin && !isLoginPage) {
+        authDebug.error('401 error detected, logging out user');
+        // Remove user from local storage
+        localStorage.removeItem('user');
+        localStorage.removeItem('lastLoginTime');
+        sessionStorage.removeItem('sessionInitialized');
+        
+        // Redirect to login page
+        setTimeout(() => {
+          window.location.href = '/login';
+        }, 100);
+      } else {
+        authDebug.log('Ignoring 401 due to safety conditions', {
+          isAuthEndpoint,
+          recentLogin,
+          isLoginPage
+        });
       }
     }
     return Promise.reject(error);

@@ -346,3 +346,43 @@ export function withCircuitBreaker(
     return descriptor;
   };
 }
+
+/**
+ * Circuit Breaker Factory for creating service-specific circuit breakers
+ */
+export class CircuitBreakerFactory {
+  private static instances: Map<string, RateLimitAwareCircuitBreaker<any, any>> = new Map();
+  
+  /**
+   * Create or get a circuit breaker for a specific service
+   * @param serviceName Name of the service
+   * @param options Circuit breaker options
+   * @returns Circuit breaker instance
+   */
+  static create(serviceName: string, options?: Partial<RateLimitAwareOptions>): RateLimitAwareCircuitBreaker<any, any> {
+    if (this.instances.has(serviceName)) {
+      return this.instances.get(serviceName)!;
+    }
+    
+    // Create a generic action function that can be used for any service
+    const genericAction = async (...args: any[]) => {
+      throw new Error(`Circuit breaker for ${serviceName} called without proper action`);
+    };
+    
+    const circuitBreaker = createRateLimitAwareCircuitBreaker(
+      genericAction,
+      options,
+      serviceName
+    );
+    
+    this.instances.set(serviceName, circuitBreaker);
+    return circuitBreaker;
+  }
+  
+  /**
+   * Clear all circuit breaker instances
+   */
+  static clear(): void {
+    this.instances.clear();
+  }
+}

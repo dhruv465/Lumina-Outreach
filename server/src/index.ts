@@ -288,9 +288,9 @@ const authLimiter = rateLimit({
 
 // Advanced rate limiter for API abuse prevention
 const apiAbuseProtection = new RateLimiterMemory({
-  points: 50, // Number of requests
+  points: process.env.NODE_ENV === 'development' ? 200 : 50, // Increased for development
   duration: 60, // Per 60 seconds
-  blockDuration: 300, // Block for 5 minutes if limit exceeded
+  blockDuration: process.env.NODE_ENV === 'development' ? 60 : 300, // Reduced for development
 });
 
 // Middleware for API abuse protection

@@ -15,7 +15,7 @@ import {
   resetMetrics,
   getMetricsHealth
 } from '../controllers/deepgramMetricsController';
-import { authenticate } from '../middleware/authMiddleware';
+import { authenticate } from '../middleware/auth';
 import { apiRateLimit } from '../middleware/rateLimitMiddleware';
 
 const router = Router();

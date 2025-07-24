@@ -1,4 +1,5 @@
 import api from './api';
+import { throttleAPI, apiCache } from '../utils/apiUtils';
 
 // Types
 interface LeadParams {
@@ -40,7 +41,30 @@ export const leadsApi = {
 
   // Get a specific lead by ID
   getLeadById: async (id: string) => {
+    // Create a cache key
+    const cacheKey = `lead_${id}`;
+    
+    // Check if we have a cached response
+    const cachedData = apiCache.get(cacheKey);
+    if (cachedData) {
+      console.log('Using cached lead data for ID:', id);
+      return cachedData;
+    }
+    
+    // Check if we should throttle this request
+    if (!throttleAPI(`/leads/${id}`)) {
+      console.log('Throttling lead request for ID:', id);
+      // If we need to throttle but have no cached data, we'll still make the request
+      // but log a warning - in a real app you might want to handle this differently
+      console.warn('Rapid request detected for lead:', id);
+    }
+    
+    // Make the API request
     const response = await api.get(`/leads/${id}`);
+    
+    // Cache the response
+    apiCache.set(cacheKey, response.data);
+    
     return response.data;
   },
 
@@ -53,12 +77,20 @@ export const leadsApi = {
   // Update an existing lead
   updateLead: async (id: string, leadData: Partial<LeadData>) => {
     const response = await api.put(`/leads/${id}`, leadData);
+    
+    // Invalidate the cache
+    apiCache.set(`lead_${id}`, null);
+    
     return response.data;
   },
 
   // Delete a lead
   deleteLead: async (id: string) => {
     const response = await api.delete(`/leads/${id}`);
+    
+    // Invalidate the cache
+    apiCache.set(`lead_${id}`, null);
+    
     return response.data;
   },
 

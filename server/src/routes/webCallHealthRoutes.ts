@@ -6,7 +6,7 @@
 
 import express from 'express';
 import { getWebCallHealth, resetCircuitBreaker, getServiceHealth } from '../controllers/webCallHealthController';
-import { authenticate, authorize } from '../middleware/authMiddleware';
+import { authenticate, authorize } from '../middleware/auth';
 
 const router = express.Router();
 

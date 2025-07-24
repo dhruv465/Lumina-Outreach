@@ -5,7 +5,7 @@
 
 import express from 'express';
 import * as metricsController from '../controllers/metricsController';
-import { authenticate } from '../middleware/authMiddleware';
+import { authenticate } from '../middleware/auth';
 import { roleCheck } from '../middleware/roleCheck';
 
 const router = express.Router();

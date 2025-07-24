@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Slider } from './ui/slider';
-import { PauseIcon, PlayIcon, StopIcon, Volume2Icon, VolumeXIcon } from 'lucide-react';
+import * as LucideIcons from 'lucide-react';
 
 interface WebCallAudioPlayerProps {
   audioBuffer?: ArrayBuffer | null;
@@ -34,7 +34,6 @@ export const WebCallAudioPlayer: React.FC<WebCallAudioPlayerProps> = ({
   const [volume, setVolume] = useState(1);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
-  const [audioData, setAudioData] = useState<number[]>([]);
   
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -205,12 +204,9 @@ export const WebCallAudioPlayer: React.FC<WebCallAudioPlayerProps> = ({
     const dataArray = new Uint8Array(bufferLength);
     
     analyserRef.current.getByteFrequencyData(dataArray);
-    
-    // Update audio data state for visualization
-    setAudioData(Array.from(dataArray));
+    analyserRef.current.getByteFrequencyData(dataArray);
     
     // Clear canvas
-    canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
     
     // Draw visualization
     const width = canvas.width;
@@ -385,12 +381,12 @@ export const WebCallAudioPlayer: React.FC<WebCallAudioPlayerProps> = ({
             <div className="w-full h-full flex items-center justify-center">
               <div className="text-xs text-red-500 p-2 text-center">
                 <div className="flex items-center justify-center gap-1 mb-1">
-                  <AlertCircle size={12} />
+                  <LucideIcons.AlertCircle size={12} />
                   <span>Audio playback error</span>
                 </div>
                 {isRecovering ? (
                   <div className="flex items-center justify-center gap-1">
-                    <RefreshCw className="h-3 w-3 animate-spin" />
+                    <LucideIcons.RefreshCw className="h-3 w-3 animate-spin" />
                     <span>Attempting recovery...</span>
                   </div>
                 ) : (
@@ -426,7 +422,7 @@ export const WebCallAudioPlayer: React.FC<WebCallAudioPlayerProps> = ({
             onClick={isPlaying ? pauseAudio : playAudio}
             disabled={!decodedBufferRef.current || isRecovering}
           >
-            {isPlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />}
+            {isPlaying ? <LucideIcons.PauseIcon size={16} /> : <LucideIcons.PlayIcon size={16} />}
           </Button>
           
           {/* Stop Button */}
@@ -436,7 +432,7 @@ export const WebCallAudioPlayer: React.FC<WebCallAudioPlayerProps> = ({
             onClick={stopPlayback}
             disabled={!isPlaying || isRecovering}
           >
-            <StopIcon size={16} />
+            <LucideIcons.Square size={16} />
           </Button>
           
           {/* Time Display */}
@@ -451,7 +447,7 @@ export const WebCallAudioPlayer: React.FC<WebCallAudioPlayerProps> = ({
             onClick={toggleMute}
             disabled={isRecovering}
           >
-            {isMuted ? <VolumeXIcon size={16} /> : <Volume2Icon size={16} />}
+            {isMuted ? <LucideIcons.VolumeXIcon size={16} /> : <LucideIcons.Volume2Icon size={16} />}
           </Button>
           
           <Slider

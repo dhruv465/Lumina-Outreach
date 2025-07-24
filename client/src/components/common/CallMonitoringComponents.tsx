@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info, AlertCircle, Play, Pause } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -34,16 +34,14 @@ export function CallMetricsCard({
         <div className="flex items-center gap-1.5">
           <h3 className="text-sm font-medium">{title}</h3>
           {tooltipText && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Info className="h-3.5 w-3.5 text-muted-foreground" />
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p className="text-xs max-w-xs">{tooltipText}</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info className="h-3.5 w-3.5 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs max-w-xs">{tooltipText}</p>
+              </TooltipContent>
+            </Tooltip>
           )}
         </div>
         {icon && <div className="text-muted-foreground">{icon}</div>}

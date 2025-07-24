@@ -1,6 +1,6 @@
 import express from 'express';
 import expressWs from 'express-ws';
-import { authenticate } from '../middleware/authMiddleware';
+import { authenticate } from '../middleware/auth';
 import { handleVoiceStream, handleConversationalAIStream } from '../controllers/streamController';
 import { handleOptimizedVoiceStream } from '../controllers/optimizedStreamController';
 import { handleLowLatencyVoiceStream, triggerCachePreload } from '../controllers/lowLatencyStreamController';

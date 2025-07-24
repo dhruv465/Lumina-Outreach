@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticate } from '../middleware/authMiddleware';
+import { authenticate } from '../middleware/auth';
 import {
   getVoicePersonalities,
   synthesizeVoice,

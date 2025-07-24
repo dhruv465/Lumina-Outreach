@@ -6,7 +6,7 @@
 
 import express from 'express';
 import { initializeWebCall, endWebCall } from '../controllers/webCallController';
-import { authenticate } from '../middleware/authMiddleware';
+import { authenticate } from '../middleware/auth';
 import { webCallRateLimit } from '../middleware/rateLimitMiddleware';
 import { webCallErrorHandler } from '../middleware/webCallErrorHandler';
 import { validateWebCallRequest } from '../middleware/validationMiddleware';

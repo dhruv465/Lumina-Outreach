@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Request, Response } from 'express';
-import { authenticate, authorize } from '../../../middleware/authMiddleware';
+import { authenticate, authorize } from '../../../middleware/auth';
 import { webCallRateLimit } from '../../../middleware/rateLimitMiddleware';
 import { webCallErrorHandler, WebCallError, WebCallErrorType } from '../../../middleware/webCallErrorHandler';
 import { validateWebCallRequest } from '../../../middleware/validationMiddleware';

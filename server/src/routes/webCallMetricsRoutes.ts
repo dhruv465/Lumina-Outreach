@@ -1,6 +1,6 @@
 import express from 'express';
 import { getWebCallMetrics, getCampaignComparison } from '../controllers/webCallMetricsController';
-import { authenticate } from '../middleware/authMiddleware';
+import { authenticate } from '../middleware/auth';
 
 const router = express.Router();
 

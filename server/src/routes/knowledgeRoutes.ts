@@ -5,7 +5,7 @@
 
 import express, { Request } from 'express';
 import * as knowledgeController from '../controllers/knowledgeController';
-import { authenticate } from '../middleware/authMiddleware';
+import { authenticate } from '../middleware/auth';
 import { validateWebCallRequest, validateRequest } from '../middleware/validationMiddleware';
 import { apiRateLimit } from '../middleware/rateLimitMiddleware';
 import multer from 'multer';

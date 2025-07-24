@@ -5,7 +5,7 @@
 
 import express from 'express';
 import * as deepgramMetricsController from '../controllers/deepgramMetricsController';
-import { authenticate } from '../middleware/authMiddleware';
+import { authenticate } from '../middleware/auth';
 
 const router = express.Router();
 

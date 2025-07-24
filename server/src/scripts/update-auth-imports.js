@@ -34,8 +34,8 @@ routeFiles.forEach(file => {
     
     // Replace import statement
     content = content.replace(
-      "import { authenticate } from '../middleware/authMiddleware';",
-      "import { authenticate } from '../middleware/authMiddleware';"
+      "import { authenticate } from '../middleware/auth';",
+      "import { authenticate } from '../middleware/auth';"
     );
     
     // Write updated content back to file

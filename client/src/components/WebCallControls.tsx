@@ -13,7 +13,6 @@ import {
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from './ui/tooltip';
 import {
@@ -82,24 +81,23 @@ const WebCallControls: React.FC<WebCallControlsProps> = ({
   
   return (
     <div className={`web-call-controls flex items-center justify-center gap-3 ${className}`}>
-      <TooltipProvider>
-        {/* Call start/end button */}
-        {!isCallActive ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button 
-                onClick={onStartCall} 
-                disabled={disableStartButton}
-                className="bg-green-600 hover:bg-green-700"
-              >
-                <Phone className="mr-2 h-4 w-4" />
-                Start Call
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Start a test call with the selected campaign</p>
-            </TooltipContent>
-          </Tooltip>
+      {/* Call start/end button */}
+      {!isCallActive ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button 
+              onClick={onStartCall} 
+              disabled={disableStartButton}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              <Phone className="mr-2 h-4 w-4" />
+              Start Call
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Start a test call with the selected campaign</p>
+          </TooltipContent>
+        </Tooltip>
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -146,20 +144,22 @@ const WebCallControls: React.FC<WebCallControlsProps> = ({
         
         {/* Volume controls */}
         <Popover open={showVolumeControls} onOpenChange={setShowVolumeControls}>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="icon">
-                {volume === 0 ? (
-                  <VolumeX className="h-4 w-4" />
-                ) : (
-                  <Volume2 className="h-4 w-4" />
-                )}
-              </Button>
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Adjust volume</p>
-          </TooltipContent>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="icon">
+                  {volume === 0 ? (
+                    <VolumeX className="h-4 w-4" />
+                  ) : (
+                    <Volume2 className="h-4 w-4" />
+                  )}
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Adjust volume</p>
+            </TooltipContent>
+          </Tooltip>
           
           <PopoverContent className="w-80">
             <div className="space-y-4">
@@ -201,7 +201,6 @@ const WebCallControls: React.FC<WebCallControlsProps> = ({
             <p>Call settings</p>
           </TooltipContent>
         </Tooltip>
-      </TooltipProvider>
     </div>
   );
 };

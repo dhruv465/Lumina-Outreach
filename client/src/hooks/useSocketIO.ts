@@ -32,13 +32,17 @@ export function useSocketIO() {
 
   // Initialize socket connection
   useEffect(() => {
-    // Create the socket instance
-    const socketInstance = io(window.location.origin, {
+    // Create the socket instance using the same URL from environment variable
+    const SOCKET_URL = import.meta.env.VITE_WS_URL || window.location.origin;
+    console.log('SocketIO connecting to:', SOCKET_URL);
+    
+    const socketInstance = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
       autoConnect: true,
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
       reconnectionDelay: 1000,
+      timeout: 60000,            // Increased connection timeout matching server
     });
 
     // Set up event handlers

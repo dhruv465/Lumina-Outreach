@@ -20,7 +20,6 @@ import campaignRoutes from './routes/campaignRoutes';
 import configurationRoutes from './routes/configurationRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import debugRoutes from './routes/debugRoutes';
-import deepgramMetricsRoutes from './routes/deepgramMetricsRoutes';
 import deepgramTestRoutes, { setupDeepgramWebSocketServer } from './routes/deepgramTestRoutes';
 import knowledgeRoutes from './routes/knowledgeRoutes';
 import leadRoutes from './routes/leadRoutes';
@@ -31,11 +30,14 @@ import telephonyRoutes from './routes/telephonyRoutes';
 import transcriptionRoutes from './routes/transcriptionRoutes';
 import userRoutes from './routes/userRoutes';
 import voiceAIRoutes from './routes/voiceAIRoutes';
-import webCallRoutes from './routes/webCallRoutes';
 import webCallMetricsRoutes from './routes/webCallMetricsRoutes';
+import webCallRoutes from './routes/webCallRoutes';
+
+// Optimized stream controller
+import { optimizedStreamRoute } from './controllers/optimizedStreamController';
 
 // Twilio Media Streams WebSocket handler
-import { handleLowLatencyVoiceStream } from './controllers/lowLatencyStreamController';
+import { initializeTwilioWebSocketServer } from './services/twilioWebSocketServer';
 
 // Web Call WebSocket handlers
 import { setupWebCallSocketHandlers } from './routes/webCallSocketRoutes';
@@ -72,7 +74,7 @@ const logger = winston.createLogger({
     winston.format.errors({ stack: true }),
     winston.format.json()
   ),
-  defaultMeta: { 
+  defaultMeta: {
     service: 'lumina-outreach',
     version: process.env.npm_package_version || '1.0.0',
     environment: process.env.NODE_ENV || 'development'
@@ -87,10 +89,10 @@ const logger = winston.createLogger({
         ),
       })
     ] : []),
-    
+
     // File transports with rotation
-    new winston.transports.File({ 
-      filename: path.join('logs', 'error.log'), 
+    new winston.transports.File({
+      filename: path.join('logs', 'error.log'),
       level: 'error',
       maxsize: logFileMaxSize,
       maxFiles: logFileMaxFiles,
@@ -99,7 +101,7 @@ const logger = winston.createLogger({
         winston.format.json()
       )
     }),
-    new winston.transports.File({ 
+    new winston.transports.File({
       filename: path.join('logs', 'combined.log'),
       maxsize: logFileMaxSize,
       maxFiles: logFileMaxFiles,
@@ -108,7 +110,7 @@ const logger = winston.createLogger({
         winston.format.json()
       )
     }),
-    
+
     // Console transport for production (structured logging)
     ...(process.env.NODE_ENV === 'production' ? [
       new winston.transports.Console({
@@ -134,8 +136,30 @@ const server = http.createServer(app);
 // Initialize WebSocket support and get the augmented app instance
 const { app: wsApp } = expressWs(app, server);
 
-// Register Twilio Media Streams WebSocket endpoint on the augmented app
-wsApp.ws('/voice/low-latency/:callId/:conversationId', handleLowLatencyVoiceStream);
+// Initialize dedicated Twilio WebSocket server with robust framing
+const twilioWSServer = initializeTwilioWebSocketServer(server);
+logger.info('Dedicated Twilio WebSocket server initialized for robust framing');
+
+// Add server upgrade event handler for better WebSocket connection debugging
+server.on('upgrade', (request, socket, head) => {
+  const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname;
+
+  // Log all upgrade requests for debugging
+  logger.debug('HTTP upgrade request received', {
+    pathname,
+    headers: {
+      host: request.headers.host,
+      origin: request.headers.origin,
+      'user-agent': request.headers['user-agent'],
+      upgrade: request.headers.upgrade,
+      connection: request.headers.connection
+    },
+    method: request.method
+  });
+
+  // Let express-ws and other WebSocket servers handle the upgrade automatically
+  // The WebSocket routes are already defined in streamRoutes.ts
+});
 
 const io = new SocketIOServer(server, {
   cors: {
@@ -143,6 +167,11 @@ const io = new SocketIOServer(server, {
     methods: ['GET', 'POST'],
     credentials: true,
   },
+  pingTimeout: parseInt(process.env.WS_PING_TIMEOUT || '120000'),      // Use environment variable or default to 120 seconds
+  pingInterval: parseInt(process.env.WS_PING_INTERVAL || '15000'),     // Use environment variable or default to 15 seconds
+  connectTimeout: parseInt(process.env.WS_CONNECT_TIMEOUT || '60000'), // Use environment variable or default to 60 seconds
+  maxHttpBufferSize: 1e8,    // 100MB max buffer size for larger audio chunks
+  transports: ['websocket', 'polling'],  // Prefer WebSocket, fallback to polling
 });
 
 // Set up WebSocket handlers for web call testing
@@ -155,6 +184,9 @@ setupDeepgramWebSocketServer(server);
 // Enhanced middleware setup for production
 const corsOrigin = process.env.CORS_ORIGIN || process.env.CLIENT_URL || 'http://localhost:3000';
 const isProduction = process.env.NODE_ENV === 'production';
+
+// Trust proxy configuration for accurate IP detection
+app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal']);
 
 // CORS configuration
 app.use(cors({
@@ -210,7 +242,7 @@ app.use('/audio', express.static(path.join(__dirname, '../public/audio')));
 app.use('/fallbacks', express.static(path.join(__dirname, '../public/fallbacks')));
 
 // Body parsing middleware with limits
-app.use(express.json({ 
+app.use(express.json({
   limit: '10mb',
   verify: (req, _res, buf) => {
     if (buf && buf.length) {
@@ -218,9 +250,9 @@ app.use(express.json({
     }
   }
 }));
-app.use(express.urlencoded({ 
-  extended: true, 
-  limit: '10mb' 
+app.use(express.urlencoded({
+  extended: true,
+  limit: '10mb'
 }));
 
 // Enhanced logging
@@ -301,14 +333,14 @@ const apiAbuseMiddleware = async (req: express.Request, res: express.Response, n
   } catch (rejRes) {
     const remainingPoints = rejRes.remainingPoints || 0;
     const msBeforeNext = rejRes.msBeforeNext || 1000;
-    
+
     logger.warn(`API abuse detected for IP: ${req.ip}`, {
       ip: req.ip,
       remainingPoints,
       msBeforeNext,
       url: req.url
     });
-    
+
     res.set('Retry-After', String(Math.round(msBeforeNext / 1000)));
     res.status(429).json({
       error: 'Too many requests. You have been temporarily blocked.',
@@ -323,6 +355,11 @@ app.get('/health', healthCheckHandler);
 // Readiness probe (for Kubernetes/Docker)
 app.get('/ready', readinessCheckHandler);
 
+// Friendly root route
+app.get('/', (_, res) =>
+  res.json({ message: 'Lumina Outreach API is up 🚀' })
+);
+
 // Metrics endpoint for monitoring
 app.get('/metrics', (_req, res) => {
   const metrics = {
@@ -336,7 +373,7 @@ app.get('/metrics', (_req, res) => {
     },
     activeConnections: io.engine.clientsCount
   };
-  
+
   res.status(200).json(metrics);
 });
 
@@ -378,13 +415,16 @@ if (process.env.NODE_ENV !== 'production') {
   app.use('/api/debug', debugRoutes);
 }
 
+// Add optimized stream route
+app.get('/voice/optimized-stream/:callId/:conversationId', optimizedStreamRoute);
+
 // WebSocket routes
 app.use('/', streamRoutes);
 
 // Enhanced global error handler
 app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const errorId = Math.random().toString(36).substring(7);
-  
+
   logger.error('Unhandled error:', {
     errorId,
     message: err.message,
@@ -398,15 +438,15 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
 
   // Don't leak error details in production
   const isDevelopment = process.env.NODE_ENV === 'development';
-  
+
   const errorResponse = {
     error: true,
     message: isDevelopment ? err.message : 'An internal server error occurred',
     errorId,
     timestamp: new Date().toISOString(),
-    ...(isDevelopment && { 
+    ...(isDevelopment && {
       stack: err.stack,
-      details: err 
+      details: err
     })
   };
 
@@ -420,7 +460,7 @@ app.use('*', (req: express.Request, res: express.Response) => {
     ip: req.ip,
     userAgent: req.get('User-Agent')
   });
-  
+
   res.status(404).json({
     error: true,
     message: 'Route not found',
@@ -449,7 +489,7 @@ io.on('connection', (socket) => {
     socket.join(`campaign-${campaignId}`);
     logger.info(`Joined call monitoring for campaign ${campaignId}`);
   });
-  
+
   // Handle user-specific notifications
   socket.on('join-user-room', (userId) => {
     socket.join(`user-${userId}`);
@@ -463,35 +503,35 @@ const initializeServices = async () => {
     // Get configuration from database
     const Configuration = require('./models/Configuration').default;
     const config = await Configuration.findOne();
-    
+
     let elevenLabsApiKey = '';
     let openAIApiKey = '';
     let anthropicApiKey = '';
     let googleSpeechApiKey = '';
     let deepgramApiKey = '';
-    
+
     // If configuration exists, use it; otherwise use empty keys (no environment fallback)
     if (config) {
       logger.info('Using API configuration from database');
-      
+
       // ElevenLabs
       elevenLabsApiKey = config.elevenLabsConfig?.apiKey || '';
-      
+
       // LLM providers
       const openAIProvider = config.llmConfig?.providers?.find((p: any) => p.name === 'openai');
       openAIApiKey = openAIProvider?.apiKey || '';
-      
+
       const anthropicProvider = config.llmConfig?.providers?.find((p: any) => p.name === 'anthropic');
       anthropicApiKey = anthropicProvider?.apiKey || '';
-      
+
       // Google (if configured)
       const googleProvider = config.llmConfig?.providers?.find((p: any) => p.name === 'google');
       googleSpeechApiKey = googleProvider?.apiKey || '';
-      
+
       // Deepgram for STT (Nova-2)
       deepgramApiKey = config.deepgramConfig?.apiKey || '';
       logger.info('Deepgram API key ' + (deepgramApiKey ? 'found' : 'not found') + ' in configuration');
-      
+
       // Initialize and validate Deepgram auto-configuration with graceful startup
       if (deepgramApiKey) {
         try {
@@ -499,14 +539,14 @@ const initializeServices = async () => {
           const { getDeepgramAutoConfigService } = await import('./services/deepgramAutoConfigService');
           const autoConfigService = getDeepgramAutoConfigService();
           await autoConfigService.initialize(deepgramApiKey);
-          
+
           // Perform graceful startup validation that won't fail the server
           logger.info('Performing graceful Deepgram startup validation...');
           const gracefulResult = await autoConfigService.performGracefulStartupValidation();
-          
+
           if (gracefulResult.success) {
             logger.info(`Deepgram startup validation successful: ${gracefulResult.message}`);
-            
+
             // Log details about the configuration
             if (gracefulResult.autoConfigResult) {
               logger.info('Auto-configuration details:', {
@@ -515,7 +555,7 @@ const initializeServices = async () => {
                 availableModels: gracefulResult.autoConfigResult.availableModels.length,
                 warnings: gracefulResult.autoConfigResult.warnings
               });
-              
+
               // Update deepgramApiKey reference for service initialization
               const updatedConfig = await Configuration.findOne();
               if (updatedConfig?.deepgramConfig?.apiKey) {
@@ -524,7 +564,7 @@ const initializeServices = async () => {
             }
           } else {
             logger.warn(`Deepgram startup validation issues: ${gracefulResult.message}`);
-            
+
             // Log validation details for troubleshooting
             if (gracefulResult.validationResult) {
               logger.warn('Validation details:', {
@@ -533,18 +573,18 @@ const initializeServices = async () => {
                 suggestedAction: gracefulResult.validationResult.suggestedAction
               });
             }
-            
+
             if (gracefulResult.autoConfigResult && !gracefulResult.autoConfigResult.success) {
               logger.warn('Auto-configuration failed:', {
                 error: gracefulResult.autoConfigResult.error,
                 warnings: gracefulResult.autoConfigResult.warnings
               });
             }
-            
+
             // Server continues regardless - graceful degradation
             logger.info('Server will continue with Deepgram in degraded mode');
           }
-          
+
           // Always start background validation if possible
           try {
             autoConfigService.startBackgroundValidation();
@@ -552,12 +592,12 @@ const initializeServices = async () => {
           } catch (bgError) {
             logger.warn(`Failed to start background validation: ${getErrorMessage(bgError)}`);
           }
-          
+
         } catch (error) {
           logger.error(`Deepgram auto-configuration initialization failed: ${getErrorMessage(error)}`);
           logger.warn('Deepgram services will start without auto-configuration');
           logger.info('Manual configuration may be required via the Configuration page');
-          
+
           // Server continues even if initialization completely fails
           logger.info('Server startup continuing without Deepgram auto-configuration');
         }
@@ -615,17 +655,17 @@ const initializeServices = async () => {
       googleSpeechApiKey,
       deepgramApiKey
     );
-    
+
     // Initialize AdvancedTelephonyService manually (safe initialization)
     const { advancedTelephonyService } = require('./services/advancedTelephonyService');
     await advancedTelephonyService.updateConfiguration();
     logger.info('Advanced telephony service initialized');
-    
+
     // Export services
     global.speechService = speechService;
     global.conversationEngine = conversationEngine;
     global.campaignService = campaignService;
-    
+
     return {
       speechService,
       conversationEngine,
@@ -644,7 +684,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 const startServer = async () => {
   try {
     logger.info('Starting Lumina Outreach server...');
-    
+
     // Step 1: Validate startup configuration (environment variables only)
     logger.info('Validating startup configuration...');
     const configValidation = validateStartupConfig();
@@ -653,29 +693,29 @@ const startServer = async () => {
       throw new Error(`Invalid startup configuration: ${configValidation.error}`);
     }
     logger.info('Startup configuration validation passed');
-    
+
     // Step 2: Connect to database
     logger.info('Establishing database connection...');
     await connectToDatabase();
-    
+
     // Step 2.1: Wait for database to be ready
     logger.info('Waiting for database to be ready...');
     const { waitForDatabaseConnection } = await import('./database/connection');
     await waitForDatabaseConnection();
     logger.info('Database connection confirmed ready');
-    
+
     // Step 2.5: Validate database-loaded configuration (optional)
     logger.info('Validating database configuration...');
     try {
       const { validateDatabaseLoadedConfig, validateDeepgramStartupConfig } = await import('./config/database-validation');
       const Configuration = require('./models/Configuration').default;
       const config = await Configuration.findOne();
-      
+
       const dbConfigValidation = validateDatabaseLoadedConfig(config);
       if (!dbConfigValidation.isValid) {
         logger.warn('Database configuration has issues:', dbConfigValidation.error);
         logger.warn('Services will start with limited functionality. Configure API keys in the Configuration page.');
-        
+
         // Log warnings if they exist
         if (dbConfigValidation.details?.warnings) {
           dbConfigValidation.details.warnings.forEach((warning: string) => {
@@ -684,7 +724,7 @@ const startServer = async () => {
         }
       } else {
         logger.info('Database configuration is valid');
-        
+
         // Log warnings even for valid configurations
         if (dbConfigValidation.details?.warnings) {
           dbConfigValidation.details.warnings.forEach((warning: string) => {
@@ -692,12 +732,12 @@ const startServer = async () => {
           });
         }
       }
-      
+
       // Perform specific Deepgram startup validation
       if (config?.deepgramConfig) {
         logger.info('Performing Deepgram-specific startup validation...');
         const deepgramValidation = validateDeepgramStartupConfig(config.deepgramConfig);
-        
+
         if (!deepgramValidation.isValid) {
           logger.warn(`Deepgram startup validation failed: ${deepgramValidation.error}`);
           logger.info('Auto-configuration will attempt to resolve these issues during service initialization');
@@ -708,59 +748,59 @@ const startServer = async () => {
           }
         }
       }
-      
+
     } catch (error) {
       logger.warn('Could not validate database configuration:', error);
       logger.warn('Services will start with empty credentials - configure via Configuration page');
     }
-    
+
     // Step 3: Initialize services with database-driven configuration
     logger.info('Initializing application services...');
-    
+
     // Initialize Cloudinary service
     initCloudinary();
-    
+
     // Test Cloudinary connection
     const cloudinaryService = await import('./utils/cloudinaryService').then(m => m.default);
     const cloudinaryWorks = await cloudinaryService.testCloudinaryConnection();
     logger.info(`Cloudinary connection test result: ${cloudinaryWorks ? 'SUCCESS' : 'FAILED'}`);
-    
+
     // Initialize services that load configuration from database
     await initializeServices();
-    
+
     // Initialize post-database services
     const { initializeServicesAfterDB } = await import('./services');
     await initializeServicesAfterDB();
-    
+
     // Initialize rate limiters for API providers
     try {
       const { getRateLimiter } = await import('./utils/rateLimiter');
-      
+
       // Initialize rate limiters with appropriate limits
       // Google/Gemini - 15 requests per minute (free tier)
       getRateLimiter('google', { requestsPerMinute: 15, queueSize: 30 });
-      
+
       // OpenAI - 60 requests per minute (default tier)
       getRateLimiter('openai', { requestsPerMinute: 60, queueSize: 30 });
-      
+
       // ElevenLabs - 30 requests per minute (default tier)
       getRateLimiter('elevenlabs', { requestsPerMinute: 30, queueSize: 20 });
-      
+
       logger.info('Rate limiters initialized for API providers');
     } catch (error) {
       logger.error(`Error initializing rate limiters: ${error.message}`);
     }
-    
+
     // Initialize AI Orchestration service
     const { getLLMService } = await import('./services');
     const llmService = getLLMService();
     const aiOrchestrationService = getAIOrchestrationService();
     const ragService = getRAGService(llmService);
-    
+
     logger.info('AI Orchestration and RAG services initialized');
-    
+
     logger.info('Services initialization completed');
-    
+
     // Step 4: Start server
     server.listen(PORT, HOST, () => {
       logger.info('Server started successfully', {
@@ -772,7 +812,7 @@ const startServer = async () => {
         nodeVersion: process.version,
         uptime: process.uptime()
       });
-      
+
       // Log service URLs
       logger.info('Service endpoints:', {
         health: `http://${HOST}:${PORT}/health`,
@@ -780,16 +820,16 @@ const startServer = async () => {
         metrics: `http://${HOST}:${PORT}/metrics`,
         api: `http://${HOST}:${PORT}/api`
       });
-      
+
       // Initialize cache preloading for optimized latency
       try {
         const { preloadAllVoices } = require('./utils/cachePreloader');
         const { cacheSettings } = require('./config/latencyOptimization');
-        
+
         // Check if preloading is enabled
         if (cacheSettings.preload.enabled) {
           logger.info('Starting voice response cache preloading...');
-          
+
           // Start preloading with a delay to allow server to stabilize
           setTimeout(() => {
             preloadAllVoices()
@@ -810,18 +850,18 @@ const startServer = async () => {
       // Initialize temporary file cleanup
       try {
         const { TempFileCleanup } = require('./utils/tempFileCleanup');
-        
+
         // Perform emergency cleanup of any existing temp files
         TempFileCleanup.emergencyCleanup();
-        
+
         // Start periodic cleanup
         TempFileCleanup.startPeriodicCleanup();
-        
+
         logger.info('Temporary file cleanup initialized');
       } catch (error) {
         logger.error(`Error initializing temp file cleanup: ${error.message}`);
       }
-      
+
       // Initialize monitoring and metrics systems
       try {
         const { initializeMonitoringSystems } = require('./monitoring/initializeMetrics');
@@ -831,15 +871,15 @@ const startServer = async () => {
         logger.error(`Error initializing monitoring systems: ${error.message}`);
       }
     });
-    
+
     // Handle server errors
     server.on('error', (error: any) => {
       if (error.syscall !== 'listen') {
         throw error;
       }
-      
+
       const bind = typeof PORT === 'string' ? 'Pipe ' + PORT : 'Port ' + PORT;
-      
+
       switch (error.code) {
         case 'EACCES':
           logger.error(`${bind} requires elevated privileges`);
@@ -853,7 +893,7 @@ const startServer = async () => {
           throw error;
       }
     });
-    
+
   } catch (error) {
     logger.error('Failed to start server:', {
       message: error.message,
@@ -873,7 +913,7 @@ process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
     stack: reason?.stack,
     promise: promise.toString()
   });
-  
+
   // In production, don't exit immediately, but log and monitor
   if (process.env.NODE_ENV === 'production') {
     // Give some time for the error to be logged
@@ -892,7 +932,7 @@ process.on('uncaughtException', (error: Error) => {
     stack: error.stack,
     name: error.name
   });
-  
+
   // For uncaught exceptions, we should exit
   gracefulShutdown('UNCAUGHT_EXCEPTION');
 });
@@ -900,7 +940,7 @@ process.on('uncaughtException', (error: Error) => {
 // Graceful shutdown function
 const gracefulShutdown = (signal: string) => {
   logger.info(`Received ${signal}. Starting graceful shutdown...`);
-  
+
   // Stop accepting new connections
   server.close(async (error) => {
     if (error) {
@@ -908,15 +948,15 @@ const gracefulShutdown = (signal: string) => {
     } else {
       logger.info('HTTP server closed');
     }
-    
+
     try {
       // Stop temp file cleanup process
       const { TempFileCleanup } = require('./utils/tempFileCleanup');
       TempFileCleanup.stopPeriodicCleanup();
-      
+
       // Perform final cleanup of temp files
       TempFileCleanup.emergencyCleanup();
-      
+
       // Stop Deepgram auto-configuration background validation
       try {
         const { getDeepgramAutoConfigService } = require('./services/deepgramAutoConfigService');
@@ -926,12 +966,12 @@ const gracefulShutdown = (signal: string) => {
       } catch (error) {
         logger.warn(`Error cleaning up Deepgram auto-config service: ${getErrorMessage(error)}`);
       }
-      
+
       // Close database connections
       logger.info('Closing database connection...');
       await mongoose.connection.close();
       logger.info('Database connections closed');
-      
+
       // Close Socket.IO connections
       io.close((err) => {
         if (err) {
@@ -940,16 +980,16 @@ const gracefulShutdown = (signal: string) => {
           logger.info('Socket.IO server closed');
         }
       });
-      
+
       logger.info('Graceful shutdown completed');
       process.exit(0);
-      
+
     } catch (shutdownError) {
       logger.error('Error during graceful shutdown:', shutdownError);
       process.exit(1);
     }
   });
-  
+
   // Force shutdown after timeout
   setTimeout(() => {
     logger.error('Graceful shutdown timeout, forcing exit');

@@ -100,8 +100,8 @@ export class RAGService extends EventEmitter {
         const Configuration = mongoose.models.Configuration || mongoose.model('Configuration');
         const config = await Configuration.findOne();
         
-        if (!config || !config.ragConfig || !config.ragConfig.sources) {
-          logger.warn('No RAG configuration found in database. Using default configuration.');
+        if (!config || !config.ragConfig || !config.ragConfig.sources || config.ragConfig.sources.length === 0) {
+          logger.info('No RAG configuration or sources found in database. RAG service will operate with minimal functionality.');
           this.setupDefaultSources();
         } else {
           // Initialize sources from configuration
@@ -143,20 +143,24 @@ export class RAGService extends EventEmitter {
    * Setup default sources
    */
   private setupDefaultSources(): void {
-    // Add MongoDB as default source
-    this.sources.set('mongodb', {
-      id: 'mongodb',
-      name: 'MongoDB',
-      type: 'database',
-      connectionInfo: {
-        // Connection will be extracted from mongoose
-      },
-      isEnabled: true,
-      priority: 10,
-      maxResultsPerQuery: 5
-    });
-    
-    logger.info('RAG Service initialized with default sources');
+    // Only add MongoDB as default source if it's connected
+    if (mongoose.connection.readyState === 1) {
+      this.sources.set('mongodb', {
+        id: 'mongodb',
+        name: 'MongoDB',
+        type: 'database',
+        connectionInfo: {
+          // Connection will be extracted from mongoose
+        },
+        isEnabled: true,
+        priority: 10,
+        maxResultsPerQuery: 5
+      });
+      
+      logger.info('RAG Service initialized with MongoDB as default source');
+    } else {
+      logger.info('RAG Service initialized with no sources (MongoDB not connected)');
+    }
   }
   
   /**
@@ -191,6 +195,14 @@ export class RAGService extends EventEmitter {
   }
   
   /**
+   * Check if RAG service has any available sources
+   */
+  public async hasAvailableSources(): Promise<boolean> {
+    await this.ensureInitialized();
+    return this.sources.size > 0;
+  }
+
+  /**
    * Query sources for relevant information
    */
   public async query(
@@ -222,7 +234,12 @@ export class RAGService extends EventEmitter {
         .sort((a, b) => a.priority - b.priority);
       
       if (sourcesToQuery.length === 0) {
-        throw new Error('No enabled sources available for query');
+        logger.debug('No enabled sources available for RAG query, returning empty result');
+        return {
+          query,
+          results: [],
+          augmentedPrompt: query
+        };
       }
       
       // Execute queries in parallel with timeout
@@ -355,35 +372,76 @@ export class RAGService extends EventEmitter {
           
           const Model = mongoose.models[modelName];
           
-          // Perform text search if the model has a text index
-          const searchResults = await Model.find(
-            { $text: { $search: query } },
-            { score: { $meta: 'textScore' } }
-          )
-            .sort({ score: { $meta: 'textScore' } })
-            .limit(source.maxResultsPerQuery)
-            .lean()
-            .exec();
-          
-          // Transform results
-          for (const result of searchResults) {
-            results.push({
-              content: JSON.stringify(this.sanitizeDocument(result)),
-              metadata: {
-                source: 'mongodb',
-                sourceId: source.id,
-                model: modelName,
-                id: result._id.toString(),
-                relevanceScore: result.score || 0.7,
-                timestamp: result.updatedAt || result.createdAt || new Date()
+          try {
+            // Perform text search if the model has a text index
+            const searchResults = await Model.find(
+              { $text: { $search: query } },
+              { score: { $meta: 'textScore' } }
+            )
+              .sort({ score: { $meta: 'textScore' } })
+              .limit(source.maxResultsPerQuery)
+              .lean()
+              .exec();
+            
+            // Transform results
+            for (const result of searchResults) {
+              results.push({
+                content: JSON.stringify(this.sanitizeDocument(result)),
+                metadata: {
+                  source: 'mongodb',
+                  sourceId: source.id,
+                  model: modelName,
+                  id: result._id.toString(),
+                  relevanceScore: result.score || 0.7,
+                  timestamp: result.updatedAt || result.createdAt || new Date()
+                }
+              });
+            }
+          } catch (modelError) {
+            // If text search fails (e.g., no text index), try a simple regex search as fallback
+            logger.debug(`Text search failed for model ${modelName}, trying fallback search: ${getErrorMessage(modelError)}`);
+            
+            try {
+              // Simple fallback search on common text fields
+              const fallbackQuery = {
+                $or: [
+                  { name: { $regex: query, $options: 'i' } },
+                  { title: { $regex: query, $options: 'i' } },
+                  { description: { $regex: query, $options: 'i' } },
+                  { content: { $regex: query, $options: 'i' } },
+                  { message: { $regex: query, $options: 'i' } }
+                ]
+              };
+              
+              const fallbackResults = await Model.find(fallbackQuery)
+                .limit(source.maxResultsPerQuery)
+                .lean()
+                .exec();
+              
+              // Transform fallback results
+              for (const result of fallbackResults) {
+                results.push({
+                  content: JSON.stringify(this.sanitizeDocument(result)),
+                  metadata: {
+                    source: 'mongodb',
+                    sourceId: source.id,
+                    model: modelName,
+                    id: result._id.toString(),
+                    relevanceScore: 0.5, // Lower relevance for fallback search
+                    timestamp: result.updatedAt || result.createdAt || new Date()
+                  }
+                });
               }
-            });
+            } catch (fallbackError) {
+              logger.debug(`Fallback search also failed for model ${modelName}: ${getErrorMessage(fallbackError)}`);
+              // Continue to next model
+            }
           }
         }
         
         return results;
       } catch (error) {
-        logger.error(`MongoDB query error: ${getErrorMessage(error)}`);
+        logger.debug(`MongoDB query error (this is normal if no knowledge base exists): ${getErrorMessage(error)}`);
         return [];
       }
     }

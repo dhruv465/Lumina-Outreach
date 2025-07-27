@@ -346,10 +346,6 @@ export const initializeServicesAfterDB = async () => {
         const { initialize: initializeOptimizedController } = await import('../controllers/optimizedStreamController');
         await initializeOptimizedController();
         
-        // Initialize low-latency stream controller
-        const { initialize: initializeLowLatencyController } = await import('../controllers/lowLatencyStreamController');
-        await initializeLowLatencyController();
-        
         // Initialize parallel processing service if SDK service is available
         if (sdkService) {
           const { initializeParallelProcessingService } = await import('./parallelProcessingService');

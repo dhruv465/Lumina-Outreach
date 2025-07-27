@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from '@/components/ui/sonner';
 import { useAuth } from '@/hooks/useAuth';
-import AuthDebugPanel from '@/components/AuthDebugPanel';
+import AuthenticationMonitoringPanel from '@/components/AuthenticationMonitoringPanel';
 
 // Layouts
 import DashboardLayout from '@/layouts/DashboardLayout';
@@ -78,8 +78,8 @@ function App() {
       </Routes>
 
       <Toaster />
-      {/* Auth debug panel - press Alt+D to toggle */}
-      <AuthDebugPanel />
+      {/* Authentication monitoring panel - press Alt+D to toggle */}
+      <AuthenticationMonitoringPanel />
     </>
   );
 }

@@ -62,10 +62,6 @@ declare module '../utils/circuitBreaker' {
   export interface CircuitBreaker {
     execute<T>(fn: () => Promise<T>): Promise<T | null>;
   }
-
-  export class CircuitBreakerFactory {
-    static create(serviceName: string): CircuitBreaker;
-  }
 }
 
 // Logger augmentations

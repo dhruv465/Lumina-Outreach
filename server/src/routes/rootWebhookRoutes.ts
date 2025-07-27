@@ -41,7 +41,25 @@ router.post('/', async (req, res) => {
     
     // Log the notification with appropriate handling for specific error codes
     if (level === 'ERROR') {
-      console.error(`Twilio error notification: ${errorCode} for resource ${payload.resource_sid}`);
+      // Handle specific error codes
+      if (errorCode === '31924') {
+        console.error(`Twilio Error 31924: WebSocket connection failed for resource ${payload.resource_sid}`);
+        console.error('This error is typically caused by:');
+        console.error('1. Malformed WebSocket messages or protocol violations');
+        console.error('2. Fragmented WebSocket control frames');
+        console.error('3. Duplicated .websocket paths in the URL');
+        console.error('4. Non-compliant message formatting');
+        
+        // Log additional diagnostic information
+        console.error('Diagnostic info:', {
+          resourceSid: payload.resource_sid,
+          serviceSid: payload.service_sid,
+          timestamp: new Date().toISOString(),
+          possibleCause: 'WebSocket URL duplication or protocol violation'
+        });
+      } else {
+        console.error(`Twilio error notification: ${errorCode} for resource ${payload.resource_sid}`);
+      }
     } else if (level === 'WARNING') {
       // Handle specific warning codes
       if (errorCode === '31951') {

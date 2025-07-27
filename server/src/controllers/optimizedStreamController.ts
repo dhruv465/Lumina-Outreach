@@ -11,7 +11,7 @@ import responseCache from '../utils/responseCache';
 import { TwilioWebSocketManager } from '../utils/TwilioWebSocketManager';
 import { SessionConfig, globalSessionManager } from '../utils/SessionManager';
 import { v4 as uuidv4 } from 'uuid';
-
+import express from 'express';
 // Common greeting phrases for pre-caching
 const COMMON_GREETINGS = [
   "Hello, how are you today?",
@@ -44,30 +44,30 @@ export const initializeResponseCache = async (): Promise<void> => {
       logger.warn('ElevenLabs not configured, skipping response cache initialization');
       return;
     }
-    
+
     // Get default voice ID
     const defaultVoiceId = config.elevenLabsConfig.availableVoices[0]?.voiceId;
     if (!defaultVoiceId) {
       logger.warn('No default voice available for pre-caching');
       return;
     }
-    
+
     // Get ElevenLabs SDK service
     const sdkService = getSDKService();
     if (!sdkService) {
       logger.warn('ElevenLabs SDK service not initialized, skipping pre-caching');
       return;
     }
-    
+
     logger.info('Initializing response cache for common phrases');
-    
+
     // Pre-cache greetings
     const greetingPromises = COMMON_GREETINGS.map(async (greeting) => {
       try {
         const buffer = await sdkService.generateSpeech(greeting, defaultVoiceId, {
           optimizeLatency: true // Use optimized settings for faster generation
         });
-        
+
         const cacheKey = `${defaultVoiceId}_${greeting}`;
         responseCache.set(cacheKey, buffer);
         logger.debug(`Pre-cached greeting: "${greeting}"`);
@@ -75,14 +75,14 @@ export const initializeResponseCache = async (): Promise<void> => {
         logger.error(`Failed to pre-cache greeting: ${greeting}`, error);
       }
     });
-    
+
     // Pre-cache acknowledgments
     const ackPromises = COMMON_ACKNOWLEDGMENTS.map(async (ack) => {
       try {
         const buffer = await sdkService.generateSpeech(ack, defaultVoiceId, {
           optimizeLatency: true // Use optimized settings for faster generation
         });
-        
+
         const cacheKey = `${defaultVoiceId}_${ack}`;
         responseCache.set(cacheKey, buffer);
         logger.debug(`Pre-cached acknowledgment: "${ack}"`);
@@ -90,10 +90,10 @@ export const initializeResponseCache = async (): Promise<void> => {
         logger.error(`Failed to pre-cache acknowledgment: ${ack}`, error);
       }
     });
-    
+
     // Wait for all pre-caching to complete
     await Promise.all([...greetingPromises, ...ackPromises]);
-    
+
     logger.info(`Response cache initialized with ${responseCache.size()} common phrases`);
   } catch (error) {
     logger.error('Failed to initialize response cache', error);
@@ -119,55 +119,55 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
     ip: req.ip,
     timestamp: new Date().toISOString()
   });
-  
+
   // Validate this is a proper WebSocket connection
   if (req.headers.upgrade?.toLowerCase() !== 'websocket') {
     logger.error('Invalid connection attempt: not a WebSocket upgrade request');
     ws.close(1003, 'Not a WebSocket connection');
     return;
   }
-  
+
   // Configure WebSocket for Twilio compatibility
   ws.setMaxListeners(20); // Prevent memory leaks with many listeners
-  
+
   // Store Twilio stream information
   let streamSid: string | null = null;
   let twilioManager: TwilioWebSocketManager;
 
   // Extract query parameters
   const url = new URL(req.url, `http://${req.headers.host}`);
-  
+
   // Try to get callId and conversationId from different sources
   // 1. Check URL parameters (from route path)
   let callId = req.params?.callId;
   let conversationId = req.params?.conversationId;
-  
+
   // 2. If not found in params, check query parameters
   if (!callId || !conversationId) {
     callId = url.searchParams.get('callId');
     conversationId = url.searchParams.get('conversationId');
   }
-  
+
   // 3. Try to extract from URL path as a last resort
   if (!callId || !conversationId) {
     const pathParts = url.pathname.split('/');
     if (pathParts.length >= 4) {
       // Format: /voice/optimized-stream/[callId]/[conversationId]
       const potentialCallId = pathParts[3];
-      const potentialConvId = pathParts[4]?.replace(/\.websocket$/, '');
-      
-      if (potentialCallId && potentialCallId !== '.websocket') {
+      const potentialConvId = pathParts[4];
+
+      if (potentialCallId) {
         callId = potentialCallId;
       }
-      
-      if (potentialConvId && potentialConvId !== '.websocket') {
+
+      if (potentialConvId) {
         conversationId = potentialConvId;
       }
     }
   }
-  
+
   logger.info(`WebSocket connection parameters: callId=${callId}, conversationId=${conversationId}, URL=${req.url}`);
-  
+
   if (!callId || !conversationId) {
     logger.error('Missing callId or conversationId in voice stream', {
       url: req.url,
@@ -178,17 +178,17 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
     ws.close(1008, 'Missing required parameters');
     return;
   }
-  
+
   let call;
   let session;
   let voiceAI;
   let config;
   let sdkService;
-  
+
   try {
     logger.info(`Optimized voice stream started for call ${callId}, conversation ${conversationId}`);
     logger.debug(`WebSocket connection details: URL=${req.url}, Headers=${JSON.stringify(req.headers)}`);
-    
+
     // Create session configuration
     const sessionConfig: SessionConfig = {
       sessionId: `session-${callId}-${conversationId}-${Date.now()}`,
@@ -202,11 +202,11 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
       idleTimeout: 300000,  // 5 minutes idle timeout
       healthCheckInterval: 30000 // 30 seconds health check
     };
-    
+
     // Create session with integrated WebSocket management
     const sessionInstance = globalSessionManager.createSession(ws, sessionConfig);
     twilioManager = sessionInstance.getTwilioManager();
-    
+
     /**
      * Enhanced function to send audio data to Twilio with proper chunking and validation
      */
@@ -218,7 +218,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         });
         return false;
       }
-      
+
       // Register audio processing as intensive operation if large
       let operationId: string | undefined;
       if (audioData.length > 32 * 1024) { // Large audio chunks (> 32KB)
@@ -232,10 +232,10 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
           pauseHeartbeat: false // Don't pause for audio, just track
         });
       }
-      
+
       // Use the enhanced Twilio manager to send audio with proper chunking
       const success = twilioManager.sendAudioToTwilio(audioData, streamSid);
-      
+
       if (success) {
         // Record successful operation for health assessment
         twilioManager.recordSuccess();
@@ -249,15 +249,15 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
           reconnectionDecision: twilioManager.getReconnectionDecision()
         });
       }
-      
+
       // Complete intensive operation if registered
       if (operationId) {
         twilioManager.completeIntensiveOperation(operationId);
       }
-      
+
       return success;
     };
-    
+
     // Send immediate success response to acknowledge connection
     try {
       const connectionMessage = {
@@ -270,7 +270,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
     } catch (initError) {
       logger.error(`Failed to send connection acknowledgment for call ${callId}:`, initError);
     }
-    
+
     // Set up session event handlers
     sessionInstance.on('sessionIdle', (data) => {
       logger.warn(`Session idle timeout for call ${callId}`, {
@@ -279,7 +279,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         conversationId
       });
     });
-    
+
     sessionInstance.on('healthDegraded', (data) => {
       logger.warn(`Session health degraded for call ${callId}`, {
         sessionId: data.sessionId,
@@ -287,7 +287,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         conversationId
       });
     });
-    
+
     sessionInstance.on('healthRecovered', (data) => {
       logger.info(`Session health recovered for call ${callId}`, {
         sessionId: data.sessionId,
@@ -295,7 +295,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         conversationId
       });
     });
-    
+
     sessionInstance.on('criticalHealth', (data) => {
       logger.error(`Critical session health detected for call ${callId}`, {
         sessionId: data.sessionId,
@@ -304,10 +304,10 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         healthReport: data.healthReport
       });
     });
-    
+
     // Start the session
     sessionInstance.start();
-    
+
     // Set up session-aware health monitoring
     const healthMonitoringInterval = setInterval(() => {
       const sessionMetrics = sessionInstance.getMetrics();
@@ -319,7 +319,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
       const heartbeatHealth = twilioManager.getHeartbeatHealth();
       const adaptiveMetrics = twilioManager.getAdaptiveHeartbeatMetrics();
       const adaptiveRecommendations = twilioManager.getAdaptiveHeartbeatRecommendations();
-      
+
       // Log comprehensive session and connection health status
       logger.debug(`Session-aware connection health for call ${callId}:`, {
         // Session information
@@ -359,11 +359,11 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         pausedOperations: adaptiveMetrics.pausedOperations,
         adaptationHistory: adaptiveMetrics.adaptationHistory.length
       });
-      
+
       // Log warning if session or connection health is degrading
-      if (healthScore.overall < 50 || !heartbeatMetrics.isAlive || 
-          adaptiveMetrics.currentCondition.type === 'poor' || 
-          sessionHealthReport.overallHealth === 'poor' || sessionHealthReport.overallHealth === 'critical') {
+      if (healthScore.overall < 50 || !heartbeatMetrics.isAlive ||
+        adaptiveMetrics.currentCondition.type === 'poor' ||
+        sessionHealthReport.overallHealth === 'poor' || sessionHealthReport.overallHealth === 'critical') {
         logger.warn(`Poor session/connection health detected for call ${callId}`, {
           sessionId: sessionConfig.sessionId,
           callId,
@@ -372,7 +372,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
           connectionHealthScore: healthScore,
           reconnectionDecision,
           recommendations: [
-            ...realTimeReport.recommendations, 
+            ...realTimeReport.recommendations,
             ...adaptiveRecommendations,
             ...sessionHealthReport.recommendations
           ],
@@ -388,10 +388,10 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
           }
         });
       }
-      
+
       // Log critical health issues
       if (reconnectionDecision.shouldReconnect && reconnectionDecision.urgency === 'immediate' ||
-          sessionHealthReport.overallHealth === 'critical') {
+        sessionHealthReport.overallHealth === 'critical') {
         logger.error(`Critical session/connection health for call ${callId} - immediate action needed`, {
           sessionId: sessionConfig.sessionId,
           callId,
@@ -408,31 +408,31 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         });
       }
     }, 30000); // Check every 30 seconds
-    
+
     // Get the call from database - in parallel with other initialization
     const callPromise = Call.findById(callId);
-    
+
     // Get system configuration - in parallel
     const configPromise = Configuration.findOne();
-    
+
     // Get conversation session - in parallel
     session = conversationEngine.getSession(conversationId);
-    
+
     // Wait for configuration and call data
     [call, config] = await Promise.all([callPromise, configPromise]);
-    
+
     if (!call) {
       logger.error(`No call found with ID ${callId} for streaming`);
       ws.close(1008, 'Call not found');
       return;
     }
-    
+
     if (!config || !config.elevenLabsConfig.isEnabled) {
       logger.error('ElevenLabs not configured for streaming');
       ws.close(1008, 'Voice synthesis not configured');
       return;
     }
-    
+
     // Get ElevenLabs SDK service (singleton)
     sdkService = getSDKService();
     if (!sdkService) {
@@ -443,43 +443,50 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         ws.close(1008, 'LLM not configured');
         return;
       }
-      
+
       // Initialize the SDK service
       sdkService = require('../services/elevenlabsSDKService').initializeSDKService(
         config.elevenLabsConfig.apiKey,
         openAIProvider.apiKey
       );
-      
+
       if (!sdkService) {
         logger.error('Failed to initialize ElevenLabs SDK service');
         ws.close(1008, 'Voice synthesis failed to initialize');
         return;
       }
     }
-    
+
     // Initialize Enhanced Voice AI service as well (for compatibility)
     voiceAI = new EnhancedVoiceAIService(
       config.elevenLabsConfig.apiKey
     );
-    
+
     // Create conversation session if it doesn't exist
     if (!session) {
       // If no session exists, create one
       const newConversationId = await conversationEngine.startConversation(
-        callId, 
-        call.leadId.toString(), 
+        callId,
+        call.leadId.toString(),
         call.campaignId.toString()
       );
       session = conversationEngine.getSession(newConversationId);
-      
+
       if (!session) {
         logger.error(`Failed to create conversation session for call ${callId}`);
         ws.close(1008, 'Failed to create conversation');
         return;
       }
     }
-    
-    // Generate initial greeting if this is the first interaction
+
+    // Store opening message data for later use (after streamSid is received)
+    let pendingOpeningMessage: {
+      message: string;
+      voiceId: string;
+      isFirstInteraction: boolean;
+    } | null = null;
+
+    // Prepare initial greeting if this is the first interaction
     if (session.conversationHistory.length === 0) {
       try {
         // Generate opening message - run in parallel with voice synthesis setup
@@ -488,74 +495,58 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
           "Customer", // Default name
           call.campaignId.toString()
         );
-        
+
         // Resolve voice ID while message is being generated - prioritize call's personalityId (campaign voice)
-        const voiceId = call.personalityId || 
-                        session.currentPersonality.voiceId || 
-                        config.elevenLabsConfig.availableVoices[0].voiceId;
-        
+        const voiceId = call.personalityId ||
+          session.currentPersonality.voiceId ||
+          config.elevenLabsConfig.availableVoices[0].voiceId;
+
         // Log which voice we're using
         logger.info(`Using voice ID ${voiceId} for call ${callId}`);
-        
+
         // Wait for opening message
         const openingMessage = await openingMessagePromise;
-        
-        // First try to get from cache (for common greetings)
-        const cacheKey = `${voiceId}_${openingMessage}`;
-        if (responseCache.has(cacheKey)) {
-          logger.info(`Using cached greeting for call ${callId}`);
-          const cachedAudio = responseCache.get(cacheKey);
-          sendAudioToTwilio(cachedAudio);
-        } else {
-          // Use streaming synthesis for optimal latency
-          logger.info(`Streaming opening message audio for call ${callId}`);
-          
-          // Define callback to send chunks as they arrive
-          const onAudioChunk = (chunk: Buffer) => {
-            sendAudioToTwilio(chunk);
-          };
-          
-          // Stream the audio response
-          await sdkService.streamSpeechGeneration(
-            openingMessage,
-            voiceId,
-            onAudioChunk,
-            { optimizeLatency: true },
-            conversationId  // Pass the persistent conversation ID
-          );
-        }
+
+        // Store the opening message to be sent after streamSid is received
+        pendingOpeningMessage = {
+          message: openingMessage,
+          voiceId: voiceId,
+          isFirstInteraction: true
+        };
+
+        logger.info(`Opening message prepared for call ${callId}, waiting for streamSid`);
       } catch (error) {
         logger.error(`Error generating opening message for call ${callId}:`, error);
-        
-        // Fallback to simple greeting from cache
-        try {
-          const fallbackGreeting = "";
-          const fallbackVoice = config.elevenLabsConfig.availableVoices[0].voiceId;
-          
-          // Try cache first
-          const cacheKey = `${fallbackVoice}_${fallbackGreeting}`;
-          if (responseCache.has(cacheKey)) {
-            sendAudioToTwilio(responseCache.get(cacheKey));
-          } else {
-            // Generate simple speech
-            const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(fallbackGreeting, fallbackVoice);
-            if (fallbackResponse) {
-              sendAudioToTwilio(fallbackResponse);
-            } else {
-              throw new Error('Fallback speech generation failed');
-            }
-          }
-        } catch (fallbackError) {
-          logger.error(`Fallback greeting failed for call ${callId}:`, fallbackError);
-          ws.close(1011, 'Voice synthesis failed');
-          return;
-        }
+
+        // Prepare fallback greeting
+        const fallbackGreeting = "Hello, how can I help you today?";
+        const fallbackVoice = config.elevenLabsConfig.availableVoices[0].voiceId;
+
+        pendingOpeningMessage = {
+          message: fallbackGreeting,
+          voiceId: fallbackVoice,
+          isFirstInteraction: true
+        };
       }
     }
-    
+
+    /**
+     * Function to send the opening message once streamSid is available
+     */
+    const sendPendingOpeningMessage = async () => {
+      if (!pendingOpeningMessage || !streamSid) return;
+      const { message, voiceId } = pendingOpeningMessage;
+      try {
+        const cacheKey = `${voiceId}_${message}`;
+        const audio = responseCache.get(cacheKey) || await sdkService.generateSpeech(message, voiceId, { optimizeLatency: true });
+        if (!responseCache.has(cacheKey)) responseCache.set(cacheKey, audio);
+        sendAudioToTwilio(audio);
+      } catch (e) { logger.error(e); } finally { pendingOpeningMessage = null; }
+    };
+
     // Set up accumulated buffer for incoming audio
     let audioBuffer: Buffer[] = [];
-    
+
     // Handle incoming WebSocket messages
     ws.on('message', async (data: WebSocket.Data) => {
       try {
@@ -566,18 +557,19 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         if (typeof data === 'string' || (data instanceof Buffer && data.length < 1000)) {
           // Convert to string if it's a Buffer
           const textData = typeof data === 'string' ? data : data.toString('utf8');
-          
+
           try {
             // Try to parse as JSON
             const jsonMessage = JSON.parse(textData);
             logger.debug(`Received JSON message from Twilio: ${JSON.stringify(jsonMessage)}`);
-            
+
             // Handle Twilio Media Stream protocol messages
             if (jsonMessage.event === 'start') {
               // This is the initial message from Twilio with the streamSid
               streamSid = jsonMessage.start.streamSid;
               logger.info(`Media stream started for call ${callId}, conv ${conversationId}, streamSid: ${streamSid}`);
-              
+              await sendPendingOpeningMessage();
+
               // Send a connected event to acknowledge the start message
               // This is REQUIRED by Twilio Media Streams protocol
               if (ws.readyState === WebSocket.OPEN) {
@@ -588,7 +580,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
                 };
                 logger.debug(`Sending connected message: ${JSON.stringify(connectedMessage)}`);
                 twilioManager.sendTwilioMessage(connectedMessage);
-                
+
                 // Also send a mark event to confirm the connection is working
                 const markMessage = {
                   event: 'mark',
@@ -600,10 +592,10 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
                 logger.debug(`Sending mark message: ${JSON.stringify(markMessage)}`);
                 twilioManager.sendTwilioMessage(markMessage);
               }
-              
+
               return; // Don't process as audio data
             }
-            
+
             // Handle stop event
             if (jsonMessage.event === 'stop') {
               logger.info(`Media stream stopped: ${jsonMessage.stop?.streamSid}`);
@@ -612,7 +604,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
               ws.close(1000, 'Stop event received from Twilio');
               return;
             }
-            
+
             // Handle media event from Twilio (incoming audio)
             if (jsonMessage.event === 'media' && jsonMessage.media?.payload) {
               // Extract the media payload
@@ -627,7 +619,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
               }
               return;
             }
-            
+
             // Handle mark events from Twilio
             if (jsonMessage.event === 'mark') {
               logger.debug(`Received mark event from Twilio: ${jsonMessage.mark?.name || 'unnamed'}`);
@@ -638,30 +630,30 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
             logger.debug(`Received non-JSON message: ${textData.substring(0, 100)}...`);
           }
         }
-        
+
         // Process as binary data if it's a large buffer
         if (data instanceof Buffer && data.length >= 1000) {
           // Accumulate audio data
           audioBuffer.push(data);
-          
+
           // If we have enough data, process it
           if (Buffer.concat(audioBuffer).length > 4096) {
             const completeAudio = Buffer.concat(audioBuffer);
             audioBuffer = []; // Reset buffer
-            
+
             // Process the audio with speech recognition using Deepgram if available
             let transcribedText;
-            
+
             // Get the speech analysis service from the conversation engine
             const speechAnalysisService = conversationEngine.getSpeechAnalysisService();
-            
+
             try {
               // Try to transcribe using Deepgram
               if (config.deepgramConfig?.isEnabled && speechAnalysisService) {
                 logger.info(`Using Deepgram for speech recognition in call ${callId}`);
                 const transcriptionResult = await speechAnalysisService.transcribeAudio(completeAudio);
                 transcribedText = transcriptionResult.transcript || "";
-                
+
                 // Log the transcription details
                 if (transcriptionResult.transcript) {
                   logger.info(`Transcription: "${transcriptionResult.transcript.substring(0, 100)}..." (confidence: ${transcriptionResult.confidence}, language: ${transcriptionResult.language})`);
@@ -669,8 +661,8 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
               } else {
                 // Fallback to existing method
                 logger.warn(`Deepgram not configured, using fallback for call ${callId}`);
-                transcribedText = data?.toString() || (() => { 
-                  throw new Error('Speech recognition not properly configured - no audio data received'); 
+                transcribedText = data?.toString() || (() => {
+                  throw new Error('Speech recognition not properly configured - no audio data received');
                 })();
               }
             } catch (transcriptionError) {
@@ -678,7 +670,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
               // Fallback to existing method
               transcribedText = data?.toString() || "Sorry, I couldn't hear you clearly.";
             }
-            
+
             // Add user input to conversation
             const userMessage = {
               id: uuidv4(),
@@ -686,16 +678,16 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
               speaker: 'customer',
               content: transcribedText
             };
-            
+
             // Send immediate acknowledgment if needed (reduces perceived latency)
             // Only do this for longer user inputs that might need processing time
             if (transcribedText.length > 50) {
               try {
                 const ack = "I'm thinking about that...";
-                const voiceId = call.personalityId || 
-                                session.currentPersonality.voiceId || 
-                                config.elevenLabsConfig.availableVoices[0].voiceId;
-                
+                const voiceId = call.personalityId ||
+                  session.currentPersonality.voiceId ||
+                  config.elevenLabsConfig.availableVoices[0].voiceId;
+
                 // Check cache for acknowledgment
                 const cacheKey = `${voiceId}_${ack}`;
                 if (responseCache.has(cacheKey)) {
@@ -715,21 +707,21 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
                 // Continue processing - acknowledgment is optional
               }
             }
-            
+
             // Generate AI response - this starts the processing
             const aiResponsePromise = conversationEngine.processUserInput(
-              conversationId, 
+              conversationId,
               transcribedText
             );
-            
+
             // Get voice ID for voice synthesis - prioritize call's personalityId (campaign voice)
-            const voiceId = call.personalityId || 
-                            session.currentPersonality.voiceId || 
-                            config.elevenLabsConfig.availableVoices[0].voiceId;
-            
+            const voiceId = call.personalityId ||
+              session.currentPersonality.voiceId ||
+              config.elevenLabsConfig.availableVoices[0].voiceId;
+
             // Get the LLM provider configuration
             const openAIProvider = config.llmConfig.providers.find(p => p.name === 'openai');
-            
+
             // Generate AI response - use Realtime API if available and enabled
             let aiResponse;
             if (openAIProvider?.useRealtimeAPI) {
@@ -745,16 +737,16 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
                   role: turn.speaker === 'agent' ? 'assistant' : 'user',
                   content: turn.content
                 }));
-                
+
                 // Add current message
                 messages.push({
                   role: 'user',
                   content: transcribedText
                 });
-                
+
                 // We'll collect the response here
                 let responseText = '';
-                
+
                 // Use the realtime chat method for ultra-low latency
                 await llmService.realtimeChat({
                   provider: 'openai',
@@ -767,23 +759,23 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
                 }, (chunk) => {
                   responseText += chunk.content;
                 });
-                
+
                 aiResponse = { text: responseText };
               }
             } else {
               // Use standard conversation engine
               aiResponse = await aiResponsePromise;
             }
-            
+
             // Stream the audio response for lowest latency
             try {
               logger.info(`Streaming response audio for call ${callId}`);
-              
+
               // Define callback to send chunks as they arrive
               const onAudioChunk = (chunk: Buffer) => {
                 sendAudioToTwilio(chunk);
               };
-              
+
               // Stream the audio response
               await sdkService.streamSpeechGeneration(
                 aiResponse.text,
@@ -794,7 +786,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
               );
             } catch (streamError) {
               logger.error(`Error streaming response for call ${callId}:`, streamError);
-              
+
               // Fallback to non-streaming method
               try {
                 const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
@@ -802,7 +794,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
                   personalityId: voiceId,
                   language: session.language || 'English'
                 });
-                
+
                 if (speechResponse && speechResponse.audioContent) {
                   sendAudioToTwilio(speechResponse.audioContent);
                 } else {
@@ -810,12 +802,12 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
                 }
               } catch (voiceError) {
                 logger.error(`Fallback synthesis failed for call ${callId}:`, voiceError);
-                
+
                 // Last resort fallback
                 try {
                   const fallbackVoice = config.elevenLabsConfig.availableVoices[0].voiceId;
                   const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(aiResponse.text, fallbackVoice);
-                  
+
                   if (fallbackResponse) {
                     sendAudioToTwilio(fallbackResponse);
                   } else {
@@ -832,13 +824,13 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         logger.error(`Error processing voice stream data for call ${callId}:`, error);
       }
     });
-    
+
     // Handle WebSocket closure
     ws.on('close', async (code: number, reason: string) => {
       // Get final health report before cleanup
       const healthReport = twilioManager.getHealthReport();
       const healthMetrics = twilioManager.getHealthMetrics();
-      
+
       logger.info(`Voice stream closed for call ${callId}: code=${code} reason="${reason || 'No reason provided'}"`, {
         callId,
         conversationId,
@@ -849,27 +841,27 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         healthScore: healthReport.healthScore,
         totalErrors: healthMetrics.issues.length
       });
-      
+
       try {
         // Clean up resources as needed
         audioBuffer = []; // Clear buffer
-        
+
         // Clear ping interval if it exists
         if ((ws as any).pingInterval) {
           clearInterval((ws as any).pingInterval);
           logger.debug(`Cleared ping interval for call ${callId}`);
         }
-        
+
         // Clear health monitoring interval
         if (healthMonitoringInterval) {
           clearInterval(healthMonitoringInterval);
           logger.debug(`Cleared health monitoring interval for call ${callId}`);
         }
-        
+
         // End session and cleanup resources
         const finalSessionMetrics = sessionInstance.getMetrics();
         const finalHealthReport = sessionInstance.getHealthReport();
-        
+
         logger.info(`Session ending for call ${callId}`, {
           sessionId: sessionConfig.sessionId,
           callId,
@@ -882,11 +874,11 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
           closeCode: code,
           closeReason: reason
         });
-        
+
         sessionInstance.end(`WebSocket closed: ${code} - ${reason || 'No reason provided'}`);
-        
+
         logger.debug(`Cleaned up session and WebSocket manager for call ${callId}`);
-        
+
         // Log additional information about the disconnection
         // This helps diagnose Twilio error 31924
         if (code === 1006) {
@@ -897,7 +889,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
             twilioErrorPossible: 'Error 31924 may occur after this abnormal closure'
           });
         }
-        
+
         // If this is an intentional closure from our side (1000), no action needed
         // For other closure codes, we might want to record them for debugging
         if (code !== 1000) {
@@ -914,7 +906,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         logger.error(`Error handling stream close for call ${callId}:`, error);
       }
     });
-    
+
     // Handle errors
     ws.on('error', (error: Error) => {
       logger.error(`WebSocket error for call ${callId}:`, {
@@ -924,7 +916,41 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         conversationId,
         streamSid
       });
-      
+
+      // Check if this is a Twilio protocol error that might benefit from reconnection
+      const errorMessage = error.message.toLowerCase();
+      const isTwilioProtocolError = errorMessage.includes('protocol') ||
+        errorMessage.includes('malformed') ||
+        errorMessage.includes('fragmented') ||
+        errorMessage.includes('31924');
+
+      if (isTwilioProtocolError && twilioManager) {
+        // Get reconnection decision for protocol errors
+        const reconnectionDecision = twilioManager.getEnhancedReconnectionDecision(
+          `Twilio protocol error: ${error.message}`
+        );
+
+        logger.info('Twilio protocol error detected, evaluating reconnection', {
+          callId,
+          conversationId,
+          error: error.message,
+          reconnectionDecision
+        });
+
+        if (reconnectionDecision.shouldReconnect && reconnectionDecision.urgency === 'immediate') {
+          // Attempt immediate reconnection for critical protocol errors
+          logger.warn('Attempting immediate reconnection for Twilio protocol error', {
+            callId,
+            conversationId,
+            error: error.message,
+            estimatedDelay: reconnectionDecision.estimatedDelay
+          });
+
+          // Don't close the connection immediately - let reconnection service handle it
+          return;
+        }
+      }
+
       try {
         // Send a closing message to Twilio if possible
         if (streamSid && ws.readyState === WebSocket.OPEN) {
@@ -943,12 +969,12 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
             logger.error(`Failed to send error message to Twilio: ${sendError.message}`);
           }
         }
-        
+
         // Close the connection with an appropriate code
         ws.close(1011, 'Internal server error: ' + error.message.substring(0, 100));
       } catch (closeError) {
         logger.error(`Error closing WebSocket after error: ${closeError.message}`);
-        
+
         // Force terminate if normal close fails
         try {
           ws.terminate();
@@ -957,16 +983,16 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         }
       }
     });
-    
+
     // Handle pong messages from client
     ws.on('pong', () => {
       logger.debug(`Received pong from client for call ${callId}`);
       (ws as any).isAlive = true;
     });
-    
+
     // Mark the connection as alive initially
     (ws as any).isAlive = true;
-    
+
     // Set up ping/pong to keep connection alive for Twilio
     const pingInterval = setInterval(() => {
       if (ws.readyState !== WebSocket.OPEN) {
@@ -974,11 +1000,11 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         logger.debug(`Cleared ping interval due to closed connection for call ${callId}`);
         return;
       }
-      
+
       // Check if we received a pong since the last ping
       if ((ws as any).isAlive === false) {
         logger.warn(`No pong received for call ${callId}, attempting reconnection`);
-        
+
         // Attempt to send a message to see if connection is actually dead
         try {
           // Send a mark message as a last attempt to verify connection
@@ -992,7 +1018,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
             };
             twilioManager.sendTwilioMessage(reconnectMessage);
             logger.info(`Sent reconnection attempt message for call ${callId}`);
-            
+
             // Give one more chance
             (ws as any).isAlive = true;
           } else {
@@ -1013,18 +1039,18 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         }
         return;
       }
-      
+
       // Mark as not alive, will be set to true when pong is received
       // or when any message is received
       (ws as any).isAlive = false;
-      
+
       // Send ping
       try {
         ws.ping(Buffer.from(JSON.stringify({ timestamp: Date.now() })));
         logger.debug(`Ping sent to keep WebSocket connection alive for call ${callId}`);
       } catch (pingError) {
         logger.error(`Error sending ping: ${pingError}`);
-        
+
         // If ping fails, try to send a JSON message instead (Twilio sometimes prefers this)
         try {
           if (streamSid) {
@@ -1041,10 +1067,10 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         }
       }
     }, 5000); // More frequent pings: every 5 seconds
-    
+
     // Store the interval for cleanup
     (ws as any).pingInterval = pingInterval;
-    
+
   } catch (error) {
     logger.error(`Error in optimized voice stream for call ${callId}:`, error);
     ws.close(1011, 'Internal server error');
@@ -1064,9 +1090,26 @@ export const initialize = async (): Promise<void> => {
   }
 };
 
+/**
+ * HTTP route handler for optimized stream endpoint
+ * Provides information about the WebSocket endpoint
+ */
+export const optimizedStreamRoute = (req: Request, res: Response): void => {
+  const { callId, conversationId } = req.params;
+
+  res.json({
+    message: 'Optimized Voice Stream Endpoint',
+    callId,
+    conversationId,
+    websocketUrl: `${req.protocol === 'https' ? 'wss' : 'ws'}://${req.get('host')}/voice/optimized-stream/${callId}/${conversationId}`,
+    status: 'ready'
+  });
+};
+
 // Export enhanced controller functions
 export default {
   handleOptimizedVoiceStream,
   handleVoiceStream, // Keep original for backward compatibility
-  initialize
+  initialize,
+  optimizedStreamRoute
 };

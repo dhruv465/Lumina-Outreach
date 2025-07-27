@@ -28,9 +28,7 @@ export class TwilioWebSocketServer {
         const pathname = url.parse(info.req.url || '').pathname || '';
         
         // Normalize path - handle with or without trailing .websocket
-        const normalizedPath = pathname.endsWith('/.websocket') 
-          ? pathname 
-          : pathname + '/.websocket';
+        const normalizedPath = pathname;
         
         const isValidPath = pathname.startsWith('/voice/low-latency') || 
                            pathname.startsWith('/stream') ||
@@ -98,13 +96,10 @@ export class TwilioWebSocketServer {
         conversationId = pathParts[3];
         
         // If there's a 5th part that's ".websocket", then we have the correct format
-        if (pathParts.length >= 5 && pathParts[4] === '.websocket') {
+        if (pathParts.length >= 4) {
           // URL format: /voice/low-latency/callId/conversationId/.websocket
           conversationId = pathParts[3];
-        } else if (pathParts[3].endsWith('.websocket')) {
-          // Legacy format: /voice/low-latency/callId/conversationId.websocket
-          conversationId = pathParts[3].replace('.websocket', '');
-        }
+        } 
         
         // Log the URL parsing for debugging
         logger.debug(`WebSocket URL parsing: ${parsedUrl.pathname}`, {

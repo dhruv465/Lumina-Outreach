@@ -16,6 +16,7 @@ import { ConnectionCircuitBreaker } from './ConnectionCircuitBreaker';
 import { RealTimeHealthAssessment, ReconnectionDecision } from './RealTimeHealthAssessment';
 import { HeartbeatService } from './HeartbeatService';
 import { AdaptiveHeartbeatManager, IntensiveOperation } from './AdaptiveHeartbeatManager';
+import { ReconnectionService } from '../services/ReconnectionService';
 
 interface TwilioMessage {
   event: string;
@@ -45,6 +46,7 @@ export class TwilioWebSocketManager {
   private realTimeAssessment: RealTimeHealthAssessment;
   private heartbeatService: HeartbeatService;
   private adaptiveHeartbeatManager: AdaptiveHeartbeatManager;
+  private reconnectionService: ReconnectionService;
   private sequenceNumber: number = 0;
   private streamSid?: string;
   private lastPingTime: number = 0;
@@ -85,6 +87,16 @@ export class TwilioWebSocketManager {
       minInterval: 15000,         // Minimum 15 seconds
       maxInterval: 60000,         // Maximum 60 seconds
       latencyThreshold: 500       // 500ms threshold for adaptation
+    });
+
+    // Initialize intelligent reconnection service
+    this.reconnectionService = new ReconnectionService({
+      maxAttempts: 10,
+      baseDelay: 1000,           // 1 second base delay
+      maxDelay: 30000,           // 30 seconds max delay
+      jitterFactor: 0.1,         // 10% jitter
+      circuitBreakerThreshold: 5, // Open after 5 failures
+      circuitBreakerTimeout: 60000 // 1 minute timeout
     });
     
     // Initialize adaptive heartbeat manager for advanced optimization
@@ -145,6 +157,74 @@ export class TwilioWebSocketManager {
 
     this.ws.on('close', (code, reason) => {
       this.handleConnectionClose(code, reason);
+    });
+
+    // Set up ReconnectionService event handlers
+    this.setupReconnectionEventHandlers();
+  }
+
+  /**
+   * Set up ReconnectionService event handlers
+   */
+  private setupReconnectionEventHandlers(): void {
+    this.reconnectionService.on('reconnectionStarted', (data) => {
+      logger.info('Reconnection attempt started', {
+        attemptNumber: data.attemptNumber,
+        reason: data.reason,
+        sessionId: data.sessionId,
+        delay: data.delay
+      });
+    });
+
+    this.reconnectionService.on('reconnectionSuccess', (data) => {
+      logger.info('Reconnection successful', {
+        attemptNumber: data.attemptNumber,
+        reason: data.reason,
+        sessionId: data.sessionId,
+        totalAttempts: data.totalAttempts
+      });
+      
+      // Reset connection health on successful reconnection
+      this.connectionHealth.isHealthy = true;
+      this.connectionHealth.errorCount = 0;
+      this.connectionHealth.connectionQuality = 'good';
+    });
+
+    this.reconnectionService.on('reconnectionFailed', (data) => {
+      logger.error('Reconnection attempt failed', {
+        attemptNumber: data.attemptNumber,
+        reason: data.reason,
+        sessionId: data.sessionId,
+        error: data.error,
+        consecutiveFailures: data.consecutiveFailures
+      });
+      
+      // Update connection health on failure
+      this.connectionHealth.errorCount++;
+      this.connectionHealth.connectionQuality = 'poor';
+    });
+
+    this.reconnectionService.on('circuitBreakerOpened', (data) => {
+      logger.warn('Reconnection circuit breaker opened', {
+        consecutiveFailures: data.consecutiveFailures,
+        threshold: data.threshold
+      });
+      
+      // Mark connection as unhealthy when circuit breaker opens
+      this.connectionHealth.isHealthy = false;
+      this.connectionHealth.connectionQuality = 'critical';
+    });
+
+    this.reconnectionService.on('maxAttemptsExceeded', (data) => {
+      logger.error('Maximum reconnection attempts exceeded', {
+        maxAttempts: data.maxAttempts,
+        reason: data.reason,
+        sessionId: data.sessionId
+      });
+      
+      // Mark connection as failed when max attempts exceeded
+      this.connectionHealth.isHealthy = false;
+      this.connectionHealth.connectionQuality = 'critical';
     });
   }
 
@@ -691,6 +771,103 @@ export class TwilioWebSocketManager {
    */
   public recordReconnectionAttempt(success: boolean): void {
     this.realTimeAssessment.recordReconnectionAttempt(success);
+  }
+
+  /**
+   * Attempt intelligent reconnection using the ReconnectionService
+   * Handles Twilio-specific connection issues with exponential backoff
+   */
+  public async attemptIntelligentReconnection(
+    connectionFunction: () => Promise<void>,
+    reason: string,
+    sessionId?: string
+  ): Promise<boolean> {
+    logger.info('Starting intelligent reconnection attempt', {
+      reason,
+      sessionId,
+      currentHealth: this.getConnectionHealth(),
+      reconnectionMetrics: this.reconnectionService.getMetrics()
+    });
+
+    // Record the reconnection attempt in our health monitoring
+    const success = await this.reconnectionService.attemptReconnection(
+      connectionFunction,
+      reason,
+      sessionId
+    );
+
+    // Update our health monitoring with the result
+    this.recordReconnectionAttempt(success);
+
+    if (success) {
+      // Reset connection health on successful reconnection
+      this.connectionHealth.isHealthy = true;
+      this.connectionHealth.errorCount = 0;
+      this.connectionHealth.connectionQuality = 'good';
+      
+      logger.info('Intelligent reconnection successful', {
+        reason,
+        sessionId,
+        reconnectionMetrics: this.reconnectionService.getMetrics()
+      });
+    } else {
+      logger.error('Intelligent reconnection failed', {
+        reason,
+        sessionId,
+        reconnectionMetrics: this.reconnectionService.getMetrics()
+      });
+    }
+
+    return success;
+  }
+
+  /**
+   * Get enhanced reconnection decision that combines both services
+   */
+  public getEnhancedReconnectionDecision(reason: string): {
+    shouldReconnect: boolean;
+    urgency: 'low' | 'medium' | 'high' | 'immediate';
+    estimatedDelay: number;
+    fallbackRecommended: boolean;
+    healthAssessment: ReconnectionDecision;
+    reconnectionMetrics: any;
+  } {
+    const healthDecision = this.realTimeAssessment.assessConnectionHealth();
+    const reconnectionDecision = this.reconnectionService.getReconnectionDecision(reason);
+    
+    // Combine both decisions - be conservative (don't reconnect if either says no)
+    const shouldReconnect = healthDecision.shouldReconnect && reconnectionDecision.shouldReconnect;
+    
+    // Use the higher urgency from both services
+    const urgencyLevels = { low: 0, medium: 1, high: 2, immediate: 3 };
+    const healthUrgency = healthDecision.urgency || 'medium';
+    const reconnectionUrgency = reconnectionDecision.urgency;
+    
+    const maxUrgency = urgencyLevels[healthUrgency] > urgencyLevels[reconnectionUrgency] 
+      ? healthUrgency : reconnectionUrgency;
+    
+    return {
+      shouldReconnect,
+      urgency: maxUrgency as 'low' | 'medium' | 'high' | 'immediate',
+      estimatedDelay: reconnectionDecision.estimatedDelay,
+      fallbackRecommended: healthDecision.fallbackRecommended || reconnectionDecision.fallbackRecommended,
+      healthAssessment: healthDecision,
+      reconnectionMetrics: this.reconnectionService.getMetrics()
+    };
+  }
+
+  /**
+   * Get reconnection service metrics
+   */
+  public getReconnectionMetrics() {
+    return this.reconnectionService.getMetrics();
+  }
+
+  /**
+   * Check if currently attempting reconnection
+   */
+  public isReconnecting(): boolean {
+    return this.reconnectionService.isCurrentlyReconnecting();
   }
 
   /**

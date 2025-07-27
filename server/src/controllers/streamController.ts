@@ -18,6 +18,7 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
   // Store Twilio stream information
   let streamSid: string | null = null;
   let sequenceNumber = 0;
+  let pendingOpeningMessage: { text: string; voiceId: string } | null = null;
   
   const sendAudioToTwilio = (audioData: Buffer) => {
     if (!streamSid) {
@@ -113,64 +114,9 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
     
     // Generate initial greeting if this is the first interaction
     if (session.conversationHistory.length === 0) {
-      try {
-        // Generate opening message
-        const openingMessage = await conversationEngine.generateOpeningMessage(
-          conversationId,
-          "Customer", // Default name
-          call.campaignId.toString()
-        );
-        
-        // Ensure we're using a valid voice ID - prioritize call's personalityId (campaign voice)
-        const voiceId = call.personalityId || 
-                        session.currentPersonality.voiceId || 
-                        config.elevenLabsConfig.availableVoices[0].voiceId;
-        
-        // Log which voice we're using
-        logger.info(`Using voice ID ${voiceId} for call ${callId}`);
-        
-        // Synthesize speech using ElevenLabs with robust error handling
-        try {
-          const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
-            text: openingMessage,
-            personalityId: voiceId,
-            language: session.language || 'English'
-          });
-          
-          // Send synthesized audio through WebSocket
-          if (speechResponse && speechResponse.audioContent) {
-            logger.info(`Sending opening message audio to client for call ${callId}`);
-            sendAudioToTwilio(speechResponse.audioContent);
-          } else {
-            throw new Error('No audio content returned from synthesizeAdaptiveVoice');
-          }
-        } catch (voiceError) {
-          logger.error(`Error in adaptive voice synthesis for call ${callId}:`, voiceError);
-          
-          // Fallback to simpler method of speech synthesis
-          try {
-            logger.info(`Attempting fallback voice synthesis for call ${callId}`);
-            const fallbackVoice = config.elevenLabsConfig.availableVoices[0].voiceId;
-            const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(openingMessage, fallbackVoice);
-            
-            if (fallbackResponse) {
-              logger.info(`Sending fallback speech for call ${callId}`);
-              sendAudioToTwilio(fallbackResponse);
-            } else {
-              logger.error(`Fallback synthesis returned no audio for call ${callId}`);
-              throw new Error('Fallback synthesis returned no audio');
-            }
-          } catch (fallbackError) {
-            logger.error(`Fallback synthesis failed for call ${callId}:`, fallbackError);
-            ws.close(1011, 'Voice synthesis failed');
-            return;
-          }
-        }
-      } catch (error) {
-        logger.error(`Error generating opening message for call ${callId}:`, error);
-        ws.close(1011, 'Failed to generate opening message');
-        return;
-      }
+      const text = await conversationEngine.generateOpeningMessage(conversationId, 'Customer', call.campaignId.toString());
+      const voiceId = call.personalityId || session.currentPersonality.voiceId || config.elevenLabsConfig.availableVoices[0].voiceId;
+      pendingOpeningMessage = { text, voiceId };
     }
     
     // Set up accumulated buffer for incoming audio
@@ -179,6 +125,31 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
     // Handle incoming audio data
     ws.on('message', async (data: WebSocket.Data) => {
       try {
+        // Check if it's a text message from Twilio (JSON)
+        if (typeof data === 'string' || (data instanceof Buffer && data.length < 1000)) {
+          const textData = typeof data === 'string' ? data : data.toString('utf8');
+          
+          try {
+            const jsonMessage = JSON.parse(textData);
+            
+            if (jsonMessage.event === 'start') {
+              streamSid = jsonMessage.start.streamSid;
+              logger.info(`Media stream started, streamSid=${streamSid}`);
+              if (pendingOpeningMessage) {
+                const { text, voiceId } = pendingOpeningMessage;
+                try {
+                  const audio = await voiceAI.synthesizeSimpleSpeech(text, voiceId);
+                  if (audio) sendAudioToTwilio(audio);
+                } catch (e) { logger.error(e); }
+                pendingOpeningMessage = null;
+              }
+              return;
+            }
+          } catch (parseError) {
+            // Not valid JSON, continue to process as binary
+          }
+        }
+        
         // Process as binary data
         if (data instanceof Buffer) {
           // Accumulate audio data

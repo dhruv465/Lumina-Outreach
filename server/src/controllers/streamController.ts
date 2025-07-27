@@ -15,14 +15,34 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
   /**
    * Helper function to send audio data to Twilio in the required JSON format
    */
+  // Store Twilio stream information
+  let streamSid: string | null = null;
+  let sequenceNumber = 0;
+  
   const sendAudioToTwilio = (audioData: Buffer) => {
+    if (!streamSid) {
+      logger.warn('Cannot send audio: streamSid not available yet');
+      return;
+    }
+    
     const message = {
       event: 'media',
+      streamSid: streamSid,
       media: {
+        track: 'outbound',
+        chunk: (++sequenceNumber).toString(),
+        timestamp: Date.now().toString(),
         payload: audioData.toString('base64')
       }
     };
-    ws.send(JSON.stringify(message));
+    
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(message));
+      }
+    } catch (error) {
+      logger.error(`Failed to send audio to Twilio: ${error}`);
+    }
   };
 
   // Extract query parameters

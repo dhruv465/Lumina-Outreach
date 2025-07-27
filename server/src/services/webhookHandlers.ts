@@ -266,9 +266,14 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
           const voiceId = await EnhancedVoiceAIService.getValidVoiceId(requestedVoiceId);
           logger.info(`🎯 Final greeting voice ID selected for call ${callId}: "${voiceId}"`);
           
-          // Properly formatted greeting text
+          // Get greeting text from campaign - prioritize openingMessage over initialPrompt
           logger.info(`Campaign data debug: initialPrompt="${campaign.initialPrompt || ''}", openingMessage="${campaign.openingMessage || ''}", campaignId=${campaign._id}`);
-          const formattedGreeting = campaign.initialPrompt?.trim() || campaign.openingMessage?.trim() || process.env.DEFAULT_FALLBACK_GREETING || 'Hello, this is an automated call. How are you today?';
+          const formattedGreeting = campaign.openingMessage?.trim() || campaign.initialPrompt?.trim();
+          
+          if (!formattedGreeting) {
+            throw new Error(`Campaign ${call.campaignId} has no greeting message configured. Please set either openingMessage or initialPrompt in the campaign.`);
+          }
+          
           logger.info(`🗣️ Synthesizing greeting: "${formattedGreeting.substring(0, 50)}${formattedGreeting.length > 50 ? '...' : ''}"`);
           
           // Try direct voice synthesis first (more reliable)
@@ -362,12 +367,18 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
     
     // Fallback if ElevenLabs failed
     if (!useElevenLabs) {
-      logger.info(`ElevenLabs failed for call ${callId}, using system configuration instead`);
-      // NO HARDCODED FALLBACK - must get from campaign configuration
-      if (!campaign.initialPrompt?.trim()) {
-        throw new Error(`Campaign ${call.campaignId} has no initial prompt configured. Please configure the campaign with proper greeting content.`);
+      logger.info(`ElevenLabs failed for call ${callId}, using TTS fallback`);
+      // Get greeting text from campaign - prioritize openingMessage over initialPrompt
+      const greetingText = campaign.openingMessage?.trim() || campaign.initialPrompt?.trim();
+      
+      if (!greetingText) {
+        throw new Error(`Campaign ${call.campaignId} has no greeting message configured. Please set either openingMessage or initialPrompt in the campaign.`);
       }
-      twiml.say({ voice: 'alice' }, campaign.initialPrompt.trim());
+      
+      twiml.say({ 
+        voice: 'alice',
+        language: campaign.primaryLanguage === 'hi' ? 'hi-IN' : 'en-US'
+      }, greetingText);
     }
     
     // Check if we should use WebSocket streaming with Deepgram and new AI stack
@@ -386,10 +397,51 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
     if (useAdvancedStreaming) {
       logger.info(`Using advanced WebSocket streaming for call ${callId} with features: Deepgram=${!!configuration?.deepgramConfig?.isEnabled}, Flash=${!!configuration?.elevenLabsConfig?.useFlashModel}, Realtime=${!!configuration?.llmConfig?.providers?.some(p => p.useRealtimeAPI)}`);
 
-      // Use WebSocket streaming with the new AI stack
+      // CRITICAL FIX: Only play greeting if ElevenLabs failed
+      // If ElevenLabs worked, the greeting was already added to TwiML above
+      if (!useElevenLabs) {
+        // Get greeting text from campaign - prioritize openingMessage over initialPrompt
+        const greetingText = campaign.openingMessage?.trim() || campaign.initialPrompt?.trim();
+        
+        if (!greetingText) {
+          throw new Error(`Campaign ${call.campaignId} has no greeting message configured. Please set either openingMessage or initialPrompt in the campaign.`);
+        }
+        
+        // Play the initial greeting using traditional TTS
+        twiml.say({ 
+          voice: 'alice', 
+          language: campaign.primaryLanguage === 'hi' ? 'hi-IN' : 'en-US' 
+        }, greetingText);
+        
+        // Add a small pause after greeting
+        twiml.pause({ length: 1 });
+      }
+
+      // Now establish WebSocket connection for the conversation
+      const host = req.headers.host;
+      // For WebSockets, we should use wss if using HTTPS/SSL or if ngrok
+      const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' || 
+                      host?.includes('ngrok') || process.env.NODE_ENV === 'production' ? 
+                      'wss' : 'ws';
+      
+      // Format URL with /.websocket suffix to match Twilio's WebSocket connection pattern
+      // Twilio connects to URLs ending with /.websocket, not .websocket as a file extension
+      const wsUrl = `${protocol}://${host}/voice/optimized-stream/${callId}/${conversationId}/.websocket`;
+      
+      logger.info(`WebSocket URL for call ${callId}: ${wsUrl}`, {
+        host,
+        protocol,
+        callId,
+        conversationId,
+        fullUrl: wsUrl,
+        expectedPath: `/voice/optimized-stream/${callId}/${conversationId}/.websocket`,
+        secure: req.secure,
+        forwardedProto: req.headers['x-forwarded-proto']
+      });
+      
       const connect = twiml.connect();
       const stream = connect.stream({
-        url: `wss://${req.headers.host}/voice/low-latency/${callId}/${conversationId}`,
+        url: wsUrl,
         name: 'project-call-stream'
       });
 
@@ -865,32 +917,54 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
 export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
   let callId: string | undefined;
   let conversationId: string | undefined;
+  let streamSid: string | undefined;
 
   ws.on('message', async (data) => {
     let msg;
     try {
       msg = JSON.parse(data.toString());
-    } catch {
-      logger.error('Failed to parse WebSocket message');
+    } catch (error) {
+      logger.error('Failed to parse WebSocket message:', error);
+      // Send proper error response to Twilio
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          event: 'error',
+          error: 'Invalid JSON message format'
+        }));
+      }
       return;
     }
 
-    if (msg.event === 'start' && msg.start?.customParameters) {
-      callId = msg.start.customParameters.callId;
-      conversationId = msg.start.customParameters.conversationId;
-      logger.info(`Media stream started for call ${callId}, conv ${conversationId}`);
+    if (msg.event === 'start') {
+      streamSid = msg.streamSid;
+      if (msg.start?.customParameters) {
+        callId = msg.start.customParameters.callId;
+        conversationId = msg.start.customParameters.conversationId;
+      }
+      logger.info(`Media stream started for call ${callId}, conv ${conversationId}, streamSid: ${streamSid}`);
+      
+      // Send acknowledgment
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          event: 'connected',
+          streamSid: streamSid
+        }));
+      }
       return;
     }
 
-    if (!callId || !conversationId) {
-      // still waiting for start event
+    if (!callId || !conversationId || !streamSid) {
+      // still waiting for start event with proper parameters
       return;
     }
 
-    if (msg.event === 'media') {
+    if (msg.event === 'media' && msg.media?.payload) {
       // Process inbound audio chunk
       const payload = msg.media.payload; // base64-encoded audio
       // TODO: feed payload to Deepgram or conversation engine
+    } else if (msg.event === 'stop') {
+      logger.info(`Media stream stopped for call ${callId}`);
+      streamSid = undefined;
     }
 
     // Handle other events if needed...

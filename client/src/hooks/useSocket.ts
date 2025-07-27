@@ -2,9 +2,12 @@ import { useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './useAuth';
 
-// Create a Socket.IO client instance
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || window.location.origin;
+// Create a Socket.IO client instance using the environment variable 
+// VITE_WS_URL from .env file or falling back to window.location.origin
+const SOCKET_URL = import.meta.env.VITE_WS_URL || window.location.origin;
 let socket: Socket | null = null;
+
+console.log('Using WebSocket URL:', SOCKET_URL); // Helpful for debugging
 
 export const useSocket = () => {
   const [isConnected, setIsConnected] = useState(false);
@@ -17,8 +20,9 @@ export const useSocket = () => {
         transports: ['websocket', 'polling'],
         autoConnect: true,
         reconnection: true,
-        reconnectionAttempts: 5,
+        reconnectionAttempts: 10,
         reconnectionDelay: 1000,
+        timeout: 60000,            // Increased connection timeout matching server
       });
     }
 

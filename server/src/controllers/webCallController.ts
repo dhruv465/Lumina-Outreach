@@ -72,6 +72,24 @@ export const handleWebCallEvent = (socket: Socket): void => {
   // Session tracking
   let currentSessionId: string | null = null;
   
+  // Set up ping interval to keep connection alive
+  const pingInterval = setInterval(() => {
+    if (socket.connected) {
+      socket.emit('webcall:ping', { timestamp: Date.now() });
+      logger.debug(`Sent ping to client: ${socket.id}`);
+    } else {
+      logger.warn(`Socket ${socket.id} disconnected, clearing ping interval`);
+      clearInterval(pingInterval);
+    }
+  }, 15000); // Send a ping every 15 seconds (reduced interval for better reliability)
+  
+  // Listen for pong responses
+  socket.on('webcall:pong', (data: { timestamp: number }) => {
+    // Connection is still alive - calculate latency
+    const latency = Date.now() - (data.timestamp || 0);
+    logger.debug(`Received pong from client: ${socket.id}, latency: ${latency}ms`);
+  });
+  
   // Set up event handlers
   socket.on('webcall:initialize', async (data: { sessionId: string, campaignId: string, userId: string, testId?: string }) => {
     try {
@@ -228,6 +246,9 @@ export const handleWebCallEvent = (socket: Socket): void => {
   
   socket.on('disconnect', async () => {
     try {
+      // Clear ping interval
+      clearInterval(pingInterval);
+      
       if (currentSessionId) {
         await webCallService.endSession(currentSessionId);
         logger.info(`WebCall session ${currentSessionId} ended due to disconnect`);

@@ -83,7 +83,7 @@ export async function checkElevenLabsHealth(): Promise<HealthCheck> {
  */
 export async function checkOpenAIHealth(): Promise<HealthCheck> {
   const apiKey = process.env.OPENAI_API_KEY;
-  
+
   if (!apiKey || apiKey.trim() === '') {
     return {
       service: 'openai',
@@ -92,7 +92,7 @@ export async function checkOpenAIHealth(): Promise<HealthCheck> {
       timestamp: new Date()
     };
   }
-  
+
   return {
     service: 'openai',
     status: 'healthy',
@@ -109,7 +109,7 @@ export async function checkOpenAIHealth(): Promise<HealthCheck> {
  */
 export async function checkAnthropicHealth(): Promise<HealthCheck> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  
+
   if (!apiKey || apiKey.trim() === '') {
     return {
       service: 'anthropic',
@@ -118,7 +118,7 @@ export async function checkAnthropicHealth(): Promise<HealthCheck> {
       timestamp: new Date()
     };
   }
-  
+
   return {
     service: 'anthropic',
     status: 'healthy',
@@ -136,7 +136,7 @@ export async function checkAnthropicHealth(): Promise<HealthCheck> {
 export async function checkTwilioHealth(): Promise<HealthCheck> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  
+
   if (!accountSid || !authToken) {
     return {
       service: 'twilio',
@@ -145,7 +145,7 @@ export async function checkTwilioHealth(): Promise<HealthCheck> {
       timestamp: new Date()
     };
   }
-  
+
   return {
     service: 'twilio',
     status: 'healthy',
@@ -163,10 +163,10 @@ export async function checkTwilioHealth(): Promise<HealthCheck> {
  */
 export async function performSystemHealthCheck(): Promise<SystemHealth> {
   const startTime = Date.now();
-  
+
   try {
     const checks: HealthCheck[] = [];
-    
+
     // Database health
     const dbHealth = await checkDatabaseHealth();
     checks.push({
@@ -176,27 +176,27 @@ export async function performSystemHealthCheck(): Promise<SystemHealth> {
       timestamp: new Date(),
       details: dbHealth.details
     });
-    
+
     // LLM providers health
     checks.push(await checkGoogleLLMHealth());
     checks.push(await checkOpenAIHealth());
     checks.push(await checkAnthropicHealth());
-    
+
     // Other services health
     checks.push(await checkElevenLabsHealth());
     checks.push(await checkTwilioHealth());
-    
+
     // Memory health check
     const memoryUsage = process.memoryUsage();
     const heapUsedMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
     const rssMB = Math.round(memoryUsage.rss / 1024 / 1024);
-    const memoryStatus = heapUsedMB > 1400 ? 'critical' : 
-                        heapUsedMB > 1200 ? 'warning' : 'healthy';
-    
+    const memoryStatus = heapUsedMB > 1400 ? 'critical' :
+      heapUsedMB > 1200 ? 'warning' : 'healthy';
+
     checks.push({
       service: 'memory',
-      status: memoryStatus === 'critical' ? 'unhealthy' : 
-              memoryStatus === 'warning' ? 'degraded' : 'healthy',
+      status: memoryStatus === 'critical' ? 'unhealthy' :
+        memoryStatus === 'warning' ? 'degraded' : 'healthy',
       message: `Heap usage: ${heapUsedMB}MB / RSS: ${rssMB}MB`,
       timestamp: new Date(),
       details: {
@@ -207,11 +207,11 @@ export async function performSystemHealthCheck(): Promise<SystemHealth> {
         arrayBuffers: Math.round(memoryUsage.arrayBuffers / 1024 / 1024)
       }
     });
-    
+
     // Determine overall system status
     const unhealthyCount = checks.filter(c => c.status === 'unhealthy').length;
     const degradedCount = checks.filter(c => c.status === 'degraded').length;
-    
+
     let overallStatus: 'healthy' | 'unhealthy' | 'degraded';
     if (unhealthyCount > 0) {
       overallStatus = 'unhealthy';
@@ -220,7 +220,7 @@ export async function performSystemHealthCheck(): Promise<SystemHealth> {
     } else {
       overallStatus = 'healthy';
     }
-    
+
     const result: SystemHealth = {
       status: overallStatus,
       timestamp: new Date(),
@@ -232,14 +232,14 @@ export async function performSystemHealthCheck(): Promise<SystemHealth> {
         status: memoryStatus
       }
     };
-    
+
     const duration = Date.now() - startTime;
     logger.debug(`Health check completed in ${duration}ms - Status: ${overallStatus}`);
-    
+
     return result;
   } catch (error) {
     logger.error('System health check failed:', error);
-    
+
     return {
       status: 'unhealthy',
       timestamp: new Date(),
@@ -260,11 +260,11 @@ export async function performSystemHealthCheck(): Promise<SystemHealth> {
 export async function healthCheckHandler(req: Request, res: Response): Promise<void> {
   try {
     const health = await performSystemHealthCheck();
-    
+
     // Set appropriate HTTP status code
-    const statusCode = health.status === 'healthy' ? 200 : 
-                      health.status === 'degraded' ? 207 : 503;
-    
+    const statusCode = health.status === 'healthy' ? 200 :
+      health.status === 'degraded' ? 207 : 503;
+
     res.status(statusCode).json(health);
   } catch (error) {
     logger.error('Health check endpoint error:', error);
@@ -287,7 +287,7 @@ export async function healthCheckHandler(req: Request, res: Response): Promise<v
  */
 export function readinessCheckHandler(req: Request, res: Response): void {
   const isReady = isDatabaseConnected();
-  
+
   if (isReady) {
     res.status(200).json({
       status: 'ready',

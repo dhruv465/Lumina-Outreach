@@ -35,7 +35,7 @@ import webCallRoutes from './routes/webCallRoutes';
 import webCallMetricsRoutes from './routes/webCallMetricsRoutes';
 
 // Twilio Media Streams WebSocket handler
-import { handleLowLatencyVoiceStream } from './controllers/lowLatencyStreamController';
+import { initializeTwilioWebSocketServer } from './services/twilioWebSocketServer';
 
 // Web Call WebSocket handlers
 import { setupWebCallSocketHandlers } from './routes/webCallSocketRoutes';
@@ -134,8 +134,30 @@ const server = http.createServer(app);
 // Initialize WebSocket support and get the augmented app instance
 const { app: wsApp } = expressWs(app, server);
 
-// Register Twilio Media Streams WebSocket endpoint on the augmented app
-wsApp.ws('/voice/low-latency/:callId/:conversationId', handleLowLatencyVoiceStream);
+// Initialize dedicated Twilio WebSocket server with robust framing
+const twilioWSServer = initializeTwilioWebSocketServer(server);
+logger.info('Dedicated Twilio WebSocket server initialized for robust framing');
+
+// Add server upgrade event handler for better WebSocket connection debugging
+server.on('upgrade', (request, socket, head) => {
+  const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname;
+  
+  // Log all upgrade requests for debugging
+  logger.debug('HTTP upgrade request received', {
+    pathname,
+    headers: {
+      host: request.headers.host,
+      origin: request.headers.origin,
+      'user-agent': request.headers['user-agent'],
+      upgrade: request.headers.upgrade,
+      connection: request.headers.connection
+    },
+    method: request.method
+  });
+  
+  // Let the WebSocket servers handle the upgrade
+  // The express-ws and twilioWebSocketServer will process this
+});
 
 const io = new SocketIOServer(server, {
   cors: {
@@ -143,6 +165,11 @@ const io = new SocketIOServer(server, {
     methods: ['GET', 'POST'],
     credentials: true,
   },
+  pingTimeout: parseInt(process.env.WS_PING_TIMEOUT || '120000'),      // Use environment variable or default to 120 seconds
+  pingInterval: parseInt(process.env.WS_PING_INTERVAL || '15000'),     // Use environment variable or default to 15 seconds
+  connectTimeout: parseInt(process.env.WS_CONNECT_TIMEOUT || '60000'), // Use environment variable or default to 60 seconds
+  maxHttpBufferSize: 1e8,    // 100MB max buffer size for larger audio chunks
+  transports: ['websocket', 'polling'],  // Prefer WebSocket, fallback to polling
 });
 
 // Set up WebSocket handlers for web call testing

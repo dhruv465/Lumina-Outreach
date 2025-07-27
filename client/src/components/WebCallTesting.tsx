@@ -1,19 +1,33 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { io, Socket } from "socket.io-client";
-import { useQuery } from "@tanstack/react-query";
-import api from "@/services/api";
 import { useAuth } from "@/hooks/useAuth";
-import WebCallAudioProcessor, {
-  AudioProcessorErrorType,
-  AudioProcessorError,
-} from "./WebCallAudioProcessor";
-import WebCallAudioPlayer from "./WebCallAudioPlayer";
-import WebCallTranscript from "./WebCallTranscript";
-import WebCallControls from "./WebCallControls";
-import WebCallTranscriptExport from "./WebCallTranscriptExport";
+import api from "@/services/api";
+import { useQuery } from "@tanstack/react-query";
+import {
+  Activity,
+  AlertCircle,
+  BarChart3,
+  MessageSquare,
+  Mic,
+  MicOff,
+  PhoneCall,
+  Play,
+  RefreshCw,
+  Settings,
+  Square,
+  Users,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
+import React, { useCallback, useRef, useState } from "react";
+import { Socket } from "socket.io-client";
 import RealTimeCallMonitoring from "./RealTimeCallMonitoring";
-import WebCallDebugPanel from "./WebCallDebugPanel";
-import { Card, CardHeader, CardContent, CardTitle } from "./ui/card";
+import WebCallAudioPlayer from "./WebCallAudioPlayer";
+import WebCallAudioProcessor from "./WebCallAudioProcessor";
+import WebCallDiagnosticPanel from "./WebCallDiagnosticPanel";
+import WebCallTranscript from "./WebCallTranscript";
+import WebCallTranscriptExport from "./WebCallTranscriptExport";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
   SelectContent,
@@ -21,27 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Skeleton } from "./ui/skeleton";
-import { Badge } from "./ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
-import {
-  AlertCircle,
-  RefreshCw,
-  Users,
-  PhoneCall,
-  Play,
-  Square,
-  Mic,
-  MicOff,
-  Volume2,
-  VolumeX,
-  Activity,
-  MessageSquare,
-  BarChart3,
-  Settings,
-} from "lucide-react";
-import { Button } from "./ui/button";
 
 // Types (same as original)
 interface WebCallTestingProps {
@@ -762,7 +756,7 @@ const WebCallTesting: React.FC<WebCallTestingProps> = ({
                 </TabsContent>
                 <TabsContent value="debug" className="h-96 mt-0">
                   <div className="border border-slate-200 rounded-lg h-full overflow-hidden">
-                    <WebCallDebugPanel
+                    <WebCallDiagnosticPanel
                       socket={socket}
                       isConnected={isConnected}
                     />

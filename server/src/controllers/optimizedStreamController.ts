@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import WebSocket from 'ws';
+import * as WebSocket from 'ws';
 import { logger } from '../index';
 import Call from '../models/Call';
 import Configuration from '../models/Configuration';
@@ -8,6 +8,8 @@ import { EnhancedVoiceAIService } from '../services/enhancedVoiceAIService';
 import { getSDKService } from '../services/elevenlabsSDKService';
 import { handleVoiceStream } from './streamController';
 import responseCache from '../utils/responseCache';
+import { TwilioWebSocketManager } from '../utils/TwilioWebSocketManager';
+import { SessionConfig, globalSessionManager } from '../utils/SessionManager';
 import { v4 as uuidv4 } from 'uuid';
 
 // Common greeting phrases for pre-caching
@@ -103,26 +105,76 @@ export const initializeResponseCache = async (): Promise<void> => {
  * Uses parallel processing and streaming to reduce latency
  */
 export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): Promise<void> => {
-  /**
-   * Helper function to send audio data to Twilio in the required JSON format
-   */
-  const sendAudioToTwilio = (audioData: Buffer) => {
-    const message = {
-      event: 'media',
-      media: {
-        payload: audioData.toString('base64')
-      }
-    };
-    ws.send(JSON.stringify(message));
-  };
+  // Log the connection attempt with detailed information
+  logger.info(`WebSocket connection attempt received`, {
+    url: req.url,
+    headers: {
+      host: req.headers.host,
+      origin: req.headers.origin,
+      upgrade: req.headers.upgrade,
+      connection: req.headers.connection,
+      protocol: req.headers['sec-websocket-protocol']
+    },
+    method: req.method,
+    ip: req.ip,
+    timestamp: new Date().toISOString()
+  });
+  
+  // Validate this is a proper WebSocket connection
+  if (req.headers.upgrade?.toLowerCase() !== 'websocket') {
+    logger.error('Invalid connection attempt: not a WebSocket upgrade request');
+    ws.close(1003, 'Not a WebSocket connection');
+    return;
+  }
+  
+  // Configure WebSocket for Twilio compatibility
+  ws.setMaxListeners(20); // Prevent memory leaks with many listeners
+  
+  // Store Twilio stream information
+  let streamSid: string | null = null;
+  let twilioManager: TwilioWebSocketManager;
 
   // Extract query parameters
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const callId = url.searchParams.get('callId');
-  const conversationId = url.searchParams.get('conversationId');
+  
+  // Try to get callId and conversationId from different sources
+  // 1. Check URL parameters (from route path)
+  let callId = req.params?.callId;
+  let conversationId = req.params?.conversationId;
+  
+  // 2. If not found in params, check query parameters
+  if (!callId || !conversationId) {
+    callId = url.searchParams.get('callId');
+    conversationId = url.searchParams.get('conversationId');
+  }
+  
+  // 3. Try to extract from URL path as a last resort
+  if (!callId || !conversationId) {
+    const pathParts = url.pathname.split('/');
+    if (pathParts.length >= 4) {
+      // Format: /voice/optimized-stream/[callId]/[conversationId]
+      const potentialCallId = pathParts[3];
+      const potentialConvId = pathParts[4]?.replace(/\.websocket$/, '');
+      
+      if (potentialCallId && potentialCallId !== '.websocket') {
+        callId = potentialCallId;
+      }
+      
+      if (potentialConvId && potentialConvId !== '.websocket') {
+        conversationId = potentialConvId;
+      }
+    }
+  }
+  
+  logger.info(`WebSocket connection parameters: callId=${callId}, conversationId=${conversationId}, URL=${req.url}`);
   
   if (!callId || !conversationId) {
-    logger.error('Missing callId or conversationId in voice stream');
+    logger.error('Missing callId or conversationId in voice stream', {
+      url: req.url,
+      params: req.params,
+      query: url.searchParams.toString(),
+      headers: req.headers
+    });
     ws.close(1008, 'Missing required parameters');
     return;
   }
@@ -135,6 +187,227 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
   
   try {
     logger.info(`Optimized voice stream started for call ${callId}, conversation ${conversationId}`);
+    logger.debug(`WebSocket connection details: URL=${req.url}, Headers=${JSON.stringify(req.headers)}`);
+    
+    // Create session configuration
+    const sessionConfig: SessionConfig = {
+      sessionId: `session-${callId}-${conversationId}-${Date.now()}`,
+      callId,
+      conversationId,
+      userId: undefined, // Could be extracted from request if available
+      campaignId: undefined, // Could be extracted from request if available
+      sessionType: 'voice_call',
+      priority: 'high',
+      maxDuration: 1800000, // 30 minutes max
+      idleTimeout: 300000,  // 5 minutes idle timeout
+      healthCheckInterval: 30000 // 30 seconds health check
+    };
+    
+    // Create session with integrated WebSocket management
+    const sessionInstance = globalSessionManager.createSession(ws, sessionConfig);
+    twilioManager = sessionInstance.getTwilioManager();
+    
+    /**
+     * Enhanced function to send audio data to Twilio with proper chunking and validation
+     */
+    const sendAudioToTwilio = (audioData: Buffer) => {
+      if (!streamSid) {
+        logger.warn('Cannot send audio: streamSid not available yet', {
+          callId,
+          conversationId
+        });
+        return false;
+      }
+      
+      // Register audio processing as intensive operation if large
+      let operationId: string | undefined;
+      if (audioData.length > 32 * 1024) { // Large audio chunks (> 32KB)
+        operationId = `audio-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        twilioManager.registerIntensiveOperation({
+          id: operationId,
+          type: 'audio_processing',
+          priority: 'high',
+          estimatedDuration: Math.min(audioData.length / 1000, 5000), // Estimate based on size
+          startTime: new Date(),
+          pauseHeartbeat: false // Don't pause for audio, just track
+        });
+      }
+      
+      // Use the enhanced Twilio manager to send audio with proper chunking
+      const success = twilioManager.sendAudioToTwilio(audioData, streamSid);
+      
+      if (success) {
+        // Record successful operation for health assessment
+        twilioManager.recordSuccess();
+      } else {
+        logger.error('Failed to send audio to Twilio via enhanced manager', {
+          callId,
+          conversationId,
+          streamSid,
+          audioSize: audioData.length,
+          connectionHealth: twilioManager.getConnectionHealth(),
+          reconnectionDecision: twilioManager.getReconnectionDecision()
+        });
+      }
+      
+      // Complete intensive operation if registered
+      if (operationId) {
+        twilioManager.completeIntensiveOperation(operationId);
+      }
+      
+      return success;
+    };
+    
+    // Send immediate success response to acknowledge connection
+    try {
+      const connectionMessage = {
+        event: 'connected',
+        timestamp: Date.now().toString(),
+        status: 'ready'
+      };
+      twilioManager.sendTwilioMessage(connectionMessage);
+      logger.info(`Enhanced Twilio WebSocket manager initialized for call ${callId}`);
+    } catch (initError) {
+      logger.error(`Failed to send connection acknowledgment for call ${callId}:`, initError);
+    }
+    
+    // Set up session event handlers
+    sessionInstance.on('sessionIdle', (data) => {
+      logger.warn(`Session idle timeout for call ${callId}`, {
+        sessionId: data.sessionId,
+        callId,
+        conversationId
+      });
+    });
+    
+    sessionInstance.on('healthDegraded', (data) => {
+      logger.warn(`Session health degraded for call ${callId}`, {
+        sessionId: data.sessionId,
+        callId,
+        conversationId
+      });
+    });
+    
+    sessionInstance.on('healthRecovered', (data) => {
+      logger.info(`Session health recovered for call ${callId}`, {
+        sessionId: data.sessionId,
+        callId,
+        conversationId
+      });
+    });
+    
+    sessionInstance.on('criticalHealth', (data) => {
+      logger.error(`Critical session health detected for call ${callId}`, {
+        sessionId: data.sessionId,
+        callId,
+        conversationId,
+        healthReport: data.healthReport
+      });
+    });
+    
+    // Start the session
+    sessionInstance.start();
+    
+    // Set up session-aware health monitoring
+    const healthMonitoringInterval = setInterval(() => {
+      const sessionMetrics = sessionInstance.getMetrics();
+      const sessionHealthReport = sessionInstance.getHealthReport();
+      const healthScore = twilioManager.getHealthScore();
+      const reconnectionDecision = twilioManager.getReconnectionDecision();
+      const realTimeReport = twilioManager.getRealTimeHealthReport();
+      const heartbeatMetrics = twilioManager.getHeartbeatMetrics();
+      const heartbeatHealth = twilioManager.getHeartbeatHealth();
+      const adaptiveMetrics = twilioManager.getAdaptiveHeartbeatMetrics();
+      const adaptiveRecommendations = twilioManager.getAdaptiveHeartbeatRecommendations();
+      
+      // Log comprehensive session and connection health status
+      logger.debug(`Session-aware connection health for call ${callId}:`, {
+        // Session information
+        sessionId: sessionConfig.sessionId,
+        callId,
+        conversationId,
+        sessionDuration: sessionMetrics.duration,
+        sessionActive: sessionMetrics.isActive,
+        sessionHealthy: sessionMetrics.isHealthy,
+        sessionOverallHealth: sessionHealthReport.overallHealth,
+        messageCount: sessionMetrics.messageCount,
+        errorCount: sessionMetrics.errorCount,
+        reconnectionCount: sessionMetrics.reconnectionCount,
+        // Connection health assessment
+        healthScore: healthScore.overall,
+        quality: healthScore.quality,
+        latency: healthScore.latency,
+        // Reconnection decision
+        shouldReconnect: reconnectionDecision.shouldReconnect,
+        reconnectionReason: reconnectionDecision.reason,
+        urgency: reconnectionDecision.urgency,
+        // Connection status
+        connectionReady: twilioManager.getStats().isReady,
+        circuitState: realTimeReport.circuitBreakerHealth.metrics.state,
+        // Basic heartbeat metrics
+        heartbeatAlive: heartbeatMetrics.isAlive,
+        heartbeatLatency: heartbeatMetrics.averageLatency,
+        heartbeatInterval: heartbeatMetrics.currentInterval,
+        missedHeartbeats: heartbeatMetrics.missedHeartbeats,
+        heartbeatQuality: heartbeatHealth.quality,
+        totalPings: heartbeatMetrics.totalPings,
+        totalPongs: heartbeatMetrics.totalPongs,
+        // Adaptive heartbeat metrics
+        networkCondition: adaptiveMetrics.currentCondition.type,
+        recommendedInterval: adaptiveMetrics.recommendedInterval,
+        performanceScore: adaptiveMetrics.performanceScore,
+        pausedOperations: adaptiveMetrics.pausedOperations,
+        adaptationHistory: adaptiveMetrics.adaptationHistory.length
+      });
+      
+      // Log warning if session or connection health is degrading
+      if (healthScore.overall < 50 || !heartbeatMetrics.isAlive || 
+          adaptiveMetrics.currentCondition.type === 'poor' || 
+          sessionHealthReport.overallHealth === 'poor' || sessionHealthReport.overallHealth === 'critical') {
+        logger.warn(`Poor session/connection health detected for call ${callId}`, {
+          sessionId: sessionConfig.sessionId,
+          callId,
+          sessionHealth: sessionHealthReport.overallHealth,
+          sessionIssues: sessionHealthReport.issues,
+          connectionHealthScore: healthScore,
+          reconnectionDecision,
+          recommendations: [
+            ...realTimeReport.recommendations, 
+            ...adaptiveRecommendations,
+            ...sessionHealthReport.recommendations
+          ],
+          degradationEvents: realTimeReport.degradationEvents.slice(-3), // Last 3 events
+          heartbeatHealth,
+          heartbeatIssues: heartbeatHealth.issues,
+          networkCondition: adaptiveMetrics.currentCondition,
+          sessionMetrics: {
+            duration: sessionMetrics.duration,
+            messageCount: sessionMetrics.messageCount,
+            errorCount: sessionMetrics.errorCount,
+            reconnectionCount: sessionMetrics.reconnectionCount
+          }
+        });
+      }
+      
+      // Log critical health issues
+      if (reconnectionDecision.shouldReconnect && reconnectionDecision.urgency === 'immediate' ||
+          sessionHealthReport.overallHealth === 'critical') {
+        logger.error(`Critical session/connection health for call ${callId} - immediate action needed`, {
+          sessionId: sessionConfig.sessionId,
+          callId,
+          sessionHealth: sessionHealthReport.overallHealth,
+          sessionAlerts: sessionHealthReport.alerts,
+          reason: reconnectionDecision.reason,
+          urgency: reconnectionDecision.urgency,
+          fallbackRecommended: reconnectionDecision.fallbackRecommended,
+          circuitState: realTimeReport.circuitBreakerHealth.metrics.state,
+          heartbeatDead: !heartbeatMetrics.isAlive,
+          missedHeartbeats: heartbeatMetrics.missedHeartbeats,
+          sessionDuration: sessionMetrics.duration,
+          sessionErrors: sessionMetrics.errorCount
+        });
+      }
+    }, 30000); // Check every 30 seconds
     
     // Get the call from database - in parallel with other initialization
     const callPromise = Call.findById(callId);
@@ -283,11 +556,91 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
     // Set up accumulated buffer for incoming audio
     let audioBuffer: Buffer[] = [];
     
-    // Handle incoming audio data
+    // Handle incoming WebSocket messages
     ws.on('message', async (data: WebSocket.Data) => {
       try {
-        // Process as binary data
-        if (data instanceof Buffer) {
+        // Reset the missed pings counter whenever we receive any message
+        (ws as any).isAlive = true;
+
+        // Check if it's a text message from Twilio (JSON)
+        if (typeof data === 'string' || (data instanceof Buffer && data.length < 1000)) {
+          // Convert to string if it's a Buffer
+          const textData = typeof data === 'string' ? data : data.toString('utf8');
+          
+          try {
+            // Try to parse as JSON
+            const jsonMessage = JSON.parse(textData);
+            logger.debug(`Received JSON message from Twilio: ${JSON.stringify(jsonMessage)}`);
+            
+            // Handle Twilio Media Stream protocol messages
+            if (jsonMessage.event === 'start') {
+              // This is the initial message from Twilio with the streamSid
+              streamSid = jsonMessage.start.streamSid;
+              logger.info(`Media stream started for call ${callId}, conv ${conversationId}, streamSid: ${streamSid}`);
+              
+              // Send a connected event to acknowledge the start message
+              // This is REQUIRED by Twilio Media Streams protocol
+              if (ws.readyState === WebSocket.OPEN) {
+                const connectedMessage = {
+                  event: 'connected',
+                  protocol: 'v2',
+                  streamSid: streamSid
+                };
+                logger.debug(`Sending connected message: ${JSON.stringify(connectedMessage)}`);
+                twilioManager.sendTwilioMessage(connectedMessage);
+                
+                // Also send a mark event to confirm the connection is working
+                const markMessage = {
+                  event: 'mark',
+                  streamSid: streamSid,
+                  mark: {
+                    name: 'connection-established'
+                  }
+                };
+                logger.debug(`Sending mark message: ${JSON.stringify(markMessage)}`);
+                twilioManager.sendTwilioMessage(markMessage);
+              }
+              
+              return; // Don't process as audio data
+            }
+            
+            // Handle stop event
+            if (jsonMessage.event === 'stop') {
+              logger.info(`Media stream stopped: ${jsonMessage.stop?.streamSid}`);
+              // Properly clean up resources
+              clearInterval((ws as any).pingInterval);
+              ws.close(1000, 'Stop event received from Twilio');
+              return;
+            }
+            
+            // Handle media event from Twilio (incoming audio)
+            if (jsonMessage.event === 'media' && jsonMessage.media?.payload) {
+              // Extract the media payload
+              const payload = jsonMessage.media.payload;
+              try {
+                // Convert base64 to buffer
+                const mediaBuffer = Buffer.from(payload, 'base64');
+                // Add to audio buffer for processing
+                audioBuffer.push(mediaBuffer);
+              } catch (mediaError) {
+                logger.error(`Error processing media payload: ${mediaError}`);
+              }
+              return;
+            }
+            
+            // Handle mark events from Twilio
+            if (jsonMessage.event === 'mark') {
+              logger.debug(`Received mark event from Twilio: ${jsonMessage.mark?.name || 'unnamed'}`);
+              return;
+            }
+          } catch (parseError) {
+            // Not valid JSON, might be binary data
+            logger.debug(`Received non-JSON message: ${textData.substring(0, 100)}...`);
+          }
+        }
+        
+        // Process as binary data if it's a large buffer
+        if (data instanceof Buffer && data.length >= 1000) {
           // Accumulate audio data
           audioBuffer.push(data);
           
@@ -482,11 +835,81 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
     
     // Handle WebSocket closure
     ws.on('close', async (code: number, reason: string) => {
-      logger.info(`Voice stream closed for call ${callId}: ${code} ${reason}`);
+      // Get final health report before cleanup
+      const healthReport = twilioManager.getHealthReport();
+      const healthMetrics = twilioManager.getHealthMetrics();
+      
+      logger.info(`Voice stream closed for call ${callId}: code=${code} reason="${reason || 'No reason provided'}"`, {
+        callId,
+        conversationId,
+        streamSid,
+        code,
+        reason,
+        connectionHealth: twilioManager.getConnectionHealth(),
+        healthScore: healthReport.healthScore,
+        totalErrors: healthMetrics.issues.length
+      });
       
       try {
         // Clean up resources as needed
         audioBuffer = []; // Clear buffer
+        
+        // Clear ping interval if it exists
+        if ((ws as any).pingInterval) {
+          clearInterval((ws as any).pingInterval);
+          logger.debug(`Cleared ping interval for call ${callId}`);
+        }
+        
+        // Clear health monitoring interval
+        if (healthMonitoringInterval) {
+          clearInterval(healthMonitoringInterval);
+          logger.debug(`Cleared health monitoring interval for call ${callId}`);
+        }
+        
+        // End session and cleanup resources
+        const finalSessionMetrics = sessionInstance.getMetrics();
+        const finalHealthReport = sessionInstance.getHealthReport();
+        
+        logger.info(`Session ending for call ${callId}`, {
+          sessionId: sessionConfig.sessionId,
+          callId,
+          conversationId,
+          sessionDuration: finalSessionMetrics.duration,
+          messageCount: finalSessionMetrics.messageCount,
+          errorCount: finalSessionMetrics.errorCount,
+          reconnectionCount: finalSessionMetrics.reconnectionCount,
+          finalHealth: finalHealthReport.overallHealth,
+          closeCode: code,
+          closeReason: reason
+        });
+        
+        sessionInstance.end(`WebSocket closed: ${code} - ${reason || 'No reason provided'}`);
+        
+        logger.debug(`Cleaned up session and WebSocket manager for call ${callId}`);
+        
+        // Log additional information about the disconnection
+        // This helps diagnose Twilio error 31924
+        if (code === 1006) {
+          logger.warn(`Abnormal WebSocket closure (code 1006) for call ${callId} - possible Twilio Media Stream protocol error`, {
+            callId,
+            conversationId,
+            streamSid,
+            twilioErrorPossible: 'Error 31924 may occur after this abnormal closure'
+          });
+        }
+        
+        // If this is an intentional closure from our side (1000), no action needed
+        // For other closure codes, we might want to record them for debugging
+        if (code !== 1000) {
+          // Log unexpected closures to help with debugging
+          logger.warn(`Unexpected WebSocket closure code ${code} for call ${callId}`, {
+            callId,
+            conversationId,
+            streamSid,
+            closeCode: code,
+            closeReason: reason || 'No reason provided'
+          });
+        }
       } catch (error) {
         logger.error(`Error handling stream close for call ${callId}:`, error);
       }
@@ -494,9 +917,133 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
     
     // Handle errors
     ws.on('error', (error: Error) => {
-      logger.error(`WebSocket error for call ${callId}:`, error);
-      ws.close(1011, 'Internal server error');
+      logger.error(`WebSocket error for call ${callId}:`, {
+        error: error.message,
+        stack: error.stack,
+        callId,
+        conversationId,
+        streamSid
+      });
+      
+      try {
+        // Send a closing message to Twilio if possible
+        if (streamSid && ws.readyState === WebSocket.OPEN) {
+          try {
+            const errorMessage = {
+              event: 'error',
+              streamSid: streamSid,
+              error: {
+                message: 'Internal server error',
+                code: 'SERVER_ERROR'
+              }
+            };
+            twilioManager.sendTwilioMessage(errorMessage);
+            logger.debug(`Sent error message to Twilio for call ${callId}`);
+          } catch (sendError) {
+            logger.error(`Failed to send error message to Twilio: ${sendError.message}`);
+          }
+        }
+        
+        // Close the connection with an appropriate code
+        ws.close(1011, 'Internal server error: ' + error.message.substring(0, 100));
+      } catch (closeError) {
+        logger.error(`Error closing WebSocket after error: ${closeError.message}`);
+        
+        // Force terminate if normal close fails
+        try {
+          ws.terminate();
+        } catch (terminateError) {
+          logger.error(`Failed to terminate WebSocket: ${terminateError.message}`);
+        }
+      }
     });
+    
+    // Handle pong messages from client
+    ws.on('pong', () => {
+      logger.debug(`Received pong from client for call ${callId}`);
+      (ws as any).isAlive = true;
+    });
+    
+    // Mark the connection as alive initially
+    (ws as any).isAlive = true;
+    
+    // Set up ping/pong to keep connection alive for Twilio
+    const pingInterval = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        clearInterval(pingInterval);
+        logger.debug(`Cleared ping interval due to closed connection for call ${callId}`);
+        return;
+      }
+      
+      // Check if we received a pong since the last ping
+      if ((ws as any).isAlive === false) {
+        logger.warn(`No pong received for call ${callId}, attempting reconnection`);
+        
+        // Attempt to send a message to see if connection is actually dead
+        try {
+          // Send a mark message as a last attempt to verify connection
+          if (streamSid) {
+            const reconnectMessage = {
+              event: 'mark',
+              streamSid: streamSid,
+              mark: {
+                name: 'reconnection-attempt'
+              }
+            };
+            twilioManager.sendTwilioMessage(reconnectMessage);
+            logger.info(`Sent reconnection attempt message for call ${callId}`);
+            
+            // Give one more chance
+            (ws as any).isAlive = true;
+          } else {
+            // If we don't have a streamSid, we can't send a proper message
+            // and the connection is likely dead
+            logger.error(`No streamSid available for reconnection attempt, terminating connection`);
+            clearInterval(pingInterval);
+            ws.terminate();
+          }
+        } catch (reconnectError) {
+          logger.error(`Error during reconnection attempt: ${reconnectError}`);
+          clearInterval(pingInterval);
+          try {
+            ws.terminate();
+          } catch (terminateError) {
+            logger.error(`Error terminating connection: ${terminateError}`);
+          }
+        }
+        return;
+      }
+      
+      // Mark as not alive, will be set to true when pong is received
+      // or when any message is received
+      (ws as any).isAlive = false;
+      
+      // Send ping
+      try {
+        ws.ping(Buffer.from(JSON.stringify({ timestamp: Date.now() })));
+        logger.debug(`Ping sent to keep WebSocket connection alive for call ${callId}`);
+      } catch (pingError) {
+        logger.error(`Error sending ping: ${pingError}`);
+        
+        // If ping fails, try to send a JSON message instead (Twilio sometimes prefers this)
+        try {
+          if (streamSid) {
+            const pingMessage = {
+              event: 'ping',
+              streamSid: streamSid,
+              timestamp: Date.now()
+            };
+            twilioManager.sendTwilioMessage(pingMessage);
+            logger.debug(`Sent ping as JSON message for call ${callId}`);
+          }
+        } catch (jsonPingError) {
+          logger.error(`Error sending JSON ping: ${jsonPingError}`);
+        }
+      }
+    }, 5000); // More frequent pings: every 5 seconds
+    
+    // Store the interval for cleanup
+    (ws as any).pingInterval = pingInterval;
     
   } catch (error) {
     logger.error(`Error in optimized voice stream for call ${callId}:`, error);

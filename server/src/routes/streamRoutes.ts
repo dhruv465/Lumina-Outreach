@@ -15,11 +15,13 @@ wsRouter.ws('/voice/stream', handleVoiceStream);
 // WebSocket streaming endpoint for ElevenLabs Conversational AI
 wsRouter.ws('/voice/conversational-ai', handleConversationalAIStream);
 
-// Optimized streaming endpoint with lower latency
-wsRouter.ws('/voice/optimized-stream', handleOptimizedVoiceStream);
-// Handle parameterized routes with callId and conversationId
-wsRouter.ws('/voice/optimized-stream/:callId/:conversationId', handleOptimizedVoiceStream);
-// Handle Twilio stream webhook
+// Note: Twilio optimized streaming endpoints are handled by TwilioWebSocketServer
+// to avoid duplicate WebSocket handlers that cause connection conflicts
+// The following routes are commented out to prevent duplicate handlers:
+// wsRouter.ws('/voice/optimized-stream', handleOptimizedVoiceStream);
+// wsRouter.ws('/voice/optimized-stream/:callId/:conversationId', handleOptimizedVoiceStream);
+
+// Handle Twilio stream webhook (keep this for backward compatibility)
 wsRouter.ws('/stream', handleTwilioStreamWebhook);
 
 export default router;

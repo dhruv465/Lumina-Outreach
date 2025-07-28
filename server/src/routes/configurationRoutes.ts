@@ -7,6 +7,7 @@ import {
   getVoiceOptions,
   testTwilioConnection,
   testElevenLabsConnection,
+  testDeepgramTTSConnection,
   testVoiceSynthesis,
   makeTestCall,
   deleteApiKey,
@@ -60,6 +61,7 @@ router.post('/test-llm', testLLMConnection);
 router.post('/test-llm-chat', testLLMChat);
 router.post('/test-twilio', testTwilioConnection);
 router.post('/test-elevenlabs', testElevenLabsConnection);
+router.post('/test-deepgram-tts', testDeepgramTTSConnection);
 router.post('/test-voice', testVoiceSynthesis);
 router.post('/test-call', makeTestCall);
 router.post('/verify/elevenlabs', verifyElevenLabsApiKey);

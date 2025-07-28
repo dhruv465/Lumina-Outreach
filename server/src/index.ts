@@ -21,6 +21,8 @@ import configurationRoutes from './routes/configurationRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import debugRoutes from './routes/debugRoutes';
 import deepgramTestRoutes, { setupDeepgramWebSocketServer } from './routes/deepgramTestRoutes';
+import deepgramTTSRoutes from './routes/deepgramTTSRoutes';
+import ttsProviderRoutes from './routes/ttsProviderRoutes';
 import knowledgeRoutes from './routes/knowledgeRoutes';
 import leadRoutes from './routes/leadRoutes';
 import metricsRoutes from './routes/metricsRoutes';
@@ -132,34 +134,14 @@ if (!fs.existsSync('logs')) {
 // Initialize express app
 const app = express();
 const server = http.createServer(app);
+// Find this section in your index.ts file:
 
-// Initialize WebSocket support and get the augmented app instance
-const { app: wsApp } = expressWs(app, server);
-
-// Initialize dedicated Twilio WebSocket server with robust framing
+// Initialize dedicated Twilio WebSocket server FIRST (before any other WebSocket servers)
 const twilioWSServer = initializeTwilioWebSocketServer(server);
 logger.info('Dedicated Twilio WebSocket server initialized for robust framing');
 
-// Add server upgrade event handler for better WebSocket connection debugging
-server.on('upgrade', (request, socket, head) => {
-  const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname;
-
-  // Log all upgrade requests for debugging
-  logger.debug('HTTP upgrade request received', {
-    pathname,
-    headers: {
-      host: request.headers.host,
-      origin: request.headers.origin,
-      'user-agent': request.headers['user-agent'],
-      upgrade: request.headers.upgrade,
-      connection: request.headers.connection
-    },
-    method: request.method
-  });
-
-  // Let express-ws and other WebSocket servers handle the upgrade automatically
-  // The WebSocket routes are already defined in streamRoutes.ts
-});
+// WebSocket upgrade handling is now managed by TwilioWebSocketServer
+// to prevent Express interference with Twilio Media Stream connections
 
 const io = new SocketIOServer(server, {
   cors: {
@@ -177,9 +159,9 @@ const io = new SocketIOServer(server, {
 // Set up WebSocket handlers for web call testing
 setupWebCallSocketHandlers(io);
 
-// Initialize Deepgram WebSocket server
-// Setup WebSocket servers
+// Initialize Deepgram WebSocket server (after Twilio WebSocket server)
 setupDeepgramWebSocketServer(server);
+logger.info('Deepgram WebSocket server initialized');
 
 // Enhanced middleware setup for production
 const corsOrigin = process.env.CORS_ORIGIN || process.env.CLIENT_URL || 'http://localhost:3000';
@@ -407,6 +389,8 @@ app.use('/api/deepgram-metrics', (req, res) => {
 }); // Temporarily disabled Deepgram metrics routes
 app.use('/api/metrics', metricsRoutes); // Advanced monitoring and metrics endpoints
 app.use('/api/deepgram', deepgramTestRoutes); // Deepgram testing routes
+app.use('/api/deepgram-tts', deepgramTTSRoutes); // Deepgram TTS routes
+app.use('/api/tts-provider', ttsProviderRoutes); // TTS Provider management routes
 app.use('/api/webcall', webCallRoutes); // Web call testing routes
 app.use('/api/webcall', webCallMetricsRoutes); // Web call metrics routes
 
@@ -417,6 +401,8 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Add optimized stream route
 app.get('/voice/optimized-stream/:callId/:conversationId', optimizedStreamRoute);
+
+
 
 // WebSocket routes
 app.use('/', streamRoutes);
@@ -529,8 +515,9 @@ const initializeServices = async () => {
       googleSpeechApiKey = googleProvider?.apiKey || '';
 
       // Deepgram for STT (Nova-2)
-      deepgramApiKey = config.deepgramConfig?.apiKey || '';
-      logger.info('Deepgram API key ' + (deepgramApiKey ? 'found' : 'not found') + ' in configuration');
+      deepgramApiKey = config.deepgramConfig?.apiKey || process.env.DEEPGRAM_API_KEY || '';
+      logger.info('Deepgram API key ' + (deepgramApiKey ? 'found' : 'not found') + ' in configuration' +
+        (process.env.DEEPGRAM_API_KEY && !config.deepgramConfig?.apiKey ? ' (using environment fallback)' : ''));
 
       // Initialize and validate Deepgram auto-configuration with graceful startup
       if (deepgramApiKey) {
@@ -609,12 +596,12 @@ const initializeServices = async () => {
         logger.info('3. Background validation will ensure continued compatibility');
       }
     } else {
-      logger.warn('No configuration found in database, services will operate without API keys');
-      elevenLabsApiKey = '';
-      openAIApiKey = '';
-      anthropicApiKey = '';
-      googleSpeechApiKey = '';
-      deepgramApiKey = '';
+      logger.warn('No configuration found in database, using environment variables as fallback');
+      elevenLabsApiKey = process.env.ELEVENLABS_API_KEY || '';
+      openAIApiKey = process.env.OPENAI_API_KEY || '';
+      anthropicApiKey = process.env.ANTHROPIC_API_KEY || '';
+      googleSpeechApiKey = process.env.GOOGLE_SPEECH_API_KEY || '';
+      deepgramApiKey = process.env.DEEPGRAM_API_KEY || '';
     }
 
     // Speech synthesis service
@@ -625,6 +612,28 @@ const initializeServices = async () => {
 
     // Initialize Enhanced Voice AI Service
     const enhancedVoiceAI = new EnhancedVoiceAIService(elevenLabsApiKey);
+
+    // Initialize Deepgram TTS service as fallback
+    if (deepgramApiKey) {
+      try {
+        const { initializeDeepgramTTS } = await import('./services/deepgramTTSService');
+        initializeDeepgramTTS(deepgramApiKey);
+        logger.info('Deepgram TTS service initialized as fallback for voice synthesis');
+      } catch (error) {
+        logger.warn(`Failed to initialize Deepgram TTS service: ${getErrorMessage(error)}`);
+      }
+    } else {
+      logger.info('Deepgram TTS service not initialized - no API key available');
+    }
+
+    // Initialize TTS Provider Service
+    try {
+      const { initializeTTSProviderService } = await import('./services/ttsProviderService');
+      initializeTTSProviderService();
+      logger.info('TTS Provider Service initialized');
+    } catch (error) {
+      logger.warn(`Failed to initialize TTS Provider Service: ${getErrorMessage(error)}`);
+    }
 
     // Conversation engine
     const conversationEngine = new ConversationEngineService(

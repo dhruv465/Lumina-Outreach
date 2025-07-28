@@ -488,20 +488,20 @@ export class AIOrchestrationService extends EventEmitter {
           });
           
           // Add RAG results to system prompt
-          if (ragResults.results.length > 0) {
+          if (ragResults.documents.length > 0) {
             // Find system message
             const systemMessageIndex = request.messages.findIndex(m => m.role === 'system');
             
             if (systemMessageIndex >= 0) {
               // Enhance existing system message
-              const enhancedSystemContent = `${request.messages[systemMessageIndex].content}\n\nAdditional context:\n${ragResults.results.map(d => d.content).join('\n\n')}`;
+              const enhancedSystemContent = `${request.messages[systemMessageIndex].content}\n\nAdditional context:\n${ragResults.documents.map(d => d.content).join('\n\n')}`;
               
               request.messages[systemMessageIndex].content = enhancedSystemContent;
             } else {
               // Create new system message with context
               const contextMessage = {
                 role: 'system' as const,
-                content: `Context information:\n${ragResults.results.map(d => d.content).join('\n\n')}`
+                content: `Context information:\n${ragResults.documents.map(d => d.content).join('\n\n')}`
               };
               
               // Insert at beginning
@@ -510,8 +510,8 @@ export class AIOrchestrationService extends EventEmitter {
             
             this.emit(OrchestrationEvent.RAG_RETRIEVAL, {
               query: contextParams.ragQuery,
-              documentCount: ragResults.results.length,
-              contextId: ragResults.query
+              documentCount: ragResults.documents.length,
+              contextId: ragResults.contextId
             });
           }
         } catch (error) {
@@ -618,20 +618,20 @@ export class AIOrchestrationService extends EventEmitter {
           });
           
           // Add RAG results to system prompt
-          if (ragResults.results.length > 0) {
+          if (ragResults.documents.length > 0) {
             // Find system message
             const systemMessageIndex = request.messages.findIndex(m => m.role === 'system');
             
             if (systemMessageIndex >= 0) {
               // Enhance existing system message
-              const enhancedSystemContent = `${request.messages[systemMessageIndex].content}\n\nAdditional context:\n${ragResults.results.map(d => d.content).join('\n\n')}`;
+              const enhancedSystemContent = `${request.messages[systemMessageIndex].content}\n\nAdditional context:\n${ragResults.documents.map(d => d.content).join('\n\n')}`;
               
               request.messages[systemMessageIndex].content = enhancedSystemContent;
             } else {
               // Create new system message with context
               const contextMessage = {
                 role: 'system' as const,
-                content: `Context information:\n${ragResults.results.map(d => d.content).join('\n\n')}`
+                content: `Context information:\n${ragResults.documents.map(d => d.content).join('\n\n')}`
               };
               
               // Insert at beginning
@@ -640,8 +640,8 @@ export class AIOrchestrationService extends EventEmitter {
             
             this.emit(OrchestrationEvent.RAG_RETRIEVAL, {
               query: contextParams.ragQuery,
-              documentCount: ragResults.results.length,
-              contextId: ragResults.query
+              documentCount: ragResults.documents.length,
+              contextId: ragResults.contextId
             });
           }
         } catch (error) {

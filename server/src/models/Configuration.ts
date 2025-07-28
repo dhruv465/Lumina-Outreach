@@ -84,6 +84,25 @@ export interface IConfiguration extends mongoose.Document {
       };
     };
   };
+  ttsConfig: {
+    provider: 'elevenlabs' | 'deepgram' | 'openai' | 'google' | 'aws';
+    primaryProvider: string;
+    fallbackProviders: string[];
+    autoFallback: boolean;
+    deepgramTTS?: {
+      apiKey: string;
+      isEnabled: boolean;
+      defaultModel: string;
+      availableModels: string[];
+      voiceSettings: {
+        encoding: string;
+        sampleRate: number;
+      };
+      lastVerified?: Date | null;
+      status?: 'unverified' | 'verified' | 'failed';
+      lastError?: string;
+    };
+  };
   voiceAIConfig: {
     personalities: {
       id: string;
@@ -433,6 +452,80 @@ const ConfigurationSchema = new mongoose.Schema(
           },
         },
         default: new Map(),
+      },
+    },
+    ttsConfig: {
+      provider: {
+        type: String,
+        enum: ['elevenlabs', 'deepgram', 'openai', 'google', 'aws'],
+        default: 'elevenlabs',
+      },
+      primaryProvider: {
+        type: String,
+        default: 'elevenlabs',
+      },
+      fallbackProviders: {
+        type: [String],
+        default: ['deepgram'],
+      },
+      autoFallback: {
+        type: Boolean,
+        default: true,
+      },
+      deepgramTTS: {
+        apiKey: {
+          type: String,
+          required: false,
+          default: '',
+        },
+        isEnabled: {
+          type: Boolean,
+          default: false,
+        },
+        defaultModel: {
+          type: String,
+          default: 'aura-2-thalia-en',
+        },
+        availableModels: {
+          type: [String],
+          default: [
+            'aura-2-thalia-en',
+            'aura-asteria-en',
+            'aura-luna-en',
+            'aura-stella-en',
+            'aura-athena-en',
+            'aura-hera-en',
+            'aura-orion-en',
+            'aura-arcas-en',
+            'aura-perseus-en',
+            'aura-angus-en',
+            'aura-orpheus-en',
+            'aura-helios-en',
+            'aura-zeus-en'
+          ],
+        },
+        voiceSettings: {
+          encoding: {
+            type: String,
+            default: 'mp3',
+          },
+          sampleRate: {
+            type: Number,
+            default: 24000,
+          },
+        },
+        lastVerified: {
+          type: Date,
+          default: null,
+        },
+        status: {
+          type: String,
+          enum: ['unverified', 'verified', 'failed'],
+          default: 'unverified',
+        },
+        lastError: {
+          type: String,
+        },
       },
     },
     ragConfig: {

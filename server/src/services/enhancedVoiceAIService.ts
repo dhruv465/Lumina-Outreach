@@ -4,8 +4,8 @@ import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
 import mongoose from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
-import { 
-  ElevenLabsConversationalService, 
+import {
+  ElevenLabsConversationalService,
   ConversationEvent,
   initializeConversationalService
 } from './elevenLabsConversationalService';
@@ -18,6 +18,8 @@ import { LLMService } from './llm/service';
 import { LLMConfig, LLMProvider, LLMMessage, MessageRole } from './llm/types';
 import { getPreferredVoiceId } from '../utils/voiceUtils';
 import Campaign from '../models/Campaign';
+import { getDeepgramTTSService } from './deepgramTTSService';
+import { getTTSProviderService } from './ttsProviderService';
 
 export interface VoicePersonality {
   id: string;
@@ -51,26 +53,26 @@ export class EnhancedVoiceAIService {
       hasApiKey: !!elevenLabsApiKey,
       apiKeyLength: elevenLabsApiKey?.length || 0
     });
-    
+
     this.elevenLabsApiKey = elevenLabsApiKey;
-    
+
     // Initialize services
     console.log('Initializing conversational service...');
     this.initializeConversationalService();
-    
+
     console.log('Initializing SDK service...');
     this.initializeSDKService();
-    
+
     // Initialize LLM service asynchronously - it will fetch from the database
     console.log('Starting LLM service initialization...');
     this.initializeLLMService().catch(error => {
       console.error(`Failed to initialize LLM Service: ${getErrorMessage(error)}`);
       logger.error(`Failed to initialize LLM Service: ${getErrorMessage(error)}`);
     });
-    
+
     console.log('EnhancedVoiceAIService initialization completed');
   }
-  
+
   /**
    * Initialize the ElevenLabs Conversational Service
    */
@@ -97,17 +99,17 @@ export class EnhancedVoiceAIService {
         hasApiKey: !!this.elevenLabsApiKey,
         apiKeyLength: this.elevenLabsApiKey?.length || 0
       });
-      
+
       if (!this.elevenLabsApiKey) {
         throw new Error('ElevenLabs API key is missing');
       }
-      
+
       // Initialize without OpenAI dependency - LLM service will handle AI responses
       console.log('Calling initializeSDKService from enhancedVoiceAIService...');
       this.sdkService = initializeSDKService(
         this.elevenLabsApiKey
       );
-      
+
       if (this.sdkService) {
         console.log('ElevenLabs SDK Service initialized successfully in EnhancedVoiceAIService');
         logger.info('ElevenLabs SDK Service initialized successfully');
@@ -132,7 +134,7 @@ export class EnhancedVoiceAIService {
         logger.warn('LLM configuration not found in database');
         return;
       }
-      
+
       // Extract provider configurations from database
       const providers = configuration.llmConfig.providers.map(provider => ({
         name: provider.name as LLMProvider,
@@ -141,18 +143,18 @@ export class EnhancedVoiceAIService {
         defaultModel: provider.defaultModel,
         baseUrl: provider.baseUrl
       })).filter(provider => provider.isEnabled && provider.apiKey);
-      
+
       if (providers.length === 0) {
         logger.warn('No enabled LLM providers found in configuration');
         return;
       }
-      
+
       // Configure LLM service with providers from database
       const llmConfig: LLMConfig = {
         providers,
         defaultProvider: configuration.llmConfig.defaultProvider as LLMProvider || providers[0].name
       };
-      
+
       this.llmService = new LLMService(llmConfig);
       logger.info(`LLM Service initialized with ${providers.length} providers from database`);
     } catch (error) {
@@ -185,7 +187,7 @@ export class EnhancedVoiceAIService {
 
       return availableVoices.map((voice) => {
         const personalityType = this.inferPersonalityFromVoiceName(voice.name);
-        
+
         return {
           id: voice.voiceId,
           name: voice.name,
@@ -232,7 +234,7 @@ export class EnhancedVoiceAIService {
   static async getValidVoiceId(campaignVoiceId: string): Promise<string> {
     try {
       logger.info(`🎯 Voice Selection Debug - Requested voice ID: "${campaignVoiceId}"`);
-      
+
       const configuration = await mongoose.model('Configuration').findOne();
       if (!configuration || !configuration.elevenLabsConfig) {
         logger.error('❌ Voice Selection Error: ElevenLabs configuration not found');
@@ -243,7 +245,7 @@ export class EnhancedVoiceAIService {
       logger.info(`📋 Available voices in configuration: ${availableVoices.length} voices`, {
         voices: availableVoices.map(v => ({ id: v.voiceId, name: v.name }))
       });
-      
+
       if (availableVoices.length === 0) {
         logger.error('❌ Voice Selection Error: No voices configured in ElevenLabs');
         throw new Error('No voices configured in ElevenLabs. Please configure voices in the system settings.');
@@ -254,34 +256,34 @@ export class EnhancedVoiceAIService {
         logger.info(`✅ Voice Selection Success: Found exact match - ${matchingVoice.name} (${matchingVoice.voiceId})`);
         return matchingVoice.voiceId;
       }
-      
+
       if (campaignVoiceId === "default-voice-id" || !campaignVoiceId) {
         // Use the preferred voice ID from configuration
         const preferredVoiceId = await getPreferredVoiceId();
-        
+
         // Check if the preferred voice exists in available voices
         const preferredVoice = availableVoices.find(voice => voice.voiceId === preferredVoiceId);
-        
+
         if (preferredVoice) {
           logger.warn(`⚠️ Voice Selection Fallback: Using preferred voice - ${preferredVoice.name} (${preferredVoice.voiceId})`);
           return preferredVoice.voiceId;
         }
-        
+
         // Fallback to first available voice if preferred voice not found
         const fallbackVoice = availableVoices[0];
         logger.warn(`⚠️ Voice Selection Fallback: Preferred voice not found, using first available - ${fallbackVoice.name} (${fallbackVoice.voiceId})`);
         return fallbackVoice.voiceId;
       }
-      
+
       // If the requested voice is not found and not a default request, try to use preferred voice
       const preferredVoiceId = await getPreferredVoiceId();
       const preferredVoice = availableVoices.find(voice => voice.voiceId === preferredVoiceId);
-      
+
       if (preferredVoice) {
         logger.warn(`⚠️ Voice Selection Fallback: Voice ID "${campaignVoiceId}" not found, using preferred voice - ${preferredVoice.name} (${preferredVoice.voiceId})`);
         return preferredVoice.voiceId;
       }
-      
+
       // Last resort: use first available voice
       const fallbackVoice = availableVoices[0];
       logger.warn(`⚠️ Voice Selection Fallback: Voice ID "${campaignVoiceId}" not found, using first available - ${fallbackVoice.name} (${fallbackVoice.voiceId})`);
@@ -310,37 +312,85 @@ export class EnhancedVoiceAIService {
   }
 
   /**
-   * Synthesize voice with basic configuration
+   * Synthesize voice using the configured TTS provider
+   */
+  async synthesizeWithTTSProvider(params: {
+    text: string;
+    personalityId: string;
+    language?: string;
+  }): Promise<any> {
+    const { text, personalityId, language = 'en' } = params;
+
+    try {
+      const ttsService = getTTSProviderService();
+      const result = await ttsService.synthesizeSpeech({
+        text,
+        voiceId: personalityId,
+        language
+      });
+
+      logger.info('TTS provider synthesis successful', {
+        provider: result.metadata.provider,
+        textLength: text.length,
+        audioSize: result.audioContent.length,
+        fallbackUsed: result.metadata.fallbackUsed
+      });
+
+      return {
+        audioContent: result.audioContent,
+        metadata: {
+          personality: result.metadata.model || personalityId,
+          language: language === 'hi' ? 'Hindi' : 'English',
+          duration: result.metadata.duration,
+          voiceId: personalityId,
+          provider: result.metadata.provider,
+          fallbackUsed: result.metadata.fallbackUsed,
+          encoding: result.metadata.encoding
+        }
+      };
+    } catch (error) {
+      logger.error('TTS provider synthesis failed', {
+        error: getErrorMessage(error),
+        textLength: text.length,
+        personalityId
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Synthesize voice with basic configuration (legacy method)
    */
   async synthesizeAdaptiveVoice(params: {
     text: string;
     personalityId: string;
     language?: string;
   }): Promise<any> {
+    const { text, personalityId, language = 'en' } = params;
+
     try {
-      const { text, personalityId, language = 'en' } = params;
-      
+
       logger.info(`Attempting to synthesize with personality ID: ${personalityId}`);
-      
+
       const config = await mongoose.model('Configuration').findOne();
       if (!config || !config.elevenLabsConfig) {
         throw new Error('ElevenLabs configuration not found');
       }
-      
+
       let personality;
-      
+
       try {
         const personalities = await EnhancedVoiceAIService.getEnhancedVoicePersonalities();
         personality = personalities.find(p => p.id === personalityId || p.voiceId === personalityId);
       } catch (personalityError) {
         logger.warn(`Error getting enhanced personalities: ${getErrorMessage(personalityError)}`);
       }
-      
+
       if (!personality) {
         const availableVoice = config.elevenLabsConfig.availableVoices.find(
           v => v.voiceId === personalityId
         );
-        
+
         if (availableVoice) {
           personality = {
             id: availableVoice.voiceId,
@@ -376,7 +426,7 @@ export class EnhancedVoiceAIService {
       }
 
       const voiceLanguage = language === 'hi' ? 'Hindi' : 'English';
-      
+
       const voiceSettings = {
         stability: personality.settings.stability,
         similarity_boost: personality.settings.similarityBoost,
@@ -418,8 +468,43 @@ export class EnhancedVoiceAIService {
         }
       };
     } catch (error) {
-      logger.error(`Error synthesizing voice: ${getErrorMessage(error)}`);
-      throw new Error(`Voice synthesis failed: ${getErrorMessage(error)}`);
+      logger.error(`ElevenLabs voice synthesis failed: ${getErrorMessage(error)}`);
+
+      // Try Deepgram TTS as fallback
+      const deepgramTTS = getDeepgramTTSService();
+      if (deepgramTTS) {
+        try {
+          logger.info('Attempting Deepgram TTS fallback');
+          const audioBuffer = await deepgramTTS.synthesizeSpeech(text, {
+            model: 'aura-asteria-en',
+            encoding: 'linear16',
+            container: 'wav',
+            sample_rate: 24000
+          });
+
+          logger.info('Deepgram TTS fallback successful', {
+            textLength: text.length,
+            audioSize: audioBuffer.length
+          });
+
+          return {
+            audioContent: audioBuffer,
+            metadata: {
+              personality: 'Deepgram Fallback',
+              language: 'English',
+              duration: Math.ceil(text.length / 15),
+              voiceId: 'deepgram-fallback',
+              fallbackUsed: true
+            }
+          };
+        } catch (deepgramError) {
+          logger.error(`Deepgram TTS fallback also failed: ${getErrorMessage(deepgramError)}`);
+        }
+      } else {
+        logger.warn('Deepgram TTS service not available for fallback');
+      }
+
+      throw new Error(`All voice synthesis methods failed: ${getErrorMessage(error)}`);
     }
   }
 
@@ -448,18 +533,18 @@ export class EnhancedVoiceAIService {
   }> {
     const conversationId = options.conversationId || `conv_${uuidv4()}`;
     const startTime = Date.now();
-    
+
     logger.info(`Creating conversation ${conversationId} with voice ${voiceId}, campaignId: ${options.campaignId || 'none'}`);
 
     try {
       if (!this.sdkService) {
         throw new Error('SDK Service not available - check ElevenLabs API configuration');
       }
-      
+
       // Get campaign-specific voice settings if available
       let campaignVoiceId = voiceId;
       let campaignVoiceSettings = null;
-      
+
       if (options.campaignId) {
         try {
           const campaign = await Campaign.findById(options.campaignId);
@@ -469,7 +554,7 @@ export class EnhancedVoiceAIService {
               campaignVoiceId = campaign.voiceConfiguration.voiceId;
               logger.info(`Using campaign-specific voice ID: ${campaignVoiceId}`);
             }
-            
+
             // Store voice settings for use in synthesis
             campaignVoiceSettings = {
               speed: campaign.voiceConfiguration.speed,
@@ -486,12 +571,12 @@ export class EnhancedVoiceAIService {
         // Load system prompt and campaign script
         let systemPrompt = '';
         let campaignScript = '';
-        
+
         try {
           // First, get system prompt from configuration
           const configuration = await mongoose.model('Configuration').findOne();
           systemPrompt = configuration?.generalSettings?.defaultSystemPrompt || '';
-          
+
           // Then, if campaign ID is provided, load campaign script and settings
           if (options.campaignId) {
             const campaign = await Campaign.findById(options.campaignId);
@@ -501,7 +586,7 @@ export class EnhancedVoiceAIService {
                 systemPrompt = campaign.llmConfiguration.systemPrompt;
                 logger.info('Using campaign-specific system prompt');
               }
-              
+
               // Get active script version
               const activeScript = campaign.script?.versions?.find(v => v.isActive);
               if (activeScript) {
@@ -510,13 +595,13 @@ export class EnhancedVoiceAIService {
               }
             }
           }
-          
+
           // Combine system prompt with campaign script
           let fullSystemPrompt = systemPrompt;
           if (campaignScript) {
             fullSystemPrompt = `${systemPrompt}\n\nSCRIPT:\n${campaignScript}`;
           }
-          
+
           // Add system message with combined prompt
           conversationContext.push({
             role: 'system',
@@ -532,12 +617,12 @@ export class EnhancedVoiceAIService {
           });
         }
       }
-      
+
       conversationContext.push({
         role: 'user',
         content: text
       });
-      
+
       let responseText = text;
       if (options.contextAwareness !== false) {
         try {
@@ -545,7 +630,7 @@ export class EnhancedVoiceAIService {
           let model = 'claude-3-haiku-20240307'; // Default model
           let temperature = 0.7;
           let maxTokens = 150;
-          
+
           if (options.campaignId) {
             try {
               const campaign = await Campaign.findById(options.campaignId);
@@ -566,13 +651,13 @@ export class EnhancedVoiceAIService {
               logger.warn(`Failed to get campaign LLM settings: ${getErrorMessage(error)}`);
             }
           }
-          
+
           // Use model specified in options if provided (overrides campaign settings)
           if (options.modelId) {
             model = options.modelId;
             logger.info(`Overriding with specified model: ${model}`);
           }
-          
+
           responseText = await this.llmService.chat({
             provider: this.llmService.getDefaultProviderName(),
             model: model,
@@ -597,16 +682,16 @@ export class EnhancedVoiceAIService {
             personalityId: campaignVoiceId, // Use campaign voice ID if available
             language: options.language === 'Hindi' ? 'hi' : 'en'
           });
-          
+
           // If campaign voice settings exist, log that they will be applied in the voice profile
           if (campaignVoiceSettings) {
             logger.info(`Applied campaign voice settings to synthesis: ${JSON.stringify(campaignVoiceSettings)}`);
           }
-          
+
           if (options.onAudioChunk && streamingResponse.audioContent) {
             options.onAudioChunk(streamingResponse.audioContent);
           }
-          
+
           return {
             conversationId,
             status: 'streaming',
@@ -629,16 +714,16 @@ export class EnhancedVoiceAIService {
             personalityId: campaignVoiceId, // Use campaign voice ID if available
             language: options.language === 'Hindi' ? 'hi' : 'en'
           });
-          
+
           // If campaign voice settings exist, log that they will be applied in the voice profile
           if (campaignVoiceSettings) {
             logger.info(`Applied campaign voice settings to synthesis: ${JSON.stringify(campaignVoiceSettings)}`);
           }
-          
+
           if (options.onAudioChunk && adaptiveResponse.audioContent) {
             options.onAudioChunk(adaptiveResponse.audioContent);
           }
-          
+
           if (options.onCompletion) {
             options.onCompletion({
               completed: true,
@@ -647,7 +732,7 @@ export class EnhancedVoiceAIService {
               metadata: adaptiveResponse.metadata
             });
           }
-          
+
           return {
             conversationId,
             status: 'completed',
@@ -660,18 +745,18 @@ export class EnhancedVoiceAIService {
           };
         } catch (error) {
           logger.error(`Error in synthesis: ${getErrorMessage(error)}`);
-          
+
           try {
             const fallbackResponse = await this.synthesizeAdaptiveVoice({
               text: responseText,
               personalityId: campaignVoiceId, // Use campaign voice ID if available
               language: options.language === 'Hindi' ? 'hi' : 'en'
             });
-            
+
             if (options.onAudioChunk && fallbackResponse.audioContent) {
               options.onAudioChunk(fallbackResponse.audioContent);
             }
-            
+
             if (options.onCompletion) {
               const processingTime = Date.now() - startTime;
               options.onCompletion({
@@ -683,7 +768,7 @@ export class EnhancedVoiceAIService {
                 usedFallback: true
               });
             }
-            
+
             return {
               conversationId,
               status: 'completed',
@@ -697,7 +782,7 @@ export class EnhancedVoiceAIService {
             };
           } catch (fallbackError) {
             logger.error(`Both primary and fallback synthesis failed: ${getErrorMessage(fallbackError)}`);
-            
+
             if (options.onCompletion) {
               options.onCompletion({
                 completed: false,
@@ -705,7 +790,7 @@ export class EnhancedVoiceAIService {
                 conversationId
               });
             }
-            
+
             throw new Error(`All synthesis methods failed: ${getErrorMessage(fallbackError)}`);
           }
         }
@@ -713,7 +798,7 @@ export class EnhancedVoiceAIService {
     } catch (error) {
       const errorTime = Date.now() - startTime;
       logger.error(`Conversation creation failed after ${errorTime}ms: ${getErrorMessage(error)}`);
-      
+
       if (options.onCompletion) {
         options.onCompletion({
           completed: false,
@@ -721,7 +806,7 @@ export class EnhancedVoiceAIService {
           conversationId
         });
       }
-      
+
       return {
         conversationId,
         status: 'error',
@@ -754,13 +839,13 @@ export class EnhancedVoiceAIService {
   }> {
     try {
       const { userInput, conversationLog, leadId, campaignId, callContext } = params;
-      
+
       // Load all campaign data including scripts, goals and voice settings
       let campaignGoal = '';
       let systemPromptFromCampaign = '';
       let campaignScript = '';
       let voiceSettings = null;
-      
+
       if (campaignId) {
         try {
           const campaign = await Campaign.findById(campaignId);
@@ -771,10 +856,10 @@ export class EnhancedVoiceAIService {
               campaignScript = activeScript.content;
               logger.info(`Loaded campaign script for ${campaignId}: ${campaignScript.substring(0, 100)}...`);
             }
-            
+
             campaignGoal = campaign.goal || '';
             systemPromptFromCampaign = campaign.llmConfiguration?.systemPrompt || '';
-            
+
             // Get voice configuration from campaign
             if (campaign.voiceConfiguration) {
               voiceSettings = {
@@ -785,7 +870,7 @@ export class EnhancedVoiceAIService {
               };
               logger.info(`Loaded voice settings from campaign: ${JSON.stringify(voiceSettings)}`);
             }
-            
+
             logger.info(`Campaign context loaded:`, {
               campaignId,
               hasScript: !!campaignScript,
@@ -799,7 +884,7 @@ export class EnhancedVoiceAIService {
           logger.error(`Error loading campaign ${campaignId}:`, error);
         }
       }
-      
+
       // Convert conversation log to a clear format with roles and content
       let formattedConversationLog = '';
       if (conversationLog && conversationLog.length > 0) {
@@ -811,7 +896,7 @@ export class EnhancedVoiceAIService {
       } else {
         formattedConversationLog = "No prior conversation";
       }
-      
+
       // Get system prompt from configuration
       let defaultSystemPrompt = '';
       try {
@@ -855,16 +940,16 @@ Current call details:
       if (!this.llmService) {
         logger.warn('LLM Service not initialized, attempting to initialize now');
         await this.initializeLLMService();
-        
+
         if (!this.llmService) {
           throw new Error('Failed to initialize LLM Service - no LLM providers configured in database. Please configure at least one LLM provider.');
         }
       }
-      
+
       // Get campaign-specific LLM settings if available
       let temperature = 0.7;
       let maxTokens = 200;
-      
+
       try {
         if (campaignId) {
           const campaign = await Campaign.findById(campaignId);
@@ -920,7 +1005,7 @@ Current call details:
       try {
         // Clean the response before parsing (remove any non-JSON parts)
         let cleanedResponse = llmResponse.content.trim();
-        
+
         // If response starts with backticks (like ```json), extract just the JSON part
         if (cleanedResponse.startsWith('```')) {
           const jsonStartIndex = cleanedResponse.indexOf('{');
@@ -929,10 +1014,10 @@ Current call details:
             cleanedResponse = cleanedResponse.substring(jsonStartIndex, jsonEndIndex + 1);
           }
         }
-        
+
         // Try to parse the cleaned response
         result = JSON.parse(cleanedResponse);
-        
+
         // Validate the expected fields are present
         if (!result.text || !result.intent) {
           throw new Error('Missing required fields in JSON response');
@@ -940,19 +1025,19 @@ Current call details:
       } catch (parseError) {
         logger.error(`Error parsing LLM JSON response: ${getErrorMessage(parseError)}`);
         logger.error(`Raw LLM response that failed to parse: ${llmResponse.content}`);
-        
+
         // It seems the LLM is sometimes returning a plain string.
         const responseText = llmResponse.content.trim();
-        
+
         // Check for specific error cases
-        if (responseText.startsWith('Please provide') || 
-            responseText.includes('need more context') ||
-            responseText.includes('I need the')) {
+        if (responseText.startsWith('Please provide') ||
+          responseText.includes('need more context') ||
+          responseText.includes('I need the')) {
           logger.warn('LLM returned a context request, using system configuration instead');
           // Throw error to force proper configuration without hardcoded message
           throw new Error('LLM requires more context. Please ensure your system configuration provides sufficient context.');
         }
-        
+
         // If it seems like a reasonable response, use it directly
         if (responseText.length > 0 && !responseText.startsWith('{')) {
           logger.warn('LLM response was a plain string, accepting as valid response');
@@ -961,11 +1046,11 @@ Current call details:
             intent: "direct_response"
           };
         }
-        
+
         // Throw error to force proper configuration
         throw new Error(`LLM returned invalid JSON response format. Please check your system configuration and LLM provider settings.`);
       }
-      
+
       return {
         text: result.text,
         intent: result.intent
@@ -985,16 +1070,16 @@ Current call details:
       // Try to retrieve voice personalities from configuration
       const personalities = await EnhancedVoiceAIService.getEnhancedVoicePersonalities();
       const matchingPersonality = personalities.find(p => p.id === personalityId || p.voiceId === personalityId);
-      
+
       if (matchingPersonality) {
         logger.info(`Found matching personality in configuration: ${matchingPersonality.name}`);
         return matchingPersonality;
       }
-      
+
       // If not found, fetch valid voice ID from configuration
       const voiceId = await EnhancedVoiceAIService.getValidVoiceId(personalityId);
       const configuration = await mongoose.model('Configuration').findOne();
-      
+
       if (configuration && configuration.elevenLabsConfig) {
         const voiceConfig = configuration.elevenLabsConfig.availableVoices.find(v => v.voiceId === voiceId);
         if (voiceConfig) {
@@ -1014,7 +1099,7 @@ Current call details:
           };
         }
       }
-      
+
       // Last resort fallback with minimal hardcoded values
       logger.warn(`No matching personality found for ID ${personalityId}, using fallback`);
       return {
@@ -1061,7 +1146,7 @@ Current call details:
           logger.error(`Error getting error message from configuration: ${getErrorMessage(configError)}`);
           params.text = process.env.DEFAULT_FALLBACK_GREETING || 'Hello, this is an automated call. How are you today?';
         }
-        
+
         // If still empty after config check, don't proceed
         if (!params.text || params.text.trim() === '') {
           throw new Error('Empty text provided and no fallback message found in configuration');
@@ -1070,12 +1155,12 @@ Current call details:
 
       // Get and validate voice ID
       const voiceId = await EnhancedVoiceAIService.getValidVoiceId(params.personalityId || 'default');
-      
+
       logger.info(`Synthesizing voice for ID: ${voiceId}, text length: ${params.text.length} chars`);
 
       // Set stability based on language (Hindi needs higher stability)
       const stability = params.language === 'Hindi' ? 0.85 : 0.75;
-      
+
       const audioBuffer = await this.conversationalService.generateSpeech(
         params.text,
         voiceId,
@@ -1088,23 +1173,23 @@ Current call details:
 
       // Import cloudinaryService
       const cloudinaryService = await import('../utils/cloudinaryService').then(m => m.default);
-      
+
       // If Cloudinary is configured, upload directly and return URL
       if (cloudinaryService.isCloudinaryConfigured()) {
         try {
           const cloudinaryUrl = await cloudinaryService.uploadAudioBuffer(audioBuffer);
           logger.info(`Voice synthesis uploaded to Cloudinary: ${cloudinaryUrl}`);
-          
+
           // Store a local copy as well for backup
           const filename = `synthesis_${Date.now()}_${Math.floor(Math.random() * 1000)}.mp3`;
           const outputPath = `/tmp/${filename}`;
           require('fs').writeFileSync(outputPath, audioBuffer);
-          
+
           // Return the Cloudinary URL if the service is expecting a URL
           if (process.env.VOICE_SYNTHESIS_RETURN_URL === 'true') {
             return cloudinaryUrl;
           }
-          
+
           // Otherwise return the local file path for compatibility with existing code
           return outputPath;
         } catch (cloudinaryError) {
@@ -1112,18 +1197,18 @@ Current call details:
           // Fall back to local file if Cloudinary fails
         }
       }
-      
+
       // Save audio to a file and return the path (fallback method)
       const filename = `synthesis_${Date.now()}_${Math.floor(Math.random() * 1000)}.mp3`;
       const outputPath = `/tmp/${filename}`;
-      
+
       require('fs').writeFileSync(outputPath, audioBuffer);
       logger.info(`Voice synthesis complete, saved to ${outputPath}, size: ${audioBuffer.length} bytes`);
-      
+
       return outputPath;
     } catch (error) {
       logger.error('Error synthesizing voice:', error);
-      
+
       // Try to generate a fallback audio if possible
       try {
         if (this.conversationalService) {
@@ -1134,7 +1219,7 @@ Current call details:
             fallbackVoiceId = await getPreferredVoiceId();
           } catch (voiceError) {
             logger.error(`Error getting preferred voice ID from configuration: ${getErrorMessage(voiceError)}`);
-            
+
             // Try to get any available voice from configuration as fallback
             try {
               const config = await mongoose.model('Configuration').findOne();
@@ -1146,7 +1231,7 @@ Current call details:
               logger.error(`Error accessing configuration for fallback voices: ${getErrorMessage(configError)}`);
             }
           }
-          
+
           // Get fallback message from configuration if possible
           let errorMessage = 'I apologize, but there was a technical issue. Please try again later.';
           try {
@@ -1157,14 +1242,14 @@ Current call details:
           } catch (configError) {
             logger.error(`Error getting error message from configuration: ${getErrorMessage(configError)}`);
           }
-          
+
           logger.info(`Attempting to generate fallback audio with voice ID: ${fallbackVoiceId || 'unavailable'}`);
-          
+
           // Only proceed if we found a valid fallback voice ID
           if (!fallbackVoiceId) {
             throw new Error('No valid fallback voice ID available from configuration');
           }
-          
+
           const fallbackBuffer = await this.conversationalService.generateSpeech(
             errorMessage,
             fallbackVoiceId,
@@ -1174,26 +1259,26 @@ Current call details:
               style: 0.0
             }
           );
-          
+
           // Import cloudinaryService
           const cloudinaryService = await import('../utils/cloudinaryService').then(m => m.default);
-          
+
           // If Cloudinary is configured, upload directly
           if (cloudinaryService.isCloudinaryConfigured()) {
             try {
               const cloudinaryUrl = await cloudinaryService.uploadAudioBuffer(fallbackBuffer, 'fallbacks');
               logger.info(`Fallback audio uploaded to Cloudinary: ${cloudinaryUrl}`);
-              
+
               // Store a local copy as well for backup
               const filename = `fallback_${Date.now()}_${Math.floor(Math.random() * 1000)}.mp3`;
               const outputPath = `/tmp/${filename}`;
               require('fs').writeFileSync(outputPath, fallbackBuffer);
-              
+
               // Return the Cloudinary URL if the service is expecting a URL
               if (process.env.VOICE_SYNTHESIS_RETURN_URL === 'true') {
                 return cloudinaryUrl;
               }
-              
+
               // Otherwise return the local file path for compatibility with existing code
               return outputPath;
             } catch (cloudinaryError) {
@@ -1201,19 +1286,19 @@ Current call details:
               // Fall back to local file if Cloudinary fails
             }
           }
-          
+
           const filename = `fallback_${Date.now()}_${Math.floor(Math.random() * 1000)}.mp3`;
           const outputPath = `/tmp/${filename}`;
-          
+
           require('fs').writeFileSync(outputPath, fallbackBuffer);
           logger.info(`Fallback audio generated successfully, saved to ${outputPath}`);
-          
+
           return outputPath;
         }
       } catch (fallbackError) {
         logger.error('Failed to generate fallback audio:', fallbackError);
       }
-      
+
       throw new Error(`Voice synthesis failed: ${getErrorMessage(error)}`);
     }
   }
@@ -1227,12 +1312,12 @@ Current call details:
       if (!this.elevenLabsApiKey) {
         return false;
       }
-      
+
       // Check if LLM service is initialized
       if (!this.llmService) {
         await this.initializeLLMService();
       }
-      
+
       // Basic connectivity test - just return true for now
       // In production, you might want to make actual API calls to test connectivity
       return true;
@@ -1260,14 +1345,14 @@ Current call details:
   }> {
     try {
       const { text, personalityId, language = 'en', twiml, fallbackText = text } = params;
-      
+
       // Log the request to help with debugging
       logger.info(`TwiML synthesis request for voice ID: ${personalityId}, text length: ${text.length}`);
-      
+
       // Safety check for empty or invalid text
       if (!text || text.trim() === '') {
         logger.warn('Empty text provided to synthesizeAdaptiveVoiceForTwiML');
-        
+
         // If twiml is provided, add fallback from configuration
         if (twiml) {
           // Get error message from configuration
@@ -1278,27 +1363,27 @@ Current call details:
           } catch (configError) {
             logger.error(`Error getting error message from configuration: ${getErrorMessage(configError)}`);
           }
-          
-          twiml.say({ 
-            voice: 'alice', 
-            language: language === 'hi' ? 'hi-IN' : 'en-US' 
+
+          twiml.say({
+            voice: 'alice',
+            language: language === 'hi' ? 'hi-IN' : 'en-US'
           }, fallbackText || errorMessage || '');
         }
-        
+
         return { success: false };
       }
-      
+
       // Synthesize the voice
       const speechResponse = await this.synthesizeAdaptiveVoice({
-        text, 
+        text,
         personalityId,
         language
       });
-      
+
       // If no audio content, return failure
       if (!speechResponse || !speechResponse.audioContent) {
         logger.warn('No audio content returned from synthesizeAdaptiveVoice');
-        
+
         // If twiml is provided, add fallback from configuration
         if (twiml) {
           // Get error message from configuration
@@ -1309,30 +1394,30 @@ Current call details:
           } catch (configError) {
             logger.error(`Error getting error message from configuration: ${getErrorMessage(configError)}`);
           }
-          
-          twiml.say({ 
-            voice: 'alice', 
-            language: language === 'hi' ? 'hi-IN' : 'en-US' 
+
+          twiml.say({
+            voice: 'alice',
+            language: language === 'hi' ? 'hi-IN' : 'en-US'
           }, fallbackText || errorMessage || '');
         }
-        
+
         return { success: false };
       }
-      
+
       // Get utility functions
       const fs = require('fs');
       const path = require('path');
       const os = require('os');
       const cloudinaryService = require('../utils/cloudinaryService').default;
       const { processAudioForTwiML, prepareUrlForTwilioPlay } = require('../utils/voiceSynthesis');
-      
+
       // Process the audio for TwiML
       const audioResult = await processAudioForTwiML(
         speechResponse.audioContent,
         fallbackText,
         language
       );
-      
+
       // If twiml is provided, add the audio
       if (twiml) {
         if (audioResult.method === 'tts') {
@@ -1340,26 +1425,26 @@ Current call details:
           if (audioResult.url && audioResult.url.startsWith('USE_CHUNKED_AUDIO:')) {
             // Extract the text and split it into manageable chunks
             const fullText = audioResult.url.substring('USE_CHUNKED_AUDIO:'.length);
-            
+
             // Split text into chunks of roughly 500 characters each on sentence boundaries
             const chunks = this.splitTextIntoChunks(fullText);
             logger.info(`Split text into ${chunks.length} chunks for TTS to avoid TwiML size limits`);
-            
+
             // Add each chunk as a separate say command
             for (const chunk of chunks) {
               if (chunk.trim()) { // Only add non-empty chunks
-                twiml.say({ 
-                  voice: 'alice', 
-                  language: language === 'hi' ? 'hi-IN' : 'en-US' 
+                twiml.say({
+                  voice: 'alice',
+                  language: language === 'hi' ? 'hi-IN' : 'en-US'
                 }, chunk);
               }
             }
           } else {
             // Regular TTS fallback with the provided text
             const textToSpeak = audioResult.url || fallbackText || "I'm sorry, there was an issue with my response.";
-            twiml.say({ 
-              voice: 'alice', 
-              language: language === 'hi' ? 'hi-IN' : 'en-US' 
+            twiml.say({
+              voice: 'alice',
+              language: language === 'hi' ? 'hi-IN' : 'en-US'
             }, textToSpeak);
           }
         } else if (audioResult.url && audioResult.url.trim() !== '') {
@@ -1368,29 +1453,29 @@ Current call details:
         } else {
           // Safeguard against empty URL - fall back to TTS
           logger.warn('Empty URL detected in audioResult, using TTS fallback');
-          twiml.say({ 
-            voice: 'alice', 
-            language: language === 'hi' ? 'hi-IN' : 'en-US' 
+          twiml.say({
+            voice: 'alice',
+            language: language === 'hi' ? 'hi-IN' : 'en-US'
           }, fallbackText || "I'm sorry, there was an issue with my response.");
         }
       }
-      
-      return { 
+
+      return {
         success: true,
         method: audioResult.method,
         size: audioResult.size
       };
     } catch (error) {
       logger.error(`Error in synthesizeAdaptiveVoiceForTwiML: ${getErrorMessage(error)}`);
-      
+
       // If twiml is provided, add fallback
       if (params.twiml) {
-        params.twiml.say({ 
-          voice: 'alice', 
-          language: params.language === 'hi' ? 'hi-IN' : 'en-US' 
+        params.twiml.say({
+          voice: 'alice',
+          language: params.language === 'hi' ? 'hi-IN' : 'en-US'
         }, params.fallbackText || params.text);
       }
-      
+
       return { success: false };
     }
   }
@@ -1404,7 +1489,7 @@ Current call details:
    */
   private splitTextIntoChunks(text: string, maxChunkLength: number = 250): string[] {
     if (!text) return [];
-    
+
     // If text is already small enough, return it as a single chunk
     if (text.length <= maxChunkLength) {
       return [text];
@@ -1416,12 +1501,12 @@ Current call details:
     while (currentPosition < text.length) {
       // Determine end of current chunk (max length or earlier)
       let chunkEnd = Math.min(currentPosition + maxChunkLength, text.length);
-      
+
       // Try to find a sentence end (., !, ?) followed by a space or end of text
       if (chunkEnd < text.length) {
         // Search backward from max chunk length for a good break point
         const sentenceEndMatch = text.substring(currentPosition, chunkEnd).match(/[.!?]\s+(?=[A-Z])/g);
-        
+
         if (sentenceEndMatch && sentenceEndMatch.length > 0) {
           // Find the last sentence end within this chunk
           const lastIndex = text.substring(currentPosition, chunkEnd).lastIndexOf(sentenceEndMatch[sentenceEndMatch.length - 1]);
@@ -1444,15 +1529,74 @@ Current call details:
           }
         }
       }
-      
+
       // Add the chunk to our results
       chunks.push(text.substring(currentPosition, chunkEnd).trim());
-      
+
       // Move to next position
       currentPosition = chunkEnd;
     }
-    
+
     return chunks;
+  }
+
+  /**
+   * Simple speech synthesis method for basic TTS needs
+   * This method provides a fallback-aware TTS solution
+   */
+  async synthesizeSimpleSpeech(text: string, voiceId: string): Promise<Buffer | null> {
+    try {
+      if (!text || !text.trim()) {
+        logger.warn('Empty text provided to synthesizeSimpleSpeech');
+        return null;
+      }
+
+      // Try ElevenLabs SDK service first
+      if (this.sdkService) {
+        try {
+          const audioBuffer = await this.sdkService.generateSpeech(
+            text,
+            voiceId,
+            { optimizeLatency: true }
+          );
+          return audioBuffer;
+        } catch (sdkError) {
+          logger.warn(`SDK service failed in synthesizeSimpleSpeech: ${getErrorMessage(sdkError)}`);
+        }
+      }
+
+      // Fallback to conversational service
+      if (this.conversationalService) {
+        try {
+          const audioBuffer = await this.conversationalService.generateSpeech(
+            text,
+            voiceId,
+            {
+              stability: 0.75,
+              similarityBoost: 0.75,
+              style: 0.0
+            }
+          );
+          return audioBuffer;
+        } catch (convError) {
+          logger.warn(`Conversational service failed in synthesizeSimpleSpeech: ${getErrorMessage(convError)}`);
+        }
+      }
+
+      // Final fallback: use TextToSpeechService
+      try {
+        const { getTextToSpeechService } = require('./textToSpeechService');
+        const ttsService = await getTextToSpeechService();
+        const audioBuffer = await ttsService.generateSpeech(text, { voiceId });
+        return audioBuffer;
+      } catch (ttsError) {
+        logger.error(`All TTS services failed in synthesizeSimpleSpeech: ${getErrorMessage(ttsError)}`);
+        return null;
+      }
+    } catch (error) {
+      logger.error(`Error in synthesizeSimpleSpeech: ${getErrorMessage(error)}`);
+      return null;
+    }
   }
 }
 

@@ -541,7 +541,27 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         const audio = responseCache.get(cacheKey) || await sdkService.generateSpeech(message, voiceId, { optimizeLatency: true });
         if (!responseCache.has(cacheKey)) responseCache.set(cacheKey, audio);
         sendAudioToTwilio(audio);
-      } catch (e) { logger.error(e); } finally { pendingOpeningMessage = null; }
+        
+        // After the opening message is sent, explicitly transition to listening state
+        // This ensures the agent continues the conversation and is ready for user input
+        setTimeout(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            const listeningMessage = {
+              event: 'listening',
+              type: 'listening',
+              conversationId,
+              streamSid: streamSid
+            };
+            twilioManager.sendTwilioMessage(listeningMessage);
+            logger.info(`Transitioned to listening state after opening message for call ${callId}, conversation ${conversationId}`);
+          }
+        }, 500); // Small delay to ensure client has processed the opening message
+        
+      } catch (e) { 
+        logger.error(`Error sending opening message for call ${callId}:`, e); 
+      } finally { 
+        pendingOpeningMessage = null; 
+      }
     };
 
     // Set up accumulated buffer for incoming audio

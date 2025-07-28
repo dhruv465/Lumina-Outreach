@@ -1472,6 +1472,117 @@ export const testTwilioConnection = async (req: Request, res: Response) => {
   }
 };
 
+// @desc    Test Deepgram TTS connection
+// @route   POST /api/configuration/test-deepgram-tts
+// @access  Private
+export const testDeepgramTTSConnection = async (req: Request, res: Response) => {
+  try {
+    const { apiKey } = req.body;
+
+    if (!apiKey) {
+      return res.status(400).json({ message: 'API key is required' });
+    }
+
+    let isSuccessful = false;
+    let response = null;
+
+    try {
+      // Test Deepgram TTS connection by creating a service instance and testing availability
+      const { DeepgramTTSService } = await import('../services/deepgramTTSService');
+      const tempService = new DeepgramTTSService(apiKey);
+      
+      // Test if the API key is valid
+      const isAvailable = await tempService.isAvailable();
+      
+      if (isAvailable) {
+        isSuccessful = true;
+        const models = tempService.getAvailableModels();
+        response = {
+          availableVoices: models.map(model => ({
+            voiceId: model,
+            name: model.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            previewUrl: undefined // Deepgram doesn't have preview URLs
+          }))
+        };
+        
+        // Update status in database
+        const configuration = await Configuration.findOne();
+        if (configuration) {
+          if (!configuration.ttsConfig) {
+            configuration.ttsConfig = {
+              provider: 'elevenlabs',
+              primaryProvider: 'elevenlabs',
+              fallbackProviders: ['deepgram'],
+              autoFallback: true
+            };
+          }
+          if (!configuration.ttsConfig.deepgramTTS) {
+            configuration.ttsConfig.deepgramTTS = {
+              apiKey: apiKey,
+              isEnabled: true,
+              defaultModel: 'aura-2-thalia-en',
+              availableModels: [],
+              voiceSettings: {
+                encoding: 'mp3',
+                sampleRate: 24000
+              }
+            };
+          } else {
+            // Update existing configuration with the new API key
+            configuration.ttsConfig.deepgramTTS.apiKey = apiKey;
+            configuration.ttsConfig.deepgramTTS.isEnabled = true;
+          }
+          configuration.ttsConfig.deepgramTTS.lastVerified = new Date();
+          configuration.ttsConfig.deepgramTTS.status = 'verified';
+          configuration.ttsConfig.deepgramTTS.availableModels = models;
+          await configuration.save();
+          logger.info('Deepgram TTS configuration status updated to verified');
+          // Always update ttsConfig.provider according to user's selection
+          if (req.body.ttsConfig && req.body.ttsConfig.provider) {
+            configuration.ttsConfig = {
+              ...configuration.ttsConfig,
+              ...req.body.ttsConfig,
+            };
+            configuration.markModified('ttsConfig');
+            logger.info(`TTS provider set to: ${req.body.ttsConfig.provider}`);
+          }
+        }
+      } else {
+        throw new Error('Deepgram TTS API key validation failed');
+      }
+    } catch (error: unknown) {
+      logger.error('Deepgram TTS test connection failed:', error);
+      
+      // Update status to failed in database
+      const configuration = await Configuration.findOne();
+      if (configuration && configuration.ttsConfig?.deepgramTTS) {
+        configuration.ttsConfig.deepgramTTS.status = 'failed';
+        configuration.ttsConfig.deepgramTTS.lastError = error instanceof Error ? error.message : 'Unknown error';
+        await configuration.save();
+      }
+      
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      return res.status(400).json({
+        success: false,
+        message: 'Deepgram TTS connection failed',
+        error: errorMessage
+      });
+    }
+
+    return res.json({
+      success: isSuccessful,
+      message: isSuccessful ? 'Deepgram TTS connection successful' : 'Deepgram TTS connection failed',
+      details: response
+    });
+  } catch (error) {
+    logger.error('Error in testDeepgramTTSConnection:', error);
+    return res.status(500).json({
+      message: 'Server error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
 // @desc    Test ElevenLabs connection
 // @route   POST /api/configuration/test-elevenlabs
 // @access  Private

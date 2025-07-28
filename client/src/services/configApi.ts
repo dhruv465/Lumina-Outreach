@@ -33,6 +33,10 @@ interface ElevenLabsConnectionData {
   apiKey: string;
 }
 
+interface DeepgramTTSConnectionData {
+  apiKey: string;
+}
+
 interface VoiceSynthesisTestData {
   voiceId: string;
   text: string;
@@ -164,6 +168,12 @@ export const configApi = {
   // Test ElevenLabs connection
   testElevenLabsConnection: async (connectionData: ElevenLabsConnectionData) => {
     const response = await api.post('/configuration/test-elevenlabs', connectionData);
+    return response.data;
+  },
+
+  // Test Deepgram TTS connection
+  testDeepgramTTSConnection: async (connectionData: DeepgramTTSConnectionData) => {
+    const response = await api.post('/configuration/test-deepgram-tts', connectionData);
     return response.data;
   },
 

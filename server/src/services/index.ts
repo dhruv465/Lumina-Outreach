@@ -261,16 +261,26 @@ export const initializeServicesAfterDB = async () => {
       openAIKeyLength: openAIApiKey?.length || 0
     });
     
+    // Get TTS provider configuration
+    const Configuration = require('../models/Configuration').default;
+    const config = await Configuration.findOne();
+    const selectedTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
+    
     // Initialize services with proper API keys from database
     if (elevenLabsApiKey || openAIApiKey || anthropicApiKey || googleSpeechKey) {
       console.log('Initializing services with API keys from database...');
       
-      // Initialize VoiceAI service with ElevenLabs API key
-      if (elevenLabsApiKey) {
+      // Initialize VoiceAI service only if ElevenLabs is the selected TTS provider
+      if (selectedTTSProvider === 'elevenlabs' && elevenLabsApiKey) {
         _voiceAIService = new EnhancedVoiceAIService(elevenLabsApiKey);
-        console.log('VoiceAI service initialized with API key');
+        console.log('VoiceAI service initialized with ElevenLabs API key');
       } else {
         _voiceAIService = new EnhancedVoiceAIService('');
+        if (selectedTTSProvider !== 'elevenlabs') {
+          console.log(`Skipping ElevenLabs VoiceAI service - selected TTS provider is ${selectedTTSProvider}`);
+        } else {
+          console.log('ElevenLabs selected but no API key available');
+        }
       }
       
       // Initialize speech analysis service
@@ -324,45 +334,56 @@ export const initializeServicesAfterDB = async () => {
     const { reinitializeLLMServiceWithDbConfig } = await import('./advancedCampaignService');
     await reinitializeLLMServiceWithDbConfig();
     
-    // Initialize ElevenLabs services if API keys are available
-    if (elevenLabsApiKey && openAIApiKey) {
+    // Initialize TTS services based on selected provider
+    const shouldInitializeElevenLabs = selectedTTSProvider === 'elevenlabs' && elevenLabsApiKey && openAIApiKey;
+    const shouldInitializeTTS = shouldInitializeElevenLabs || (selectedTTSProvider !== 'elevenlabs' && openAIApiKey);
+    
+    if (shouldInitializeTTS) {
       try {
-        console.log('Initializing ElevenLabs services with API keys from database...');
-        
-        // Re-initialize the ElevenLabs Conversational Service with the database API keys
-        const { initializeConversationalService } = await import('./elevenLabsConversationalService');
-        initializeConversationalService(elevenLabsApiKey, openAIApiKey);
-        console.log('ElevenLabs Conversational Service initialized');
-        
-        // Re-initialize the ElevenLabs SDK Service with the database API keys
-        const { initializeSDKService } = await import('./elevenlabsSDKService');
-        const sdkService = initializeSDKService(elevenLabsApiKey);
-        console.log('ElevenLabs SDK Service initialized:', !!sdkService);
-        
-        // Load the SDK extension with streaming methods
-        await import('./elevenlabsSDKExtension');
-        
-        // Initialize optimized stream controllers
-        const { initialize: initializeOptimizedController } = await import('../controllers/optimizedStreamController');
-        await initializeOptimizedController();
-        
-        // Initialize parallel processing service if SDK service is available
-        if (sdkService) {
-          const { initializeParallelProcessingService } = await import('./parallelProcessingService');
-          initializeParallelProcessingService(sdkService, getLLMService());
-          logger.info('Parallel processing service initialized for low-latency responses');
+        if (shouldInitializeElevenLabs) {
+          console.log('Initializing ElevenLabs services with API keys from database...');
+          
+          // Re-initialize the ElevenLabs Conversational Service with the database API keys
+          const { initializeConversationalService } = await import('./elevenLabsConversationalService');
+          initializeConversationalService(elevenLabsApiKey, openAIApiKey);
+          console.log('ElevenLabs Conversational Service initialized');
+          
+          // Re-initialize the ElevenLabs SDK Service with the database API keys
+          const { initializeSDKService } = await import('./elevenlabsSDKService');
+          const sdkService = initializeSDKService(elevenLabsApiKey);
+          console.log('ElevenLabs SDK Service initialized:', !!sdkService);
+          
+          // Load the SDK extension with streaming methods
+          await import('./elevenlabsSDKExtension');
+          
+          // Initialize optimized stream controllers
+          const { initialize: initializeOptimizedController } = await import('../controllers/optimizedStreamController');
+          await initializeOptimizedController();
+          
+          // Initialize parallel processing service if SDK service is available
+          if (sdkService) {
+            const { initializeParallelProcessingService } = await import('./parallelProcessingService');
+            initializeParallelProcessingService(sdkService, getLLMService());
+            logger.info('Parallel processing service initialized for low-latency responses');
+          }
+          
+          console.log('ElevenLabs Voice AI services initialized with database configuration');
+          logger.info('ElevenLabs Voice AI services initialized with database configuration');
+        } else {
+          console.log(`TTS provider is ${selectedTTSProvider}, skipping ElevenLabs-specific services`);
+          logger.info(`TTS provider is ${selectedTTSProvider}, skipping ElevenLabs-specific services`);
         }
-        
-        console.log('Voice AI services initialized with database configuration');
-        logger.info('Voice AI services initialized with database configuration');
       } catch (voiceAIError) {
         console.error('Failed to initialize Voice AI services:', voiceAIError);
         logger.error('Failed to initialize Voice AI services:', voiceAIError);
       }
     } else {
-      console.warn('Skipping voice services initialization - missing API keys:', {
+      console.warn(`Skipping TTS services initialization for provider ${selectedTTSProvider}:`, {
+        selectedTTSProvider,
         hasElevenLabsKey: !!elevenLabsApiKey,
-        hasOpenAIKey: !!openAIApiKey
+        hasOpenAIKey: !!openAIApiKey,
+        needsElevenLabs: selectedTTSProvider === 'elevenlabs',
+        needsBothKeys: selectedTTSProvider === 'elevenlabs' ? 'ElevenLabs + OpenAI' : 'OpenAI only'
       });
     }
     

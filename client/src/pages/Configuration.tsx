@@ -190,9 +190,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
   const [testingCall, setTestingCall] = useState(false);
   const [openTestCallDialog, setOpenTestCallDialog] = useState(false);
   const [testCallNumber, setTestCallNumber] = useState("");
-  const [testCallMessage, setTestCallMessage] = useState(
-    ""
-  );
+  const [testCallMessage, setTestCallMessage] = useState("");
   const [testingLLMChat, setTestingLLMChat] = useState(false);
   const [openTestLLMChatDialog, setOpenTestLLMChatDialog] = useState(false);
   const [testLLMResponse, setTestLLMResponse] = useState("");
@@ -210,15 +208,17 @@ Keep the conversation natural and engaging. If they're not interested, politely 
   const [loadingModels, setLoadingModels] = useState(false);
   const [apiKeyDebounceTimer, setApiKeyDebounceTimer] =
     useState<NodeJS.Timeout | null>(null);
-  const [elevenLabsDebounceTimer, setElevenLabsDebounceTimer] = useState<NodeJS.Timeout | null>(null);
-  const [deepgramTTSDebounceTimer, setDeepgramTTSDebounceTimer] = useState<NodeJS.Timeout | null>(null);
+  const [elevenLabsDebounceTimer, setElevenLabsDebounceTimer] =
+    useState<NodeJS.Timeout | null>(null);
+  const [deepgramTTSDebounceTimer, setDeepgramTTSDebounceTimer] =
+    useState<NodeJS.Timeout | null>(null);
 
   // Load available voices based on selected TTS provider
   const loadVoices = useCallback(async () => {
     console.log("🔄 loadVoices called with config:", {
       ttsProvider: config.ttsProvider,
       elevenLabsApiKey: config.elevenLabsApiKey ? "SET" : "NOT SET",
-      deepgramTTSApiKey: config.deepgramTTSApiKey ? "SET" : "NOT SET"
+      deepgramTTSApiKey: config.deepgramTTSApiKey ? "SET" : "NOT SET",
     });
 
     try {
@@ -288,15 +288,17 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           console.log("No Deepgram API key set, skipping voice fetch");
         }
       } else {
-        console.log(`Voice loading not implemented for provider: ${config.ttsProvider}`);
+        console.log(
+          `Voice loading not implemented for provider: ${config.ttsProvider}`
+        );
       }
-      
+
       console.log("🎤 Setting available voices:", {
         provider: config.ttsProvider,
         voiceCount: currentVoices.length,
-        voices: currentVoices.slice(0, 3).map(v => v.name)
+        voices: currentVoices.slice(0, 3).map((v) => v.name),
       });
-      
+
       setAvailableVoices(currentVoices);
       // Only update voiceId if it's empty or if no voices are available at all
       if (currentVoices.length === 0) {
@@ -309,7 +311,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           voiceId: currentVoices[0].voiceId,
         }));
       }
-      // Note: We intentionally don't override the user's selection even if 
+      // Note: We intentionally don't override the user's selection even if
       // their selected voice isn't in the current available voices list,
       // as this could be temporary (API issues, etc.)
     } catch (error) {
@@ -317,7 +319,12 @@ Keep the conversation natural and engaging. If they're not interested, politely 
       setAvailableVoices([]); // Ensure availableVoices is empty on error
       setConfig((prevConfig) => ({ ...prevConfig, voiceId: "" }));
     }
-  }, [config.ttsProvider, config.elevenLabsApiKey, config.deepgramTTSApiKey, setConfig]); // Updated dependencies for TTS provider
+  }, [
+    config.ttsProvider,
+    config.elevenLabsApiKey,
+    config.deepgramTTSApiKey,
+    setConfig,
+  ]); // Updated dependencies for TTS provider
 
   // Fetch available models from the API (for saved configurations)
   // This function fetches a general list of models, possibly for all configured providers.
@@ -336,8 +343,8 @@ Keep the conversation natural and engaging. If they're not interested, politely 
     } finally {
       setLoadingModels(false);
     }
-  // }, [config.llmApiKey]); // Removed config.llmApiKey from dependencies
-}, [api, setLoadingModels, setAvailableModels]); // Assuming 'api' is stable or memoized
+    // }, [config.llmApiKey]); // Removed config.llmApiKey from dependencies
+  }, [api, setLoadingModels, setAvailableModels]); // Assuming 'api' is stable or memoized
 
   // Dynamically fetch models when user enters an API key
   const fetchModelsWithApiKey = useCallback(
@@ -407,15 +414,17 @@ Keep the conversation natural and engaging. If they're not interested, politely 
       if (apiKeyDebounceTimer) {
         clearTimeout(apiKeyDebounceTimer);
       }
-      if (elevenLabsDebounceTimer) { // Clean up elevenLabsDebounceTimer as well
+      if (elevenLabsDebounceTimer) {
+        // Clean up elevenLabsDebounceTimer as well
         clearTimeout(elevenLabsDebounceTimer);
       }
-      if (deepgramTTSDebounceTimer) { // Clean up deepgramTTSDebounceTimer as well
+      if (deepgramTTSDebounceTimer) {
+        // Clean up deepgramTTSDebounceTimer as well
         clearTimeout(deepgramTTSDebounceTimer);
       }
     };
-  // }, [apiKeyDebounceTimer]);
-}, [apiKeyDebounceTimer, elevenLabsDebounceTimer, deepgramTTSDebounceTimer]);
+    // }, [apiKeyDebounceTimer]);
+  }, [apiKeyDebounceTimer, elevenLabsDebounceTimer, deepgramTTSDebounceTimer]);
 
   useEffect(() => {
     // Load voices only on component mount or when elevenLabsApiKey changes, with debounce
@@ -456,11 +465,14 @@ Keep the conversation natural and engaging. If they're not interested, politely 
 
   // Load voices when TTS provider changes
   useEffect(() => {
-    console.log("TTS provider changed, loading voices for:", config.ttsProvider);
+    console.log(
+      "TTS provider changed, loading voices for:",
+      config.ttsProvider
+    );
     console.log("Current config state:", {
       ttsProvider: config.ttsProvider,
       elevenLabsApiKey: config.elevenLabsApiKey ? "SET" : "NOT SET",
-      deepgramTTSApiKey: config.deepgramTTSApiKey ? "SET" : "NOT SET"
+      deepgramTTSApiKey: config.deepgramTTSApiKey ? "SET" : "NOT SET",
     });
     loadVoices();
   }, [config.ttsProvider, loadVoices]);
@@ -468,9 +480,11 @@ Keep the conversation natural and engaging. If they're not interested, politely 
   // Fetch available models (general list) when component mounts or when the LLM provider changes.
   // This should not run on every keystroke of the llmApiKey.
   useEffect(() => {
-    console.log("Effect: Calling fetchAvailableModels (general list) due to mount or provider change.");
+    console.log(
+      "Effect: Calling fetchAvailableModels (general list) due to mount or provider change."
+    );
     fetchAvailableModels();
-  // }, [config.llmApiKey, fetchAvailableModels]); // Old dependencies
+    // }, [config.llmApiKey, fetchAvailableModels]); // Old dependencies
   }, [fetchAvailableModels, config.llmProvider]); // New dependencies
 
   useEffect(() => {
@@ -516,8 +530,8 @@ Keep the conversation natural and engaging. If they're not interested, politely 
             ? "openai"
             : "google",
           voiceId:
-            data.elevenLabsConfig?.selectedVoiceId || 
-            data.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 
+            data.elevenLabsConfig?.selectedVoiceId ||
+            data.elevenLabsConfig?.availableVoices?.[0]?.voiceId ||
             "rachel",
           voiceSpeed: data.elevenLabsConfig?.voiceSpeed || 1.0,
           voiceStability: data.elevenLabsConfig?.voiceStability || 0.8,
@@ -528,11 +542,17 @@ Keep the conversation natural and engaging. If they're not interested, politely 
 
           // TTS Provider Settings
           ttsProvider: data.ttsConfig?.provider || "elevenlabs",
-          ttsPrimaryProvider: data.ttsConfig?.primaryProvider || data.ttsConfig?.provider || "elevenlabs",
-          ttsFallbackProviders: data.ttsConfig?.fallbackProviders || ["deepgram"],
+          ttsPrimaryProvider:
+            data.ttsConfig?.primaryProvider ||
+            data.ttsConfig?.provider ||
+            "elevenlabs",
+          ttsFallbackProviders: data.ttsConfig?.fallbackProviders || [
+            "deepgram",
+          ],
           ttsAutoFallback: data.ttsConfig?.autoFallback !== false, // Default to true
           deepgramTTSApiKey: data.ttsConfig?.deepgramTTS?.apiKey || "",
-          deepgramTTSStatus: data.ttsConfig?.deepgramTTS?.status || "unverified",
+          deepgramTTSStatus:
+            data.ttsConfig?.deepgramTTS?.status || "unverified",
 
           deepgramApiKey: data.deepgramConfig?.apiKey || "",
           deepgramStatus: data.deepgramConfig?.status || "unverified",
@@ -669,8 +689,12 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           autoFallback: config.ttsAutoFallback,
           deepgramTTS: {
             apiKey: config.deepgramTTSApiKey,
-            isEnabled: config.ttsProvider === "deepgram" && !!config.deepgramTTSApiKey,
-            defaultModel: config.ttsProvider === "deepgram" ? config.voiceId : "aura-2-thalia-en",
+            isEnabled:
+              config.ttsProvider === "deepgram" && !!config.deepgramTTSApiKey,
+            defaultModel:
+              config.ttsProvider === "deepgram"
+                ? config.voiceId
+                : "aura-2-thalia-en",
             voiceSettings: {
               encoding: "mp3",
               sampleRate: 24000,
@@ -749,17 +773,22 @@ Keep the conversation natural and engaging. If they're not interested, politely 
         providers: [
           {
             name: "openai",
-            status: config.llmProvider === "openai" ? config.llmStatus : "unverified",
+            status:
+              config.llmProvider === "openai" ? config.llmStatus : "unverified",
             isEnabled: config.llmProvider === "openai",
           },
           {
             name: "anthropic",
-            status: config.llmProvider === "anthropic" ? config.llmStatus : "unverified",
+            status:
+              config.llmProvider === "anthropic"
+                ? config.llmStatus
+                : "unverified",
             isEnabled: config.llmProvider === "anthropic",
           },
           {
             name: "google",
-            status: config.llmProvider === "google" ? config.llmStatus : "unverified",
+            status:
+              config.llmProvider === "google" ? config.llmStatus : "unverified",
             isEnabled: config.llmProvider === "google",
           },
         ],
@@ -777,7 +806,8 @@ Keep the conversation natural and engaging. If they're not interested, politely 
         },
         elevenLabsConfig: {
           apiKey: apiConfig.elevenLabsConfig.apiKey ? "SET" : "NOT SET",
-          selectedVoiceId: apiConfig.elevenLabsConfig.selectedVoiceId || "NOT SET",
+          selectedVoiceId:
+            apiConfig.elevenLabsConfig.selectedVoiceId || "NOT SET",
           voiceSpeed: apiConfig.elevenLabsConfig.voiceSpeed,
           voiceStability: apiConfig.elevenLabsConfig.voiceStability,
           voiceClarity: apiConfig.elevenLabsConfig.voiceClarity,
@@ -795,7 +825,9 @@ Keep the conversation natural and engaging. If they're not interested, politely 
         },
         voiceAIConfig: {
           conversationalAI: {
-            defaultVoiceId: apiConfig.voiceAIConfig?.conversationalAI?.defaultVoiceId || "NOT SET",
+            defaultVoiceId:
+              apiConfig.voiceAIConfig?.conversationalAI?.defaultVoiceId ||
+              "NOT SET",
           },
         },
       });
@@ -841,11 +873,12 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           updatedConfigData.llmConfig?.providers?.find(
             (p: any) => p.name === currentProvider
           )?.status || "unverified";
-        
+
         // Preserve verification status if it was just verified locally
-        const llmStatus = prevConfig.llmStatus === "verified" 
-          ? "verified" 
-          : serverProviderStatus;
+        const llmStatus =
+          prevConfig.llmStatus === "verified"
+            ? "verified"
+            : serverProviderStatus;
 
         const llmApiKey = serverProviderKey || prevConfig.llmApiKey;
 
@@ -918,6 +951,14 @@ Keep the conversation natural and engaging. If they're not interested, politely 
             updatedConfigData.generalSettings?.defaultTimeZone ||
             prevConfig.timeZone,
 
+          // TTS Provider Settings
+          ttsProvider: updatedConfigData.ttsConfig?.provider || prevConfig.ttsProvider,
+          ttsPrimaryProvider: updatedConfigData.ttsConfig?.primaryProvider || prevConfig.ttsPrimaryProvider,
+          ttsFallbackProviders: updatedConfigData.ttsConfig?.fallbackProviders || prevConfig.ttsFallbackProviders,
+          ttsAutoFallback: updatedConfigData.ttsConfig?.autoFallback ?? prevConfig.ttsAutoFallback,
+          deepgramTTSApiKey: updatedConfigData.ttsConfig?.deepgramTTS?.apiKey || prevConfig.deepgramTTSApiKey,
+          deepgramTTSStatus: updatedConfigData.ttsConfig?.deepgramTTS?.status || prevConfig.deepgramTTSStatus,
+
           // Webhook config
           webhookSecret:
             updatedConfigData.webhookConfig?.secret || prevConfig.webhookSecret,
@@ -948,33 +989,42 @@ Keep the conversation natural and engaging. If they're not interested, politely 
   const handleTestVoice = async () => {
     setTestingVoice(true);
     try {
+      const testText = `Hello! This is a test of ${config.ttsProvider} TTS. The voice sounds clear and natural.`;
+      console.log(`Testing ${config.ttsProvider} TTS with voice: ${config.voiceId}`);
+
+      // Check if we have the required API key for the selected provider
+      const apiKey = config.ttsProvider === "elevenlabs" 
+        ? config.elevenLabsApiKey 
+        : config.ttsProvider === "deepgram" 
+        ? config.deepgramTTSApiKey 
+        : "";
+
+      if (!apiKey) {
+        throw new Error(`Please enter a valid ${config.ttsProvider} API key.`);
+      }
+
+      if (!config.voiceId) {
+        throw new Error(`Please select a voice for ${config.ttsProvider} TTS.`);
+      }
+
       if (config.ttsProvider === "elevenlabs") {
-        const testText =
-          "Hello! This is a test of the voice synthesis system. The voice sounds clear and natural.";
-        console.log(`Testing voice with ID: ${config.voiceId}`);
-
-        // Make sure we have a valid API key
-        const apiKey = config.elevenLabsApiKey;
-        if (!apiKey) {
-          throw new Error("Please enter a valid API key.");
-        }
-
-        if (!config.voiceId) {
-          throw new Error("Please select a voice to test.");
-        }
 
         try {
           // Test using the TTS provider API with authentication
-          const response = await api.post('/tts-provider/synthesize', {
-            text: testText,
-            voiceId: config.voiceId,
-            language: 'en'
-          }, {
-            responseType: 'blob'
-          });
+          const response = await api.post(
+            "/tts-provider/synthesize",
+            {
+              text: testText,
+              voiceId: config.voiceId,
+              language: "en",
+            },
+            {
+              responseType: "blob",
+            }
+          );
 
           if (!response.data) {
-            throw new Error('TTS test failed: No audio data received');
+            throw new Error("TTS test failed: No audio data received");
           }
 
           // Update status to verified on successful test
@@ -1020,8 +1070,9 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           }
         }
       } else if (config.ttsProvider === "deepgram") {
-        const testText = "Hello! This is a test of Deepgram TTS. The voice sounds clear and natural.";
-        console.log(`Testing Deepgram TTS with model: ${config.deepgramTTSModel}`);
+        const testText =
+          "Hello! This is a test of Deepgram TTS. The voice sounds clear and natural.";
+        console.log(`Testing Deepgram TTS with model: ${config.deepgramModel}`);
 
         // Make sure we have a valid API key
         const apiKey = config.deepgramTTSApiKey;
@@ -1035,16 +1086,20 @@ Keep the conversation natural and engaging. If they're not interested, politely 
 
         try {
           // Test using the TTS provider API with authentication
-          const response = await api.post('/tts-provider/synthesize', {
-            text: testText,
-            voiceId: config.voiceId,
-            language: 'en'
-          }, {
-            responseType: 'blob'
-          });
+          const response = await api.post(
+            "/tts-provider/synthesize",
+            {
+              text: testText,
+              voiceId: config.voiceId,
+              language: "en",
+            },
+            {
+              responseType: "blob",
+            }
+          );
 
           if (!response.data) {
-            throw new Error('TTS test failed: No audio data received');
+            throw new Error("TTS test failed: No audio data received");
           }
 
           // Update status to verified on successful test
@@ -1061,7 +1116,8 @@ Keep the conversation natural and engaging. If they're not interested, politely 
 
           toast({
             title: "Deepgram TTS Test Successful",
-            description: "Deepgram TTS is working correctly and audio is playing.",
+            description:
+              "Deepgram TTS is working correctly and audio is playing.",
           });
 
           // Clean up the object URL
@@ -1078,22 +1134,29 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           throw error;
         }
       } else {
-        throw new Error(`TTS provider ${config.ttsProvider} testing not yet implemented.`);
+        throw new Error(
+          `TTS provider ${config.ttsProvider} testing not yet implemented.`
+        );
       }
     } catch (error: any) {
       console.error("Voice test error:", error);
 
-      // Update status to failed on any error
+      // Update status to failed on any error based on the selected provider
       setConfig((prev) => ({
         ...prev,
-        ...(config.ttsProvider === "elevenlabs" && { elevenLabsStatus: "failed" }),
-        ...(config.ttsProvider === "deepgram" && { deepgramTTSStatus: "failed" }),
+        ...(config.ttsProvider === "elevenlabs" && {
+          elevenLabsStatus: "failed",
+        }),
+        ...(config.ttsProvider === "deepgram" && {
+          deepgramTTSStatus: "failed",
+        }),
       }));
 
       toast({
         title: "TTS Test Failed",
         description:
-          error.message || `Please check your ${config.ttsProvider} API key and settings.`,
+          error.message ||
+          `Please check your ${config.ttsProvider} API key and settings.`,
         variant: "destructive",
       });
     } finally {
@@ -1274,7 +1337,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           variant: "destructive",
         });
       } else if (itemToDelete.type === "deepgramTTS") {
-        await configApi.deleteApiKey({ provider: "deepgramTTS" });
+        await configApi.deleteApiKey({ provider: "deepgram" });
         toast({
           title: "Deepgram TTS Configuration Deleted",
           description: "Your Deepgram TTS API key has been removed.",
@@ -1446,8 +1509,9 @@ Keep the conversation natural and engaging. If they're not interested, politely 
 
   const handleTestLLMChat = async () => {
     // Use a predefined test message instead of requiring user input
-    const testMessage = "Hello, how are you today? Can you tell me about your product or service?";
-    
+    const testMessage =
+      "Hello, how are you today? Can you tell me about your product or service?";
+
     // Validate that system prompt is set
     if (!config.systemPrompt.trim()) {
       toast({
@@ -1476,7 +1540,9 @@ Keep the conversation natural and engaging. If they're not interested, politely 
       const providerName = config.llmProvider.toLowerCase();
 
       console.log(`Testing LLM chat with provider: ${providerName}`);
-      console.log(`Using system prompt: ${config.systemPrompt.substring(0, 100)}...`);
+      console.log(
+        `Using system prompt: ${config.systemPrompt.substring(0, 100)}...`
+      );
       console.log(`Test message: ${testMessage}`);
 
       const result = await configApi.testLLMChat({
@@ -1492,7 +1558,8 @@ Keep the conversation natural and engaging. If they're not interested, politely 
 
         toast({
           title: "Test Successful",
-          description: "The LLM responded successfully with your system prompt configuration.",
+          description:
+            "The LLM responded successfully with your system prompt configuration.",
         });
 
         // Update LLM status to verified if successful
@@ -1505,31 +1572,36 @@ Keep the conversation natural and engaging. If they're not interested, politely 
         try {
           // Get current configuration to preserve all providers
           const currentConfig = await configApi.getConfiguration();
-          
+
           // Update only the tested provider's status while preserving others
-          const updatedProviders = currentConfig.llmConfig.providers.map((provider: any) => {
-            if (provider.name === config.llmProvider) {
-              return {
-                ...provider,
-                status: "verified",
-                lastVerified: new Date().toISOString(),
-                apiKey: config.llmApiKey,
-              };
+          const updatedProviders = currentConfig.llmConfig.providers.map(
+            (provider: any) => {
+              if (provider.name === config.llmProvider) {
+                return {
+                  ...provider,
+                  status: "verified",
+                  lastVerified: new Date().toISOString(),
+                  apiKey: config.llmApiKey,
+                };
+              }
+              return provider;
             }
-            return provider;
-          });
+          );
 
           const quickUpdateConfig = {
             llmConfig: {
               ...currentConfig.llmConfig,
-              providers: updatedProviders
-            }
+              providers: updatedProviders,
+            },
           };
-          
+
           await configApi.updateConfiguration(quickUpdateConfig);
           console.log("Verification status saved to server successfully");
         } catch (saveError) {
-          console.warn("Failed to save verification status to server:", saveError);
+          console.warn(
+            "Failed to save verification status to server:",
+            saveError
+          );
           // Don't show error to user as the test was successful
         }
       } else {
@@ -1551,26 +1623,28 @@ Keep the conversation natural and engaging. If they're not interested, politely 
         try {
           // Get current configuration to preserve all providers
           const currentConfig = await configApi.getConfiguration();
-          
+
           // Update only the tested provider's status while preserving others
-          const updatedProviders = currentConfig.llmConfig.providers.map((provider: any) => {
-            if (provider.name === config.llmProvider) {
-              return {
-                ...provider,
-                status: "failed",
-                apiKey: config.llmApiKey,
-              };
+          const updatedProviders = currentConfig.llmConfig.providers.map(
+            (provider: any) => {
+              if (provider.name === config.llmProvider) {
+                return {
+                  ...provider,
+                  status: "failed",
+                  apiKey: config.llmApiKey,
+                };
+              }
+              return provider;
             }
-            return provider;
-          });
+          );
 
           const quickUpdateConfig = {
             llmConfig: {
               ...currentConfig.llmConfig,
-              providers: updatedProviders
-            }
+              providers: updatedProviders,
+            },
           };
-          
+
           await configApi.updateConfiguration(quickUpdateConfig);
         } catch (saveError) {
           console.warn("Failed to save failed status to server:", saveError);
@@ -1596,26 +1670,28 @@ Keep the conversation natural and engaging. If they're not interested, politely 
       try {
         // Get current configuration to preserve all providers
         const currentConfig = await configApi.getConfiguration();
-        
+
         // Update only the tested provider's status while preserving others
-        const updatedProviders = currentConfig.llmConfig.providers.map((provider: any) => {
-          if (provider.name === config.llmProvider) {
-            return {
-              ...provider,
-              status: "failed",
-              apiKey: config.llmApiKey,
-            };
+        const updatedProviders = currentConfig.llmConfig.providers.map(
+          (provider: any) => {
+            if (provider.name === config.llmProvider) {
+              return {
+                ...provider,
+                status: "failed",
+                apiKey: config.llmApiKey,
+              };
+            }
+            return provider;
           }
-          return provider;
-        });
+        );
 
         const quickUpdateConfig = {
           llmConfig: {
             ...currentConfig.llmConfig,
-            providers: updatedProviders
-          }
+            providers: updatedProviders,
+          },
         };
-        
+
         await configApi.updateConfiguration(quickUpdateConfig);
       } catch (saveError) {
         console.warn("Failed to save failed status to server:", saveError);
@@ -1695,11 +1771,19 @@ Keep the conversation natural and engaging. If they're not interested, politely 
             </div>
             <Badge variant="outline" className="mt-1">
               {(() => {
-                const status = config.ttsProvider === "elevenlabs" ? config.elevenLabsStatus : 
-                              config.ttsProvider === "deepgram" ? config.deepgramTTSStatus : "unverified";
-                const apiKey = config.ttsProvider === "elevenlabs" ? config.elevenLabsApiKey : 
-                              config.ttsProvider === "deepgram" ? config.deepgramTTSApiKey : "";
-                
+                const status =
+                  config.ttsProvider === "elevenlabs"
+                    ? config.elevenLabsStatus
+                    : config.ttsProvider === "deepgram"
+                    ? config.deepgramTTSStatus
+                    : "unverified";
+                const apiKey =
+                  config.ttsProvider === "elevenlabs"
+                    ? config.elevenLabsApiKey
+                    : config.ttsProvider === "deepgram"
+                    ? config.deepgramTTSApiKey
+                    : "";
+
                 if (status === "verified") {
                   return (
                     <>
@@ -1750,9 +1834,9 @@ Keep the conversation natural and engaging. If they're not interested, politely 
                     <h4 className="text-sm font-semibold">STT Provider</h4>
                     <p className="text-sm text-muted-foreground">
                       The Speech-to-Text service used to transcribe customer
-                      speech during phone calls. Deepgram provides high-accuracy,
-                      low-latency transcription with advanced noise handling
-                      capabilities for real-time conversations.
+                      speech during phone calls. Deepgram provides
+                      high-accuracy, low-latency transcription with advanced
+                      noise handling capabilities for real-time conversations.
                     </p>
                   </div>
                 </HoverCardContent>
@@ -1985,6 +2069,36 @@ Keep the conversation natural and engaging. If they're not interested, politely 
                 </SelectContent>
               </Select>
             </div>
+            
+            {/* Unified Test Voice Button - works for all TTS providers */}
+            {((config.ttsProvider === "elevenlabs" && config.elevenLabsApiKey) ||
+              (config.ttsProvider === "deepgram" && config.deepgramTTSApiKey)) && 
+              config.voiceId && (
+              <div className="mt-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestVoice}
+                  disabled={testingVoice}
+                  className="w-full"
+                >
+                  {testingVoice ? (
+                    <Mic className="h-4 w-4 mr-2 animate-pulse" />
+                  ) : (
+                    <Mic className="h-4 w-4 mr-2" />
+                  )}
+                  {testingVoice ? "Testing..." : `Test Voice (${config.ttsProvider})`}
+                </Button>
+                <div className="text-xs text-muted-foreground mt-2 text-center">
+                  {config.ttsProvider === "elevenlabs" 
+                    ? "Testing with ElevenLabs TTS - make sure you have a valid API key and voice selected"
+                    : config.ttsProvider === "deepgram"
+                    ? "Testing with Deepgram TTS - make sure you have a valid API key and voice model selected"
+                    : "Make sure you have a valid API key and voice selected"}
+                </div>
+              </div>
+            )}
+            
             {config.ttsProvider === "elevenlabs" && (
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
@@ -2014,7 +2128,9 @@ Keep the conversation natural and engaging. If they're not interested, politely 
             {config.ttsProvider === "deepgram" && (
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
-                  <Label htmlFor="deepgramTTSApiKey">Deepgram TTS API Key</Label>
+                  <Label htmlFor="deepgramTTSApiKey">
+                    Deepgram TTS API Key
+                  </Label>
                   {config.deepgramTTSApiKey && (
                     <Button
                       variant="outline"
@@ -2088,30 +2204,40 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           {/* TTS Provider Fallback Configuration */}
           <div className="space-y-4">
             <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
+              <Checkbox
                 id="ttsAutoFallback"
                 checked={config.ttsAutoFallback}
-                onChange={(e) => updateConfig("ttsAutoFallback", e.target.checked)}
+                onCheckedChange={(checked) => updateConfig("ttsAutoFallback", checked)}
                 className="rounded"
               />
-              <Label htmlFor="ttsAutoFallback">Enable automatic TTS provider fallback</Label>
+              <Label htmlFor="ttsAutoFallback">
+                Enable automatic TTS provider fallback
+              </Label>
             </div>
             {config.ttsAutoFallback && (
               <div className="space-y-2">
                 <Label>Fallback Providers (in order of preference)</Label>
                 <div className="text-sm text-muted-foreground">
-                  If the primary TTS provider fails, these providers will be tried in order:
+                  If the primary TTS provider fails, these providers will be
+                  tried in order:
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {config.ttsFallbackProviders.map((provider, index) => (
-                    <div key={provider} className="flex items-center space-x-2 bg-muted px-3 py-1 rounded-md">
-                      <span className="text-sm">{index + 1}. {provider}</span>
+                    <div
+                      key={provider}
+                      className="flex items-center space-x-2 bg-muted px-3 py-1 rounded-md"
+                    >
+                      <span className="text-sm">
+                        {index + 1}. {provider}
+                      </span>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          const newFallbacks = config.ttsFallbackProviders.filter((_, i) => i !== index);
+                          const newFallbacks =
+                            config.ttsFallbackProviders.filter(
+                              (_, i) => i !== index
+                            );
                           updateConfig("ttsFallbackProviders", newFallbacks);
                         }}
                         className="h-4 w-4 p-0 text-muted-foreground hover:text-red-500"
@@ -2123,8 +2249,14 @@ Keep the conversation natural and engaging. If they're not interested, politely 
                 </div>
                 <Select
                   onValueChange={(value) => {
-                    if (!config.ttsFallbackProviders.includes(value) && value !== config.ttsProvider) {
-                      updateConfig("ttsFallbackProviders", [...config.ttsFallbackProviders, value]);
+                    if (
+                      !config.ttsFallbackProviders.includes(value) &&
+                      value !== config.ttsProvider
+                    ) {
+                      updateConfig("ttsFallbackProviders", [
+                        ...config.ttsFallbackProviders,
+                        value,
+                      ]);
                     }
                   }}
                 >
@@ -2133,8 +2265,12 @@ Keep the conversation natural and engaging. If they're not interested, politely 
                   </SelectTrigger>
                   <SelectContent>
                     {["elevenlabs", "deepgram", "openai", "google", "aws"]
-                      .filter(provider => provider !== config.ttsProvider && !config.ttsFallbackProviders.includes(provider))
-                      .map(provider => (
+                      .filter(
+                        (provider) =>
+                          provider !== config.ttsProvider &&
+                          !config.ttsFallbackProviders.includes(provider)
+                      )
+                      .map((provider) => (
                         <SelectItem key={provider} value={provider}>
                           {provider.charAt(0).toUpperCase() + provider.slice(1)}
                         </SelectItem>
@@ -2144,14 +2280,16 @@ Keep the conversation natural and engaging. If they're not interested, politely 
               </div>
             )}
           </div>
-          
+
           {config.ttsProvider === "elevenlabs" && (
             <div className="flex items-center space-x-2 mt-4">
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="useFlashModel"
                   checked={config.useFlashModel}
-                  onCheckedChange={(checked) => updateConfig("useFlashModel", checked)}
+                  onCheckedChange={(checked) =>
+                    updateConfig("useFlashModel", checked)
+                  }
                 />
                 <Label htmlFor="useFlashModel" className="cursor-pointer">
                   Use ElevenLabs Flash v2.5 for ultra-low latency (~75ms)
@@ -2167,33 +2305,19 @@ Keep the conversation natural and engaging. If they're not interested, politely 
                   <div className="space-y-2">
                     <h4 className="text-sm font-semibold">Flash v2.5 Model</h4>
                     <p className="text-sm text-muted-foreground">
-                      ElevenLabs Flash v2.5 (eleven_turbo_v2) is an ultra-low latency model optimized for real-time conversations.
-                      It provides much faster response times (around 75ms) compared to standard models,
-                      which significantly improves the natural flow of conversations.
+                      ElevenLabs Flash v2.5 (eleven_turbo_v2) is an ultra-low
+                      latency model optimized for real-time conversations. It
+                      provides much faster response times (around 75ms) compared
+                      to standard models, which significantly improves the
+                      natural flow of conversations.
                     </p>
                   </div>
                 </HoverCardContent>
               </HoverCard>
             </div>
           )}
-          
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleTestVoice}
-            disabled={testingVoice}
-          >
-            {testingVoice ? (
-              <Mic className="h-4 w-4 mr-2 animate-pulse" />
-            ) : (
-              <Mic className="h-4 w-4 mr-2" />
-            )}
-            {testingVoice ? "Testing..." : "Test Voice"}
-          </Button>
-          <div className="text-xs text-muted-foreground mt-2">
-            Make sure you've entered a valid API key and voice ID before
-            testing. Voice IDs can be found in your ElevenLabs dashboard.
-          </div>
+
+
         </CardContent>
       </Card>
 
@@ -2213,9 +2337,10 @@ Keep the conversation natural and engaging. If they're not interested, politely 
                 <div className="space-y-2">
                   <h4 className="text-sm font-semibold">Speech Recognition</h4>
                   <p className="text-sm text-muted-foreground">
-                    Configure Deepgram Nova-2 for high-accuracy, low-latency speech-to-text services.
-                    Nova-2 provides significantly better transcription quality and reduced latency
-                    compared to other STT services.
+                    Configure Deepgram Nova-2 for high-accuracy, low-latency
+                    speech-to-text services. Nova-2 provides significantly
+                    better transcription quality and reduced latency compared to
+                    other STT services.
                   </p>
                 </div>
               </HoverCardContent>
@@ -2255,7 +2380,10 @@ Keep the conversation natural and engaging. If they're not interested, politely 
                 value={config.deepgramModel}
                 onValueChange={(value) => updateConfig("deepgramModel", value)}
               >
-                <SelectTrigger id="deepgramModel" className="w-full h-10 rounded-xl">
+                <SelectTrigger
+                  id="deepgramModel"
+                  className="w-full h-10 rounded-xl"
+                >
                   <SelectValue placeholder="Select a model" />
                 </SelectTrigger>
                 <SelectContent>
@@ -2266,22 +2394,26 @@ Keep the conversation natural and engaging. If they're not interested, politely 
               </Select>
             </div>
           </div>
-          
+
           <div className="flex items-center space-x-2 mt-4">
             <div className="flex items-center space-x-2">
               <Checkbox
                 id="deepgramEnabled"
                 checked={config.deepgramEnabled}
-                onCheckedChange={(checked) => updateConfig("deepgramEnabled", checked)}
+                onCheckedChange={(checked) =>
+                  updateConfig("deepgramEnabled", checked)
+                }
               />
               <Label htmlFor="deepgramEnabled" className="cursor-pointer">
-                Enable Deepgram for speech recognition (falls back to OpenAI Whisper if disabled)
+                Enable Deepgram for speech recognition (falls back to OpenAI
+                Whisper if disabled)
               </Label>
             </div>
           </div>
-          
+
           <div className="text-xs text-muted-foreground mt-2">
-            Deepgram Nova-2 provides higher accuracy and lower latency than OpenAI Whisper for speech recognition.
+            Deepgram Nova-2 provides higher accuracy and lower latency than
+            OpenAI Whisper for speech recognition.
           </div>
         </CardContent>
       </Card>
@@ -2682,7 +2814,9 @@ Keep the conversation natural and engaging. If they're not interested, politely 
             </HoverCard>
           </CardTitle>
           <CardDescription>
-            Configure webhook secret for receiving call events. The webhook base URL is configured via the WEBHOOK_BASE_URL environment variable in the server.
+            Configure webhook secret for receiving call events. The webhook base
+            URL is configured via the WEBHOOK_BASE_URL environment variable in
+            the server.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -2807,8 +2941,9 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           <AlertDialogHeader>
             <AlertDialogTitle>Test AI Chat</AlertDialogTitle>
             <AlertDialogDescription>
-              Test your AI model with your current system prompt configuration. 
-              This will send a sample customer message to see how the AI responds with your configured personality.
+              Test your AI model with your current system prompt configuration.
+              This will send a sample customer message to see how the AI
+              responds with your configured personality.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -2816,10 +2951,12 @@ Keep the conversation natural and engaging. If they're not interested, politely 
             <div className="space-y-2">
               <Label>Test Scenario</Label>
               <div className="border rounded-md p-3 bg-muted/50 text-sm">
-                <strong>Customer Message:</strong> "Hello, how are you today? Can you tell me about your product or service?"
+                <strong>Customer Message:</strong> "Hello, how are you today?
+                Can you tell me about your product or service?"
               </div>
               <p className="text-xs text-muted-foreground">
-                The AI will respond to this customer message using your configured system prompt and personality settings.
+                The AI will respond to this customer message using your
+                configured system prompt and personality settings.
               </p>
             </div>
 

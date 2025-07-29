@@ -217,11 +217,23 @@ export class TTSProviderService {
     // Create a new instance with the current API key from configuration
     const deepgramTTS = new DeepgramTTSService(deepgramConfig.apiKey);
 
+    const encoding = options.encoding || deepgramConfig.voiceSettings?.encoding || 'mp3';
     const synthesisOptions = {
       model: options.voiceId || options.model || deepgramConfig.defaultModel || 'aura-2-thalia-en',
-      encoding: options.encoding || deepgramConfig.voiceSettings?.encoding || 'mp3',
-      sample_rate: options.sampleRate || deepgramConfig.voiceSettings?.sampleRate || 24000
+      encoding: encoding,
+      // Only include sample_rate for non-mp3 encodings (per Deepgram documentation)
+      ...(encoding !== 'mp3' && { 
+        sample_rate: options.sampleRate || deepgramConfig.voiceSettings?.sampleRate || 24000 
+      })
     };
+
+    logger.info('Deepgram TTS synthesis request', {
+      textLength: options.text.length,
+      model: synthesisOptions.model,
+      encoding: synthesisOptions.encoding,
+      sampleRate: synthesisOptions.sample_rate,
+      hasApiKey: !!deepgramConfig.apiKey
+    });
 
     const audioBuffer = await deepgramTTS.synthesizeSpeechWithStream(
       options.text,

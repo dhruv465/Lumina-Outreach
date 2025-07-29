@@ -35,11 +35,14 @@ export class DeepgramTTSService {
     }
 
     try {
+      // Default to linear16 with wav container for compatibility
+      const encoding = options.encoding || 'linear16';
       const defaultOptions = {
         model: 'aura-asteria-en',
-        encoding: 'linear16',
-        container: 'wav',
-        sample_rate: 24000,
+        encoding: encoding,
+        container: options.container || (encoding === 'linear16' ? 'wav' : undefined),
+        // Only include sample_rate for non-mp3 encodings
+        ...(encoding !== 'mp3' && { sample_rate: options.sample_rate || 24000 }),
         ...options
       };
 
@@ -48,33 +51,20 @@ export class DeepgramTTSService {
         options: defaultOptions
       });
 
+      // Use the exact format from Deepgram documentation
       const response = await this.client.speak.request(
-        { text },
+        { text: text },
         defaultOptions
       );
 
-      // For Deepgram, we need to get the stream and convert to buffer
+      // Get the stream as per documentation
       const stream = await response.getStream();
       if (!stream) {
         throw new Error('Error generating audio stream from Deepgram');
       }
 
-      // Convert stream to buffer
-      const chunks: Buffer[] = [];
-      
-      const audioBuffer = await new Promise<Buffer>((resolve, reject) => {
-        stream.on('data', (chunk: Buffer) => {
-          chunks.push(chunk);
-        });
-        
-        stream.on('end', () => {
-          resolve(Buffer.concat(chunks));
-        });
-        
-        stream.on('error', (error: Error) => {
-          reject(error);
-        });
-      });
+      // Convert stream to buffer using the helper function from Deepgram docs
+      const audioBuffer = await this.getAudioBuffer(stream);
       
       logger.debug('Deepgram TTS synthesis successful', {
         audioBufferSize: audioBuffer.length,
@@ -105,12 +95,15 @@ export class DeepgramTTSService {
     }
 
     try {
+      // Use the exact format from Deepgram documentation
+      // Note: sample_rate is not applicable when encoding=mp3
+      const encoding = options.encoding || 'mp3';
       const defaultOptions = {
-        model: 'aura-2-thalia-en', // Using the model from your example
-        encoding: 'mp3',
-        // Note: container is not used with mp3 encoding
-        sample_rate: 24000,
-        ...options
+        model: options.model || 'aura-2-thalia-en',
+        encoding: encoding,
+        ...(options.container && { container: options.container }),
+        // Only include sample_rate for non-mp3 encodings
+        ...(encoding !== 'mp3' && options.sample_rate && { sample_rate: options.sample_rate })
       };
 
       logger.info('Synthesizing speech with Deepgram TTS streaming', {
@@ -119,8 +112,9 @@ export class DeepgramTTSService {
         hasOutputFile: !!options.outputFile
       });
 
+      // Use the exact format from the documentation: { text: "Hello, how can I help you today?" }
       const response = await this.client.speak.request(
-        { text },
+        { text: text },
         defaultOptions
       );
 
@@ -151,30 +145,15 @@ export class DeepgramTTSService {
           throw pipelineError;
         }
       } else {
-        // Convert stream to buffer directly
-        const chunks: Buffer[] = [];
+        // Convert stream to buffer using the helper function
+        const audioBuffer = await this.getAudioBuffer(stream);
         
-        return new Promise((resolve, reject) => {
-          stream.on('data', (chunk: Buffer) => {
-            chunks.push(chunk);
-          });
-          
-          stream.on('end', () => {
-            const audioBuffer = Buffer.concat(chunks);
-            logger.info('Deepgram TTS streaming synthesis successful', {
-              audioBufferSize: audioBuffer.length,
-              textLength: text.length
-            });
-            resolve(audioBuffer);
-          });
-          
-          stream.on('error', (error: Error) => {
-            logger.error('Stream error during Deepgram TTS synthesis', {
-              error: getErrorMessage(error)
-            });
-            reject(error);
-          });
+        logger.info('Deepgram TTS streaming synthesis successful', {
+          audioBufferSize: audioBuffer.length,
+          textLength: text.length
         });
+        
+        return audioBuffer;
       }
     } catch (error) {
       logger.error('Deepgram TTS streaming synthesis failed', {
@@ -193,6 +172,7 @@ export class DeepgramTTSService {
     return this.synthesizeSpeechWithStream(text, {
       model: 'aura-2-thalia-en',
       encoding: 'mp3',
+      // Note: sample_rate is automatically excluded for mp3 encoding
       outputFile
     });
   }
@@ -203,24 +183,61 @@ export class DeepgramTTSService {
     }
 
     try {
-      // Test with a simple phrase using the streaming method that works
+      // Test with a simple phrase using the correct format (no sample_rate with mp3)
       const response = await this.client.speak.request(
         { text: 'Test' },
         {
           model: 'aura-2-thalia-en',
           encoding: 'mp3'
+          // Note: sample_rate is not included with mp3 encoding
         }
       );
 
       // Try to get the stream - if this works, the API key is valid
       const stream = await response.getStream();
-      return !!stream;
+      if (!stream) {
+        return false;
+      }
+      
+      // Try to read a small amount to verify the stream works
+      try {
+        const reader = stream.getReader();
+        const { done, value } = await reader.read();
+        return true; // If we can read from the stream, it's working
+      } catch (streamError) {
+        logger.warn('Deepgram TTS stream test failed', {
+          error: getErrorMessage(streamError)
+        });
+        return false;
+      }
     } catch (error) {
       logger.warn('Deepgram TTS availability check failed', {
         error: getErrorMessage(error)
       });
       return false;
     }
+  }
+
+  /**
+   * Helper function to convert stream to audio buffer
+   * Based on Deepgram SDK documentation
+   */
+  private async getAudioBuffer(response: any): Promise<Buffer> {
+    const reader = response.getReader();
+    const chunks: Uint8Array[] = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+
+    const dataArray = chunks.reduce(
+      (acc, chunk) => Uint8Array.from([...acc, ...chunk]),
+      new Uint8Array(0)
+    );
+
+    return Buffer.from(dataArray.buffer);
   }
 
   /**

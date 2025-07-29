@@ -346,11 +346,28 @@ export const handleLowLatencyVoiceStream = async (ws: WebSocket, req: Request): 
       return;
     }
     
-    if (!config || !config.elevenLabsConfig.isEnabled) {
-      logger.error('ElevenLabs not configured for streaming');
+    // Check if TTS is properly configured based on selected provider
+    const selectedTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
+    const isTTSConfigured = selectedTTSProvider === 'elevenlabs' 
+      ? config?.elevenLabsConfig?.isEnabled 
+      : config?.ttsConfig?.deepgramTTS?.isEnabled || false;
+    
+    if (!config || !isTTSConfigured) {
+      logger.error(`TTS provider ${selectedTTSProvider} not configured for streaming`);
       ws.close(1008, 'Voice synthesis not configured');
       return;
     }
+    
+    // Both ElevenLabs and Deepgram support streaming
+    if (selectedTTSProvider !== 'elevenlabs' && selectedTTSProvider !== 'deepgram') {
+      logger.error(`Streaming not yet supported for TTS provider: ${selectedTTSProvider}`);
+      ws.close(1008, 'Streaming not supported for selected TTS provider');
+      return;
+    }
+
+    logger.info(`Using ${selectedTTSProvider} for streaming TTS`, {
+      provider: selectedTTSProvider
+    });
     
     if (!session) {
       logger.error(`Failed to create or retrieve session for conversation ${conversationId}`);

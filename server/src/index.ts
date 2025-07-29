@@ -610,8 +610,24 @@ const initializeServices = async () => {
       path.join(__dirname, '../uploads/audio')
     );
 
-    // Initialize Enhanced Voice AI Service
-    const enhancedVoiceAI = new EnhancedVoiceAIService(elevenLabsApiKey);
+    // Get the selected TTS provider from configuration
+    const selectedTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
+    logger.info(`Initializing services for selected TTS provider: ${selectedTTSProvider}`);
+
+    // Initialize Enhanced Voice AI Service only if ElevenLabs is the selected TTS provider
+    let enhancedVoiceAI;
+    if (selectedTTSProvider === 'elevenlabs' && elevenLabsApiKey) {
+      enhancedVoiceAI = new EnhancedVoiceAIService(elevenLabsApiKey);
+      logger.info('ElevenLabs Enhanced Voice AI Service initialized');
+    } else {
+      // Create a minimal service instance for compatibility
+      enhancedVoiceAI = new EnhancedVoiceAIService('');
+      if (selectedTTSProvider !== 'elevenlabs') {
+        logger.info(`Skipping ElevenLabs service initialization - selected TTS provider is ${selectedTTSProvider}`);
+      } else {
+        logger.warn('ElevenLabs selected as TTS provider but no API key available');
+      }
+    }
 
     // Initialize Deepgram TTS service as fallback
     if (deepgramApiKey) {

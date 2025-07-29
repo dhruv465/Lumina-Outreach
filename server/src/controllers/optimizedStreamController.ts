@@ -427,40 +427,76 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
       return;
     }
 
-    if (!config || !config.elevenLabsConfig.isEnabled) {
-      logger.error('ElevenLabs not configured for streaming');
+    // Check if TTS is properly configured based on selected provider
+    const selectedTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
+    const isTTSConfigured = selectedTTSProvider === 'elevenlabs' 
+      ? config?.elevenLabsConfig?.isEnabled 
+      : config?.ttsConfig?.deepgramTTS?.isEnabled || false;
+    
+    if (!config || !isTTSConfigured) {
+      logger.error(`TTS provider ${selectedTTSProvider} not configured for streaming`);
       ws.close(1008, 'Voice synthesis not configured');
       return;
     }
-
-    // Get ElevenLabs SDK service (singleton)
-    sdkService = getSDKService();
-    if (!sdkService) {
-      // Initialize the SDK service if not already
-      const openAIProvider = config.llmConfig.providers.find(p => p.name === 'openai');
-      if (!openAIProvider || !openAIProvider.isEnabled) {
-        logger.error('OpenAI LLM not configured for streaming');
-        ws.close(1008, 'LLM not configured');
-        return;
-      }
-
-      // Initialize the SDK service
-      sdkService = require('../services/elevenlabsSDKService').initializeSDKService(
-        config.elevenLabsConfig.apiKey,
-        openAIProvider.apiKey
-      );
-
-      if (!sdkService) {
-        logger.error('Failed to initialize ElevenLabs SDK service');
-        ws.close(1008, 'Voice synthesis failed to initialize');
-        return;
-      }
+    
+    // Both ElevenLabs and Deepgram support streaming
+    if (selectedTTSProvider !== 'elevenlabs' && selectedTTSProvider !== 'deepgram') {
+      logger.error(`Streaming not yet supported for TTS provider: ${selectedTTSProvider}`);
+      ws.close(1008, 'Streaming not supported for selected TTS provider');
+      return;
     }
 
-    // Initialize Enhanced Voice AI service as well (for compatibility)
-    voiceAI = new EnhancedVoiceAIService(
-      config.elevenLabsConfig.apiKey
-    );
+    logger.info(`Using ${selectedTTSProvider} for streaming TTS`, {
+      callId,
+      conversationId,
+      provider: selectedTTSProvider
+    });
+
+    // Initialize TTS service based on selected provider
+    if (selectedTTSProvider === 'elevenlabs') {
+      // Get ElevenLabs SDK service (singleton)
+      sdkService = getSDKService();
+      if (!sdkService) {
+        // Initialize the SDK service if not already
+        const openAIProvider = config.llmConfig.providers.find(p => p.name === 'openai');
+        if (!openAIProvider || !openAIProvider.isEnabled) {
+          logger.error('OpenAI LLM not configured for ElevenLabs streaming');
+          ws.close(1008, 'LLM not configured');
+          return;
+        }
+
+        // Initialize the SDK service
+        sdkService = require('../services/elevenlabsSDKService').initializeSDKService(
+          config.elevenLabsConfig.apiKey,
+          openAIProvider.apiKey
+        );
+
+        if (!sdkService) {
+          logger.error('Failed to initialize ElevenLabs SDK service');
+          ws.close(1008, 'Voice synthesis failed to initialize');
+          return;
+        }
+      }
+    } else if (selectedTTSProvider === 'deepgram') {
+      // Initialize Deepgram streaming TTS service
+      const deepgramApiKey = config.ttsConfig?.deepgramTTS?.apiKey;
+      if (!deepgramApiKey) {
+        logger.error('Deepgram TTS API key not configured for streaming');
+        ws.close(1008, 'Deepgram TTS not configured');
+        return;
+      }
+
+      logger.info('Deepgram streaming TTS will be initialized per connection', {
+        hasApiKey: !!deepgramApiKey
+      });
+    }
+
+    // Initialize Enhanced Voice AI service for ElevenLabs (for compatibility)
+    if (selectedTTSProvider === 'elevenlabs') {
+      voiceAI = new EnhancedVoiceAIService(
+        config.elevenLabsConfig.apiKey
+      );
+    }
 
     // Create conversation session if it doesn't exist
     if (!session) {

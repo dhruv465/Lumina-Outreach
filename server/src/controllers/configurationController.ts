@@ -37,20 +37,35 @@ const updateServicesWithNewConfig = async (configuration: any): Promise<void> =>
   try {
     const { initializeSpeechService } = require('../services/realSpeechService');
     
+    // Get the selected TTS provider
+    const selectedTTSProvider = configuration.ttsConfig?.provider || 'elevenlabs';
+    logger.info(`Updating services for selected TTS provider: ${selectedTTSProvider}`);
+    
     // Get API keys from configuration
     let elevenLabsKey = '';
     let openAIKey = '';
     let anthropicKey = '';
     
-    // Update ElevenLabs API key
-    if (configuration.elevenLabsConfig?.apiKey) {
+    // Only initialize ElevenLabs services if it's the selected TTS provider
+    if (selectedTTSProvider === 'elevenlabs' && configuration.elevenLabsConfig?.apiKey) {
       elevenLabsKey = configuration.elevenLabsConfig.apiKey;
       // Reinitialize speech service with new key
       initializeSpeechService(
         elevenLabsKey, 
         require('path').join(__dirname, '../../uploads/audio')
       );
-      logger.info('Speech service updated with new API key');
+      logger.info('ElevenLabs speech service updated with new API key');
+    } else if (selectedTTSProvider !== 'elevenlabs') {
+      logger.info(`Skipping ElevenLabs service initialization - selected TTS provider is ${selectedTTSProvider}`);
+    }
+    
+    // Initialize TTS Provider Service with the selected provider
+    try {
+      const { initializeTTSProviderService } = await import('../services/ttsProviderService');
+      await initializeTTSProviderService();
+      logger.info(`TTS Provider Service initialized for provider: ${selectedTTSProvider}`);
+    } catch (error) {
+      logger.warn(`Failed to initialize TTS Provider Service: ${getErrorMessage(error)}`);
     }
     
     // Get LLM provider keys
@@ -66,18 +81,20 @@ const updateServicesWithNewConfig = async (configuration: any): Promise<void> =>
       }
     }
     
-    // Update global services via constructor if available, or try to update API keys
+    // Update global services - only pass ElevenLabs key if it's the selected provider
+    const effectiveElevenLabsKey = selectedTTSProvider === 'elevenlabs' ? elevenLabsKey : '';
+    
     if (global.conversationEngine && typeof global.conversationEngine.updateApiKeys === 'function') {
-      global.conversationEngine.updateApiKeys(elevenLabsKey, openAIKey, anthropicKey);
+      global.conversationEngine.updateApiKeys(effectiveElevenLabsKey, openAIKey, anthropicKey);
       logger.info('Conversation engine updated with new API keys');
     }
     
     if (global.campaignService && typeof global.campaignService.updateApiKeys === 'function') {
-      global.campaignService.updateApiKeys(elevenLabsKey, openAIKey, anthropicKey);
+      global.campaignService.updateApiKeys(effectiveElevenLabsKey, openAIKey, anthropicKey);
       logger.info('Campaign service updated with new API keys');
     }
     
-    logger.info('All services updated with new configuration');
+    logger.info(`All services updated with new configuration for TTS provider: ${selectedTTSProvider}`);
   } catch (error) {
     logger.error(`Error updating services with new config: ${getErrorMessage(error)}`);
   }
@@ -898,6 +915,81 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
       });
     }
 
+    // Update TTS config if provided
+    if (updatedConfig.ttsConfig) {
+      logger.info('Updating TTS configuration...');
+      
+      // Initialize ttsConfig if it doesn't exist
+      if (!config.ttsConfig) {
+        config.ttsConfig = {
+          provider: 'elevenlabs',
+          primaryProvider: 'elevenlabs',
+          fallbackProviders: ['deepgram'],
+          autoFallback: true,
+          deepgramTTS: {
+            apiKey: '',
+            isEnabled: false,
+            defaultModel: 'aura-2-thalia-en',
+            voiceSettings: {
+              encoding: 'mp3',
+              sampleRate: 24000
+            },
+            status: 'unverified'
+          }
+        };
+      }
+      
+      // Update TTS provider settings
+      config.ttsConfig = {
+        ...existingConfig.ttsConfig,
+        provider: handleFieldUpdate(updatedConfig.ttsConfig.provider, existingConfig.ttsConfig?.provider || 'elevenlabs'),
+        primaryProvider: handleFieldUpdate(updatedConfig.ttsConfig.primaryProvider, existingConfig.ttsConfig?.primaryProvider || updatedConfig.ttsConfig.provider || 'elevenlabs'),
+        fallbackProviders: handleFieldUpdate(updatedConfig.ttsConfig.fallbackProviders, existingConfig.ttsConfig?.fallbackProviders || ['deepgram']),
+        autoFallback: handleFieldUpdate(updatedConfig.ttsConfig.autoFallback, existingConfig.ttsConfig?.autoFallback !== undefined ? existingConfig.ttsConfig.autoFallback : true)
+      };
+      
+      // Update Deepgram TTS specific settings if provided
+      if (updatedConfig.ttsConfig.deepgramTTS) {
+        if (!config.ttsConfig.deepgramTTS) {
+          config.ttsConfig.deepgramTTS = {
+            apiKey: '',
+            isEnabled: false,
+            defaultModel: 'aura-2-thalia-en',
+            voiceSettings: {
+              encoding: 'mp3',
+              sampleRate: 24000
+            },
+            status: 'unverified'
+          };
+        }
+        
+        config.ttsConfig.deepgramTTS = {
+          ...existingConfig.ttsConfig?.deepgramTTS,
+          apiKey: updateApiKeyIfChanged(updatedConfig.ttsConfig.deepgramTTS.apiKey, existingConfig.ttsConfig?.deepgramTTS?.apiKey || ''),
+          isEnabled: handleFieldUpdate(updatedConfig.ttsConfig.deepgramTTS.isEnabled, existingConfig.ttsConfig?.deepgramTTS?.isEnabled || false),
+          defaultModel: handleFieldUpdate(updatedConfig.ttsConfig.deepgramTTS.defaultModel, existingConfig.ttsConfig?.deepgramTTS?.defaultModel || 'aura-2-thalia-en'),
+          voiceSettings: handleFieldUpdate(updatedConfig.ttsConfig.deepgramTTS.voiceSettings, existingConfig.ttsConfig?.deepgramTTS?.voiceSettings || { encoding: 'mp3', sampleRate: 24000 }),
+          status: handleFieldUpdate(updatedConfig.ttsConfig.deepgramTTS.status, existingConfig.ttsConfig?.deepgramTTS?.status || 'unverified')
+        };
+      }
+      
+      // Mark ttsConfig as modified
+      config.markModified('ttsConfig');
+      
+      logger.info('TTS configuration updated:', {
+        provider: config.ttsConfig.provider,
+        primaryProvider: config.ttsConfig.primaryProvider,
+        fallbackProviders: config.ttsConfig.fallbackProviders,
+        autoFallback: config.ttsConfig.autoFallback,
+        deepgramTTS: {
+          isEnabled: config.ttsConfig.deepgramTTS?.isEnabled || false,
+          hasApiKey: !!(config.ttsConfig.deepgramTTS?.apiKey),
+          defaultModel: config.ttsConfig.deepgramTTS?.defaultModel,
+          status: config.ttsConfig.deepgramTTS?.status
+        }
+      });
+    }
+
     // Save configuration changes
     try {
       // Process API keys - log what will be saved to the database
@@ -939,6 +1031,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
       config.markModified('elevenLabsConfig');
       config.markModified('twilioConfig');
       config.markModified('voiceAIConfig');
+      config.markModified('ttsConfig');
       
       // Also mark each provider individually to ensure status changes are detected
       if (config.llmConfig && config.llmConfig.providers) {

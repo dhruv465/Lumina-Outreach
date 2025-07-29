@@ -50,19 +50,19 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                               // Check for ANY enabled LLM provider, not just OpenAI
                               const enabledProvider = config.llmConfig.providers.find(p => p.isEnabled && p.apiKey);
                               if (enabledProvider) {
-                                    const voiceAI = new EnhancedVoiceAIService(
-                                          config.elevenLabsConfig.apiKey
-                                    );
-
+                                    // Use the TTS service factory to get the appropriate service
+                                    const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
+                                    
                                     const defaultVoiceId = config.voiceAIConfig?.conversationalAI?.defaultVoiceId ||
-                                          'XvRdSQXvmv5jHPGBw0XU'; // Default voice ID
+                                          (config.ttsConfig?.provider === 'deepgram' ? 'aura-2-thalia-en' : 'XvRdSQXvmv5jHPGBw0XU');
 
-                                    // Process audio safely using the processAudioForTwiML helper
-                                    const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
-                                          text: errorMessage,
-                                          personalityId: defaultVoiceId,
-                                          language: 'en'
-                                    });
+                                    // Process audio safely using the TTS service factory
+                                    const speechResponse = await synthesizeSpeechWithProvider(
+                                          config,
+                                          errorMessage,
+                                          defaultVoiceId,
+                                          'en'
+                                    );
 
                                     if (speechResponse.audioContent) {
                                           // Process audio safely using helper function
@@ -168,19 +168,19 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                               // Check for ANY enabled LLM provider, not just OpenAI
                               const enabledProvider = configuration.llmConfig.providers.find(p => p.isEnabled && p.apiKey);
                               if (enabledProvider) {
-                                    const voiceAI = new EnhancedVoiceAIService(
-                                          configuration.elevenLabsConfig.apiKey
-                                    );
-
+                                    // Use the TTS service factory to get the appropriate service
+                                    const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
+                                    
                                     const defaultVoiceId = configuration.voiceAIConfig?.conversationalAI?.defaultVoiceId ||
-                                          'XvRdSQXvmv5jHPGBw0XU'; // Default voice ID
+                                          (configuration.ttsConfig?.provider === 'deepgram' ? 'aura-2-thalia-en' : 'XvRdSQXvmv5jHPGBw0XU');
 
-                                    // Process audio safely using the processAudioForTwiML helper
-                                    const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
-                                          text: errorMessage,
-                                          personalityId: defaultVoiceId,
-                                          language: 'en'
-                                    });
+                                    // Process audio safely using the TTS service factory
+                                    const speechResponse = await synthesizeSpeechWithProvider(
+                                          configuration,
+                                          errorMessage,
+                                          defaultVoiceId,
+                                          'en'
+                                    );
 
                                     if (speechResponse.audioContent) {
                                           // Process audio safely using helper function
@@ -233,11 +233,17 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                         // Check for ANY enabled LLM provider, not just OpenAI
                         const enabledProvider = configuration.llmConfig.providers.find(p => p.isEnabled && p.apiKey);
                         if (enabledProvider) {
-                              logger.info(`🔧 ElevenLabs configuration status: ${configuration.elevenLabsConfig.status || 'unknown'}, API key length: ${configuration.elevenLabsConfig.apiKey.length}, using LLM provider: ${enabledProvider.name}`);
+                              const selectedTTSProvider = configuration.ttsConfig?.provider || 'elevenlabs';
+                              logger.info(`🔧 TTS configuration status: provider=${selectedTTSProvider}, using LLM provider: ${enabledProvider.name}`);
 
-                              const voiceAI = new EnhancedVoiceAIService(
-                                    configuration.elevenLabsConfig.apiKey
-                              );
+                              // Use the TTS service factory to get the appropriate service
+                              const { getTTSService, isTTSProviderConfigured } = await import('../utils/ttsServiceFactory');
+                              
+                              if (!isTTSProviderConfigured(configuration)) {
+                                    logger.warn(`Selected TTS provider ${selectedTTSProvider} is not properly configured`);
+                                    twiml.say({ voice: 'alice', language: 'en-US' }, initialGreeting);
+                                    return res.type('text/xml').send(twiml.toString());
+                              }
 
                               // Debug campaign voice configuration for initial greeting
                               logger.info(`🔍 Initial Greeting Voice Config Debug for call ${callId}:`, {
@@ -247,7 +253,7 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                                     requestedVoiceId: campaign.voiceConfiguration?.voiceId,
                                     voiceProvider: campaign.voiceConfiguration?.provider,
                                     primaryLanguage: campaign.primaryLanguage,
-                                    elevenLabsApiKey: `${configuration.elevenLabsConfig.apiKey.substring(0, 5)}...${configuration.elevenLabsConfig.apiKey.substring(configuration.elevenLabsConfig.apiKey.length - 5)}`,
+                                    ttsProvider: selectedTTSProvider,
                                     providerName: enabledProvider.name,
                                     hasApiKey: !!enabledProvider.apiKey
                               });
@@ -257,8 +263,16 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                               const requestedVoiceId = campaign.voiceConfiguration?.voiceId || preferredVoiceId;
                               logger.info(`🎤 Resolving initial greeting voice ID for call ${callId}: "${requestedVoiceId}"`);
 
-                              const voiceId = await EnhancedVoiceAIService.getValidVoiceId(requestedVoiceId);
-                              logger.info(`🎯 Final greeting voice ID selected for call ${callId}: "${voiceId}"`);
+                              // Get appropriate voice ID based on TTS provider
+                              let voiceId;
+                              if (selectedTTSProvider === 'elevenlabs') {
+                                    voiceId = await EnhancedVoiceAIService.getValidVoiceId(requestedVoiceId);
+                              } else if (selectedTTSProvider === 'deepgram') {
+                                    voiceId = requestedVoiceId || 'aura-2-thalia-en';
+                              } else {
+                                    voiceId = requestedVoiceId || 'default';
+                              }
+                              logger.info(`🎯 Final greeting voice ID selected for call ${callId}: "${voiceId}" (provider: ${selectedTTSProvider})`);
 
                               // Get greeting text from campaign - prioritize openingMessage over initialPrompt
                               logger.info(`Campaign data debug: initialPrompt="${campaign.initialPrompt || ''}", openingMessage="${campaign.openingMessage || ''}", campaignId=${campaign._id}`);
@@ -270,21 +284,22 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
 
                               logger.info(`🗣️ Synthesizing greeting: "${formattedGreeting.substring(0, 50)}${formattedGreeting.length > 50 ? '...' : ''}"`);
 
-                              // Try direct voice synthesis first (more reliable)
+                              // Try TTS synthesis using the configured provider
                               try {
-                                    // This uses a more reliable synthesis method with file output
-                                    const speechFilePath = await voiceAI.synthesizeVoice({
-                                          text: formattedGreeting,
-                                          personalityId: voiceId,
-                                          language: campaign.primaryLanguage === 'hi' ? 'Hindi' : 'English'
-                                    });
+                                    // Use the TTS service factory for synthesis
+                                    const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
+                                    const speechResponse = await synthesizeSpeechWithProvider(
+                                          configuration,
+                                          formattedGreeting,
+                                          voiceId,
+                                          campaign.primaryLanguage === 'hi' ? 'hi' : 'en'
+                                    );
 
-                                    // Check if the file exists and is not empty
-                                    if (fs.existsSync(speechFilePath) && fs.statSync(speechFilePath).size > 0) {
+                                    // Check if synthesis was successful
+                                    if (speechResponse.audioContent && speechResponse.method === 'tts') {
                                           // Process audio safely using helper function
-                                          const audioBuffer = fs.readFileSync(speechFilePath);
                                           const audioResult = await processAudioForTwiML(
-                                                audioBuffer,
+                                                speechResponse.audioContent,
                                                 formattedGreeting,
                                                 campaign.primaryLanguage
                                           );
@@ -648,12 +663,13 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                         intent: aiResponse.intent
                   });
 
-                  // Get configuration for ElevenLabs
+                  // Get configuration for TTS
                   const config = await Configuration.findOne();
-                  let useElevenLabs = false;
+                  let useTTS = false;
 
-                  // Try to use ElevenLabs if configured
-                  if (config?.elevenLabsConfig?.isEnabled && config?.elevenLabsConfig?.apiKey) {
+                  // Try to use configured TTS provider
+                  const { isTTSProviderConfigured } = await import('../utils/ttsServiceFactory');
+                  if (config && isTTSProviderConfigured(config)) {
                         // Get the call to retrieve voice settings
                         const call = await Call.findById(callId);
                         if (call) {
@@ -662,11 +678,8 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                                     const defaultProviderName = config.llmConfig.defaultProvider;
                                     const configuredProvider = config.llmConfig.providers.find(p => p.name === defaultProviderName);
                                     if (configuredProvider?.isEnabled && configuredProvider?.apiKey) {
-                                          logger.info(`Using LLM provider '${configuredProvider.name}' for ElevenLabs in gather webhook.`);
-                                          // Initialize ElevenLabs service
-                                          const voiceAI = new EnhancedVoiceAIService(
-                                                config.elevenLabsConfig.apiKey
-                                          );
+                                          const selectedTTSProvider = config.ttsConfig?.provider || 'elevenlabs';
+                                          logger.info(`Using LLM provider '${configuredProvider.name}' with TTS provider '${selectedTTSProvider}' in gather webhook.`);
 
                                           // Get voice configuration with detailed debugging
                                           const campaign = await Campaign.findById(call.campaignId);
@@ -678,22 +691,31 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                                                 voiceProvider: campaign?.voiceConfiguration?.provider
                                           });
 
-                                          const requestedVoiceId = campaign?.voiceConfiguration?.voiceId || 'default';
+                                          const requestedVoiceId = campaign?.voiceConfiguration?.voiceId || 
+                                                (selectedTTSProvider === 'deepgram' ? 'aura-2-thalia-en' : 'default');
                                           logger.info(`🎤 Resolving voice ID for call ${callId}: "${requestedVoiceId}"`);
 
-                                          const voiceId = await EnhancedVoiceAIService.getValidVoiceId(requestedVoiceId);
+                                          // Get appropriate voice ID based on TTS provider
+                                          let voiceId;
+                                          if (selectedTTSProvider === 'elevenlabs') {
+                                                voiceId = await EnhancedVoiceAIService.getValidVoiceId(requestedVoiceId);
+                                          } else {
+                                                voiceId = requestedVoiceId;
+                                          }
 
-                                          logger.info(`🎯 Final voice ID selected for call ${callId}: "${voiceId}"`);
+                                          logger.info(`🎯 Final voice ID selected for call ${callId}: "${voiceId}" (provider: ${selectedTTSProvider})`);
 
-                                          // Synthesize speech using ElevenLabs
-                                          const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
-                                                text: aiResponse.text,
-                                                personalityId: voiceId,
-                                                language: campaign?.primaryLanguage === 'hi' ? 'hi' : 'en'
-                                          });
+                                          // Synthesize speech using the configured TTS provider
+                                          const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
+                                          const speechResponse = await synthesizeSpeechWithProvider(
+                                                config,
+                                                aiResponse.text,
+                                                voiceId,
+                                                campaign?.primaryLanguage === 'hi' ? 'hi' : 'en'
+                                          );
 
-                                          // Use ElevenLabs synthesized audio in the response
-                                          if (speechResponse.audioContent) {
+                                          // Use TTS synthesized audio in the response
+                                          if (speechResponse.audioContent && speechResponse.method === 'tts') {
                                                 // Process audio safely using helper function
                                                 const audioResult = await processAudioForTwiML(
                                                       speechResponse.audioContent,
@@ -710,22 +732,22 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                                                 } else {
                                                       // Use Cloudinary URL or small base64 data
                                                       twiml.play(prepareUrlForTwilioPlay(audioResult.url));
-                                                      useElevenLabs = true;
+                                                      useTTS = true;
                                                 }
                                           }
                                     } else {
-                                          logger.warn(`Configured LLM provider '${defaultProviderName || 'Unknown'}' not enabled or missing API key. ElevenLabs synthesis for AI response might be skipped or use fallback.`);
-                                          // useElevenLabs will remain false, leading to fallback.
+                                          logger.warn(`Configured LLM provider '${defaultProviderName || 'Unknown'}' not enabled or missing API key. TTS synthesis for AI response might be skipped or use fallback.`);
+                                          // useTTS will remain false, leading to fallback.
                                     }
                               } catch (error) {
-                                    logger.error(`Error using ElevenLabs in gather webhook: ${error}`);
-                                    useElevenLabs = false;
+                                    logger.error(`Error using TTS in gather webhook: ${error}`);
+                                    useTTS = false;
                               }
                         }
                   }
 
-                  // Fallback if ElevenLabs is not available or fails
-                  if (!useElevenLabs) {
+                  // Fallback if TTS is not available or fails
+                  if (!useTTS) {
                         logger.info(`Using TTS fallback for call ${callId} response`);
                         // Use TTS instead of empty audio
                         twiml.say({

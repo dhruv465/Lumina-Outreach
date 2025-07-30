@@ -17,7 +17,6 @@ import Configuration from '@/pages/Configuration';
 import KnowledgeManagement from '@/pages/KnowledgeManagement';
 import DocumentDetail from '@/pages/DocumentDetail';
 import MonitoringDashboard from '@/pages/MonitoringDashboard';
-import WebCallTesting from '@/pages/WebCallTesting';
 // import CallSimulator from '@/pages/DeepgramTest';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
@@ -70,7 +69,6 @@ function App() {
           <Route path="configuration" element={<Configuration />} />
           <Route path="knowledge" element={<KnowledgeManagement />} />
           <Route path="knowledge/document/:id" element={<DocumentDetail />} />
-          <Route path="web-call-testing" element={<WebCallTesting />} />
         </Route>
 
         {/* 404 route */}

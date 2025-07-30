@@ -1,4 +1,4 @@
-// Fix for handleWebCallEvent event handler scope issues
+// Global type definitions
 declare global {
   namespace NodeJS {
     interface Global {

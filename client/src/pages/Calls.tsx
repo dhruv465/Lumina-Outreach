@@ -11,7 +11,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import WebCallAnalysis from '@/components/WebCallAnalysis';
 import {
   Phone,
   PhoneCall,
@@ -717,7 +716,9 @@ const Calls = () => {
         </TabsContent>
         
         <TabsContent value="analysis">
-          <WebCallAnalysis />
+          <div className="text-center py-8 text-muted-foreground">
+            Call analysis features coming soon
+          </div>
         </TabsContent>
       </Tabs>
     </div>

@@ -56,12 +56,17 @@ export class EnhancedVoiceAIService {
 
     this.elevenLabsApiKey = elevenLabsApiKey;
 
-    // Initialize services
-    console.log('Initializing conversational service...');
-    this.initializeConversationalService();
+    // Only initialize ElevenLabs services if API key is provided
+    if (elevenLabsApiKey && elevenLabsApiKey.trim() !== '') {
+      console.log('Initializing conversational service...');
+      this.initializeConversationalService();
 
-    console.log('Initializing SDK service...');
-    this.initializeSDKService();
+      console.log('Initializing SDK service...');
+      this.initializeSDKService();
+    } else {
+      console.log('ElevenLabs API key not provided, skipping ElevenLabs service initialization');
+      logger.warn('ElevenLabs API key not provided, voice synthesis will use fallback providers only');
+    }
 
     // Initialize LLM service asynchronously - it will fetch from the database
     console.log('Starting LLM service initialization...');
@@ -78,6 +83,11 @@ export class EnhancedVoiceAIService {
    */
   private initializeConversationalService(): void {
     try {
+      if (!this.elevenLabsApiKey || this.elevenLabsApiKey.trim() === '') {
+        logger.warn('ElevenLabs API key is missing, conversational service will not be initialized');
+        return;
+      }
+
       // Initialize without OpenAI dependency - LLM service will handle AI responses
       this.conversationalService = initializeConversationalService(
         this.elevenLabsApiKey,
@@ -100,8 +110,9 @@ export class EnhancedVoiceAIService {
         apiKeyLength: this.elevenLabsApiKey?.length || 0
       });
 
-      if (!this.elevenLabsApiKey) {
-        throw new Error('ElevenLabs API key is missing');
+      if (!this.elevenLabsApiKey || this.elevenLabsApiKey.trim() === '') {
+        logger.warn('ElevenLabs API key is missing, SDK service will not be initialized');
+        return;
       }
 
       // Initialize without OpenAI dependency - LLM service will handle AI responses

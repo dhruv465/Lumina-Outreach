@@ -24,11 +24,7 @@ const apiLimiter = new RateLimiterMemory({
   blockDuration: 60 * 2     // Block for 2 minutes if exceeded
 });
 
-const webCallLimiter = new RateLimiterMemory({
-  points: 10,               // Number of points
-  duration: 60,             // Per 60 seconds
-  blockDuration: 60 * 5     // Block for 5 minutes if exceeded
-});
+// Web call limiter removed
 
 const authLimiter = new RateLimiterMemory({
   points: 5,                // Number of points
@@ -98,10 +94,7 @@ const createRateLimitMiddleware = (
  */
 export const apiRateLimit = createRateLimitMiddleware(apiLimiter);
 
-/**
- * Web call rate limiting middleware (stricter limits)
- */
-export const webCallRateLimit = createRateLimitMiddleware(webCallLimiter);
+// Web call rate limiting removed
 
 /**
  * Authentication rate limiting middleware (very strict limits)
@@ -118,19 +111,16 @@ export const customRateLimit = (points: number) => createRateLimitMiddleware(api
 /**
  * Reset rate limit for a client
  * @param clientId Client identifier
- * @param limiterType Limiter type ('api', 'webCall', 'auth')
+ * @param limiterType Limiter type ('api', 'auth')
  */
 export const resetRateLimit = async (
   clientId: string,
-  limiterType: 'api' | 'webCall' | 'auth' = 'api'
+  limiterType: 'api' | 'auth' = 'api'
 ): Promise<boolean> => {
   try {
     let limiter: RateLimiterMemory;
     
     switch (limiterType) {
-      case 'webCall':
-        limiter = webCallLimiter;
-        break;
       case 'auth':
         limiter = authLimiter;
         break;

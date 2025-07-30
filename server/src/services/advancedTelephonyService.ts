@@ -734,41 +734,7 @@ export class AdvancedTelephonyService {
     return statusMap[twilioStatus] || 'failed';
   }
 
-  /**
-   * Finalize a call and update metrics
-   */
-  private async finalizeCall(callId: string, status: string): Promise<void> {
-    const conversation = this.activeConversations.get(callId);
-    if (!conversation) return;
-
-    try {
-      const duration = Date.now() - conversation.startTime;
-      
-      // Update call metrics
-      await this.updateCallMetrics(callId, {
-        duration,
-        outcome: this.mapStatusToOutcome(status),
-        conversationMetrics: conversation.metrics?.conversationMetrics || {
-          customerEngagement: 0,
-          emotionalTone: [],
-          objectionCount: 0,
-          interruptionCount: 0,
-          conversionIndicators: []
-        },
-        qualityScore: 0.5
-      });
-
-      // Log call completion
-      logger.info(`Call ${callId} finalized with status ${status}, duration: ${duration}ms`);
-      
-      // Clean up
-      this.activeConversations.delete(callId);
-      this.callQueue.delete(callId);
-      
-    } catch (error) {
-      logger.error(`Error finalizing call ${callId}:`, error);
-    }
-  }
+  // Duplicate function removed - using enhanced version below
 
   /**
    * Update call metrics in database

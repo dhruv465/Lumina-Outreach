@@ -3,7 +3,6 @@ import { Button } from '@/components/ui/button';
 import { RefreshCw, Download, Settings } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ModelMetricsMonitoring from '../components/monitoring/ModelMetricsMonitoring';
-import WebCallMonitoring from '../components/monitoring/WebCallMonitoring';
 
 const MonitoringDashboard = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -64,15 +63,10 @@ const MonitoringDashboard = () => {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="mb-4">
           <TabsTrigger value="models">Model Metrics</TabsTrigger>
-          <TabsTrigger value="webcalls">Web Call Testing</TabsTrigger>
         </TabsList>
         
         <TabsContent value="models">
           <ModelMetricsMonitoring />
-        </TabsContent>
-        
-        <TabsContent value="webcalls">
-          <WebCallMonitoring />
         </TabsContent>
       </Tabs>
     </div>

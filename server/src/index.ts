@@ -32,8 +32,6 @@ import telephonyRoutes from './routes/telephonyRoutes';
 import transcriptionRoutes from './routes/transcriptionRoutes';
 import userRoutes from './routes/userRoutes';
 import voiceAIRoutes from './routes/voiceAIRoutes';
-import webCallMetricsRoutes from './routes/webCallMetricsRoutes';
-import webCallRoutes from './routes/webCallRoutes';
 
 // Optimized stream controller
 import { optimizedStreamRoute } from './controllers/optimizedStreamController';
@@ -41,8 +39,7 @@ import { optimizedStreamRoute } from './controllers/optimizedStreamController';
 // Twilio Media Streams WebSocket handler
 import { initializeTwilioWebSocketServer } from './services/twilioWebSocketServer';
 
-// Web Call WebSocket handlers
-import { setupWebCallSocketHandlers } from './routes/webCallSocketRoutes';
+// WebSocket handlers removed
 
 // Services initialization
 import { getAIOrchestrationService } from './services/aiOrchestrationService';
@@ -156,8 +153,7 @@ const io = new SocketIOServer(server, {
   transports: ['websocket', 'polling'],  // Prefer WebSocket, fallback to polling
 });
 
-// Set up WebSocket handlers for web call testing
-setupWebCallSocketHandlers(io);
+// WebSocket handlers setup removed
 
 // Initialize Deepgram WebSocket server (after Twilio WebSocket server)
 setupDeepgramWebSocketServer(server);
@@ -391,8 +387,6 @@ app.use('/api/metrics', metricsRoutes); // Advanced monitoring and metrics endpo
 app.use('/api/deepgram', deepgramTestRoutes); // Deepgram testing routes
 app.use('/api/deepgram-tts', deepgramTTSRoutes); // Deepgram TTS routes
 app.use('/api/tts-provider', ttsProviderRoutes); // TTS Provider management routes
-app.use('/api/webcall', webCallRoutes); // Web call testing routes
-app.use('/api/webcall', webCallMetricsRoutes); // Web call metrics routes
 
 // Debug routes only in development
 if (process.env.NODE_ENV !== 'production') {

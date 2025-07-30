@@ -72,7 +72,7 @@ export const handleWebCallEvent = (socket: Socket): void => {
   // Session tracking
   let currentSessionId: string | null = null;
   
-  // Set up ping interval to keep connection alive
+  // Set up ping interval to keep connection alive (inspired by Deepgram Voice Agent keep-alive)
   const pingInterval = setInterval(() => {
     if (socket.connected) {
       socket.emit('webcall:ping', { timestamp: Date.now() });
@@ -81,7 +81,7 @@ export const handleWebCallEvent = (socket: Socket): void => {
       logger.warn(`Socket ${socket.id} disconnected, clearing ping interval`);
       clearInterval(pingInterval);
     }
-  }, 15000); // Send a ping every 15 seconds (reduced interval for better reliability)
+  }, 15000); // Send a ping every 15 seconds (matching Deepgram Voice Agent pattern)
   
   // Listen for pong responses
   socket.on('webcall:pong', (data: { timestamp: number }) => {
@@ -132,10 +132,78 @@ export const handleWebCallEvent = (socket: Socket): void => {
         message: 'Web call session ready'
       });
       
+      // Set up session event listeners (inspired by Deepgram Voice Agent event handling)
+      webCallService.on('session:keepAlive', (data) => {
+        if (data.sessionId === currentSessionId) {
+          socket.emit('webcall:keepAlive', data);
+        }
+      });
+
+      webCallService.on('session:healthChanged', (data) => {
+        if (data.sessionId === currentSessionId) {
+          socket.emit('webcall:healthChanged', data);
+        }
+      });
+
+      webCallService.on('session:recoveryAttempt', (data) => {
+        if (data.sessionId === currentSessionId) {
+          socket.emit('webcall:recoveryAttempt', data);
+        }
+      });
+
+      webCallService.on('audio:chunkReceived', (data) => {
+        if (data.sessionId === currentSessionId) {
+          socket.emit('webcall:audioChunkReceived', data);
+        }
+      });
+
+      webCallService.on('speech:userStarted', (data) => {
+        if (data.sessionId === currentSessionId) {
+          socket.emit('webcall:userStartedSpeaking', data);
+        }
+      });
+
+      webCallService.on('speech:agentStarted', (data) => {
+        if (data.sessionId === currentSessionId) {
+          socket.emit('webcall:agentStartedSpeaking', data);
+        }
+      });
+
+      webCallService.on('audio:agentDone', (data) => {
+        if (data.sessionId === currentSessionId) {
+          socket.emit('webcall:agentAudioDone', data);
+        }
+      });
+
       logger.info(`WebCall initialized for session: ${currentSessionId}`);
     } catch (error) {
       logger.error('Error in webcall:initialize', error);
       socket.emit('webcall:error', { message: 'Failed to initialize web call' });
+    }
+  });
+
+  // Handle chunked audio data (inspired by Deepgram Voice Agent streaming)
+  socket.on('webcall:audioChunk', async (data: { chunk: string, isLast?: boolean }) => {
+    try {
+      if (!currentSessionId) {
+        socket.emit('webcall:error', { message: 'No active session' });
+        return;
+      }
+
+      const audioChunk = Buffer.from(data.chunk, 'base64');
+      await webCallService.processAudioChunk(currentSessionId, audioChunk);
+
+      // If this is the last chunk, trigger processing
+      if (data.isLast) {
+        socket.emit('webcall:state', { 
+          status: 'processing',
+          message: 'Processing complete audio input'
+        });
+      }
+
+    } catch (error) {
+      logger.error(`Error in webcall:audioChunk for session: ${currentSessionId}`, error);
+      socket.emit('webcall:error', { message: 'Failed to process audio chunk' });
     }
   });
 

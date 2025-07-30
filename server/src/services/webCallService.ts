@@ -71,10 +71,20 @@ export interface WebCallSession {
     currentSpeaker: 'agent' | 'user' | null;
     speakingStartTime?: Date;
     inactivityTimer?: NodeJS.Timeout;
+    keepAliveTimer?: NodeJS.Timeout;
+    connectionHealthTimer?: NodeJS.Timeout;
+    audioChunkBuffer: Buffer[];
+    lastKeepAlive?: Date;
+    connectionRetries: number;
+    isConnectionHealthy: boolean;
   };
   config: {
     inactivityTimeout: number;
     maxSessionDuration: number;
+    keepAliveInterval: number;
+    connectionHealthCheckInterval: number;
+    maxConnectionRetries: number;
+    audioChunkSize: number;
     voiceSettings?: {
       voiceId: string;
       stability: number;
@@ -105,6 +115,10 @@ export class WebCallService extends EventEmitter {
   private readonly DEFAULT_INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes
   private readonly DEFAULT_MAX_SESSION_DURATION = 30 * 60 * 1000; // 30 minutes
   private readonly SESSION_CLEANUP_INTERVAL = 15 * 60 * 1000; // 15 minutes
+  private readonly DEFAULT_KEEP_ALIVE_INTERVAL = 15000; // 15 seconds (like Deepgram Voice Agent)
+  private readonly DEFAULT_CONNECTION_HEALTH_CHECK = 30000; // 30 seconds
+  private readonly DEFAULT_MAX_CONNECTION_RETRIES = 3;
+  private readonly DEFAULT_AUDIO_CHUNK_SIZE = 8192; // 8KB chunks
 
   constructor() {
     super();
@@ -147,11 +161,18 @@ export class WebCallService extends EventEmitter {
       },
       resources: {
         audioBuffers: new Map(),
-        currentSpeaker: null
+        currentSpeaker: null,
+        audioChunkBuffer: [],
+        connectionRetries: 0,
+        isConnectionHealthy: true
       },
       config: {
         inactivityTimeout: this.DEFAULT_INACTIVITY_TIMEOUT,
-        maxSessionDuration: this.DEFAULT_MAX_SESSION_DURATION
+        maxSessionDuration: this.DEFAULT_MAX_SESSION_DURATION,
+        keepAliveInterval: this.DEFAULT_KEEP_ALIVE_INTERVAL,
+        connectionHealthCheckInterval: this.DEFAULT_CONNECTION_HEALTH_CHECK,
+        maxConnectionRetries: this.DEFAULT_MAX_CONNECTION_RETRIES,
+        audioChunkSize: this.DEFAULT_AUDIO_CHUNK_SIZE
       }
     };
 
@@ -177,6 +198,12 @@ export class WebCallService extends EventEmitter {
 
     // Set up max duration timer
     this.setupMaxDurationTimer(sessionId);
+
+    // Set up keep-alive mechanism (inspired by Deepgram Voice Agent)
+    this.setupKeepAlive(sessionId);
+
+    // Set up connection health monitoring
+    this.setupConnectionHealthCheck(sessionId);
 
     // Update session state to connecting
     this.updateSessionState(sessionId, 'connecting');
@@ -827,8 +854,15 @@ export class WebCallService extends EventEmitter {
       session.resources.inactivityTimer = undefined;
     }
 
+    // Clear keep-alive timer
+    this.clearKeepAlive(sessionId);
+
+    // Clear connection health check timer
+    this.clearConnectionHealthCheck(sessionId);
+
     // Clear audio buffers to free memory
     session.resources.audioBuffers.clear();
+    session.resources.audioChunkBuffer = [];
 
     logger.info(`Cleaned up resources for session ${sessionId}`);
   }
@@ -950,6 +984,330 @@ export class WebCallService extends EventEmitter {
     session.config.voiceSettings = voiceSettings;
 
     logger.info(`Updated voice settings for session ${sessionId}`);
+  }
+
+  /**
+   * Set up keep-alive mechanism (inspired by Deepgram Voice Agent)
+   * Sends periodic keep-alive signals to maintain connection health
+   * @param sessionId The session ID
+   */
+  private setupKeepAlive(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      return;
+    }
+
+    // Clear any existing keep-alive timer
+    if (session.resources.keepAliveTimer) {
+      clearInterval(session.resources.keepAliveTimer);
+    }
+
+    // Set up keep-alive interval
+    session.resources.keepAliveTimer = setInterval(() => {
+      this.sendKeepAlive(sessionId);
+    }, session.config.keepAliveInterval);
+
+    logger.debug(`Keep-alive setup for session ${sessionId} with ${session.config.keepAliveInterval}ms interval`);
+  }
+
+  /**
+   * Send keep-alive signal for a session
+   * @param sessionId The session ID
+   */
+  private sendKeepAlive(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      return;
+    }
+
+    // Only send keep-alive for active sessions
+    if (session.status === 'ended' || session.status === 'error') {
+      this.clearKeepAlive(sessionId);
+      return;
+    }
+
+    const now = new Date();
+    session.resources.lastKeepAlive = now;
+
+    // Emit keep-alive event
+    this.emit('session:keepAlive', {
+      sessionId,
+      timestamp: now,
+      status: session.status,
+      isHealthy: session.resources.isConnectionHealthy
+    });
+
+    logger.debug(`Keep-alive sent for session ${sessionId}`);
+  }
+
+  /**
+   * Clear keep-alive timer for a session
+   * @param sessionId The session ID
+   */
+  private clearKeepAlive(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+
+    if (session?.resources.keepAliveTimer) {
+      clearInterval(session.resources.keepAliveTimer);
+      session.resources.keepAliveTimer = undefined;
+      logger.debug(`Keep-alive cleared for session ${sessionId}`);
+    }
+  }
+
+  /**
+   * Set up connection health monitoring
+   * @param sessionId The session ID
+   */
+  private setupConnectionHealthCheck(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      return;
+    }
+
+    // Clear any existing health check timer
+    if (session.resources.connectionHealthTimer) {
+      clearInterval(session.resources.connectionHealthTimer);
+    }
+
+    // Set up health check interval
+    session.resources.connectionHealthTimer = setInterval(() => {
+      this.checkConnectionHealth(sessionId);
+    }, session.config.connectionHealthCheckInterval);
+
+    logger.debug(`Connection health check setup for session ${sessionId}`);
+  }
+
+  /**
+   * Check connection health for a session
+   * @param sessionId The session ID
+   */
+  private async checkConnectionHealth(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      return;
+    }
+
+    // Skip health check for ended sessions
+    if (session.status === 'ended' || session.status === 'error') {
+      this.clearConnectionHealthCheck(sessionId);
+      return;
+    }
+
+    const now = new Date();
+    const lastKeepAlive = session.resources.lastKeepAlive;
+    const healthCheckThreshold = session.config.keepAliveInterval * 3; // 3x keep-alive interval
+
+    // Check if we've missed keep-alive signals
+    const isHealthy = !lastKeepAlive || (now.getTime() - lastKeepAlive.getTime()) < healthCheckThreshold;
+
+    if (session.resources.isConnectionHealthy !== isHealthy) {
+      session.resources.isConnectionHealthy = isHealthy;
+
+      if (!isHealthy) {
+        logger.warn(`Connection health degraded for session ${sessionId}`);
+        
+        // Attempt connection recovery
+        await this.attemptConnectionRecovery(sessionId);
+      } else {
+        logger.info(`Connection health restored for session ${sessionId}`);
+        session.resources.connectionRetries = 0; // Reset retry count
+      }
+
+      // Emit health status change
+      this.emit('session:healthChanged', {
+        sessionId,
+        isHealthy,
+        timestamp: now,
+        lastKeepAlive
+      });
+    }
+  }
+
+  /**
+   * Attempt to recover connection for a session
+   * @param sessionId The session ID
+   */
+  private async attemptConnectionRecovery(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      return;
+    }
+
+    session.resources.connectionRetries++;
+
+    if (session.resources.connectionRetries > session.config.maxConnectionRetries) {
+      logger.error(`Max connection retries exceeded for session ${sessionId}, marking as error`);
+      
+      await this.handleSessionError(
+        sessionId,
+        new Error('Connection recovery failed after maximum retries'),
+        false,
+        'ConnectionRecovery'
+      );
+      return;
+    }
+
+    logger.info(`Attempting connection recovery for session ${sessionId} (attempt ${session.resources.connectionRetries})`);
+
+    // Emit recovery attempt event
+    this.emit('session:recoveryAttempt', {
+      sessionId,
+      attempt: session.resources.connectionRetries,
+      maxAttempts: session.config.maxConnectionRetries,
+      timestamp: new Date()
+    });
+
+    // Reset keep-alive to try to restore connection
+    this.setupKeepAlive(sessionId);
+  }
+
+  /**
+   * Clear connection health check timer
+   * @param sessionId The session ID
+   */
+  private clearConnectionHealthCheck(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+
+    if (session?.resources.connectionHealthTimer) {
+      clearInterval(session.resources.connectionHealthTimer);
+      session.resources.connectionHealthTimer = undefined;
+      logger.debug(`Connection health check cleared for session ${sessionId}`);
+    }
+  }
+
+  /**
+   * Process audio chunks with buffering (inspired by Deepgram Voice Agent streaming)
+   * @param sessionId The session ID
+   * @param audioChunk Audio chunk as Buffer
+   */
+  async processAudioChunk(sessionId: string, audioChunk: Buffer): Promise<void> {
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    // Update last activity time
+    session.lastActivityTime = new Date();
+
+    // Add chunk to buffer
+    session.resources.audioChunkBuffer.push(audioChunk);
+
+    // Check if we have enough data to process
+    const totalBufferSize = session.resources.audioChunkBuffer.reduce(
+      (total, chunk) => total + chunk.length, 
+      0
+    );
+
+    if (totalBufferSize >= session.config.audioChunkSize) {
+      // Combine chunks and process
+      const combinedBuffer = Buffer.concat(session.resources.audioChunkBuffer);
+      session.resources.audioChunkBuffer = []; // Clear buffer
+
+      // Process the combined audio buffer
+      await this.processUserAudio(sessionId, combinedBuffer);
+    }
+
+    // Reset inactivity timer
+    this.resetInactivityTimer(sessionId);
+
+    // Emit audio chunk received event
+    this.emit('audio:chunkReceived', {
+      sessionId,
+      chunkSize: audioChunk.length,
+      totalBufferSize,
+      timestamp: new Date()
+    });
+  }
+
+  /**
+   * Handle agent audio streaming completion (like Deepgram Voice Agent)
+   * @param sessionId The session ID
+   * @param audioBuffer Complete audio response
+   */
+  async handleAgentAudioDone(sessionId: string, audioBuffer: Buffer): Promise<void> {
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    // Update session state to listening
+    await this.updateSessionState(sessionId, 'listening');
+
+    // Emit agent audio done event
+    this.emit('audio:agentDone', {
+      sessionId,
+      audioSize: audioBuffer.length,
+      timestamp: new Date()
+    });
+
+    logger.debug(`Agent audio streaming completed for session ${sessionId}`);
+  }
+
+  /**
+   * Handle user started speaking event (like Deepgram Voice Agent)
+   * @param sessionId The session ID
+   */
+  async handleUserStartedSpeaking(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    // If agent was speaking, this is an interruption
+    if (session.resources.currentSpeaker === 'agent') {
+      session.metrics.interruptions++;
+      webCallMetricsService.recordInterruption(sessionId, 'user');
+      
+      logger.info(`User interrupted agent in session ${sessionId}`);
+    }
+
+    // Update speaker state
+    session.resources.currentSpeaker = 'user';
+    session.resources.speakingStartTime = new Date();
+
+    // Emit user started speaking event
+    this.emit('speech:userStarted', {
+      sessionId,
+      timestamp: new Date(),
+      wasInterruption: session.metrics.interruptions > 0
+    });
+  }
+
+  /**
+   * Handle agent started speaking event (like Deepgram Voice Agent)
+   * @param sessionId The session ID
+   * @param responseLatency Total response latency
+   */
+  async handleAgentStartedSpeaking(sessionId: string, responseLatency: number): Promise<void> {
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    // Update speaker state
+    session.resources.currentSpeaker = 'agent';
+    session.resources.speakingStartTime = new Date();
+
+    // Update session state
+    await this.updateSessionState(sessionId, 'speaking', { responseLatency });
+
+    // Emit agent started speaking event
+    this.emit('speech:agentStarted', {
+      sessionId,
+      responseLatency,
+      timestamp: new Date()
+    });
+
+    logger.debug(`Agent started speaking in session ${sessionId} with ${responseLatency}ms latency`);
   }
 }
 

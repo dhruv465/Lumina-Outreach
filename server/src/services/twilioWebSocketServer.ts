@@ -12,6 +12,13 @@ import { Request } from "express";
 export class TwilioWebSocketServer {
   private wss: WebSocket.Server;
   private activeConnections: Map<string, WebSocket> = new Map();
+  // Voice Agent patterns
+  private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
+  private connectionHealthTimers: Map<string, NodeJS.Timeout> = new Map();
+  private audioChunkBuffers: Map<string, Buffer[]> = new Map();
+  private readonly KEEP_ALIVE_INTERVAL = 15000; // 15 seconds (like Deepgram Voice Agent)
+  private readonly CONNECTION_HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
+  private readonly AUDIO_CHUNK_SIZE = 8192; // 8KB chunks
 
   constructor(server: http.Server) {
     logger.info("Initializing TwilioWebSocketServer with HTTP server");
@@ -123,10 +130,15 @@ export class TwilioWebSocketServer {
             streamSid: message.start?.streamSid
           });
         } else if (message.event === 'media') {
-          // Handle incoming audio data
+          // Handle incoming audio data with chunking (inspired by Deepgram Voice Agent)
+          const audioPayload = message.media?.payload;
+          if (audioPayload) {
+            this.handleAudioChunk(callId, conversationId, audioPayload, message.media?.timestamp);
+          }
+          
           logger.debug('Received audio data from Twilio', {
             callId,
-            payloadSize: message.media?.payload?.length || 0,
+            payloadSize: audioPayload?.length || 0,
             timestamp: message.media?.timestamp
           });
         } else if (message.event === 'stop') {
@@ -262,6 +274,13 @@ export class TwilioWebSocketServer {
         // Store the new connection
         this.activeConnections.set(connectionKey, ws);
 
+        // Initialize audio chunk buffer for this connection
+        this.audioChunkBuffers.set(connectionKey, []);
+
+        // Set up keep-alive and connection health monitoring (inspired by Deepgram Voice Agent)
+        this.setupConnectionKeepAlive(connectionKey, ws);
+        this.setupConnectionHealthCheck(connectionKey, ws);
+
         // Log successful connection establishment
         logger.info(
           "Establishing WebSocket connection for Twilio Media Stream",
@@ -304,8 +323,13 @@ export class TwilioWebSocketServer {
           if (pingInterval) {
             clearInterval(pingInterval);
           }
-          // Remove from active connections
+          // Clean up voice agent timers and buffers
           const connectionKey = `${callId}:${conversationId}`;
+          this.clearConnectionKeepAlive(connectionKey);
+          this.clearConnectionHealthCheck(connectionKey);
+          this.audioChunkBuffers.delete(connectionKey);
+          
+          // Remove from active connections
           this.activeConnections.delete(connectionKey);
           logger.info(`WebSocket connection closed for call ${callId}`, {
             code,
@@ -431,6 +455,273 @@ export class TwilioWebSocketServer {
 
   public getActiveConnections(): string[] {
     return Array.from(this.activeConnections.keys());
+  }
+
+  /**
+   * Set up keep-alive mechanism for a connection (inspired by Deepgram Voice Agent)
+   * @param connectionKey Connection key
+   * @param ws WebSocket connection
+   */
+  private setupConnectionKeepAlive(connectionKey: string, ws: WebSocket): void {
+    // Clear any existing timer
+    this.clearConnectionKeepAlive(connectionKey);
+
+    // Set up keep-alive timer
+    const timer = setInterval(() => {
+      this.sendConnectionKeepAlive(connectionKey, ws);
+    }, this.KEEP_ALIVE_INTERVAL);
+
+    this.keepAliveTimers.set(connectionKey, timer);
+    logger.debug(`Keep-alive setup for connection ${connectionKey}`);
+  }
+
+  /**
+   * Send keep-alive signal for a connection
+   * @param connectionKey Connection key
+   * @param ws WebSocket connection
+   */
+  private sendConnectionKeepAlive(connectionKey: string, ws: WebSocket): void {
+    if (ws.readyState !== WebSocket.OPEN) {
+      this.clearConnectionKeepAlive(connectionKey);
+      return;
+    }
+
+    // Send keep-alive message (Twilio-compatible format)
+    const keepAliveMessage = {
+      event: 'keepAlive',
+      timestamp: Date.now(),
+      connectionKey
+    };
+
+    try {
+      ws.send(JSON.stringify(keepAliveMessage));
+      logger.debug(`Keep-alive sent for connection ${connectionKey}`);
+    } catch (error) {
+      logger.error(`Failed to send keep-alive for connection ${connectionKey}:`, error);
+      this.clearConnectionKeepAlive(connectionKey);
+    }
+  }
+
+  /**
+   * Clear keep-alive timer for a connection
+   * @param connectionKey Connection key
+   */
+  private clearConnectionKeepAlive(connectionKey: string): void {
+    const timer = this.keepAliveTimers.get(connectionKey);
+    if (timer) {
+      clearInterval(timer);
+      this.keepAliveTimers.delete(connectionKey);
+      logger.debug(`Keep-alive cleared for connection ${connectionKey}`);
+    }
+  }
+
+  /**
+   * Set up connection health monitoring
+   * @param connectionKey Connection key
+   * @param ws WebSocket connection
+   */
+  private setupConnectionHealthCheck(connectionKey: string, ws: WebSocket): void {
+    // Clear any existing timer
+    this.clearConnectionHealthCheck(connectionKey);
+
+    // Set up health check timer
+    const timer = setInterval(() => {
+      this.checkConnectionHealth(connectionKey, ws);
+    }, this.CONNECTION_HEALTH_CHECK_INTERVAL);
+
+    this.connectionHealthTimers.set(connectionKey, timer);
+    logger.debug(`Connection health check setup for connection ${connectionKey}`);
+  }
+
+  /**
+   * Check connection health
+   * @param connectionKey Connection key
+   * @param ws WebSocket connection
+   */
+  private checkConnectionHealth(connectionKey: string, ws: WebSocket): void {
+    if (ws.readyState !== WebSocket.OPEN) {
+      logger.warn(`Connection ${connectionKey} is not open, cleaning up`);
+      this.clearConnectionHealthCheck(connectionKey);
+      this.clearConnectionKeepAlive(connectionKey);
+      this.activeConnections.delete(connectionKey);
+      this.audioChunkBuffers.delete(connectionKey);
+      return;
+    }
+
+    // Send health check ping
+    try {
+      ws.ping();
+      logger.debug(`Health check ping sent for connection ${connectionKey}`);
+    } catch (error) {
+      logger.error(`Health check failed for connection ${connectionKey}:`, error);
+      this.clearConnectionHealthCheck(connectionKey);
+      this.clearConnectionKeepAlive(connectionKey);
+    }
+  }
+
+  /**
+   * Clear connection health check timer
+   * @param connectionKey Connection key
+   */
+  private clearConnectionHealthCheck(connectionKey: string): void {
+    const timer = this.connectionHealthTimers.get(connectionKey);
+    if (timer) {
+      clearInterval(timer);
+      this.connectionHealthTimers.delete(connectionKey);
+      logger.debug(`Connection health check cleared for connection ${connectionKey}`);
+    }
+  }
+
+  /**
+   * Handle audio chunk processing (inspired by Deepgram Voice Agent streaming)
+   * @param callId Call ID
+   * @param conversationId Conversation ID
+   * @param audioPayload Base64 encoded audio payload
+   * @param timestamp Audio timestamp
+   */
+  private handleAudioChunk(callId: string, conversationId: string, audioPayload: string, timestamp?: string): void {
+    const connectionKey = `${callId}:${conversationId}`;
+    
+    try {
+      // Decode audio payload
+      const audioBuffer = Buffer.from(audioPayload, 'base64');
+      
+      // Get or create chunk buffer for this connection
+      let chunkBuffer = this.audioChunkBuffers.get(connectionKey) || [];
+      chunkBuffer.push(audioBuffer);
+
+      // Check if we have enough data to process
+      const totalBufferSize = chunkBuffer.reduce((total, chunk) => total + chunk.length, 0);
+
+      if (totalBufferSize >= this.AUDIO_CHUNK_SIZE) {
+        // Combine chunks and process
+        const combinedBuffer = Buffer.concat(chunkBuffer);
+        chunkBuffer = []; // Clear buffer
+        this.audioChunkBuffers.set(connectionKey, chunkBuffer);
+
+        // Emit audio chunk event for processing
+        this.emitAudioEvent(callId, conversationId, 'audioChunkReceived', {
+          audioBuffer: combinedBuffer,
+          size: combinedBuffer.length,
+          timestamp: timestamp || Date.now().toString()
+        });
+
+        logger.debug(`Processed audio chunk for call ${callId}`, {
+          chunkSize: combinedBuffer.length,
+          timestamp
+        });
+      } else {
+        // Update buffer
+        this.audioChunkBuffers.set(connectionKey, chunkBuffer);
+      }
+
+    } catch (error) {
+      logger.error(`Error processing audio chunk for call ${callId}:`, error);
+    }
+  }
+
+  /**
+   * Emit audio events (like Deepgram Voice Agent)
+   * @param callId Call ID
+   * @param conversationId Conversation ID
+   * @param event Event type
+   * @param data Event data
+   */
+  private emitAudioEvent(callId: string, conversationId: string, event: string, data: any): void {
+    // You can integrate this with your telephony service
+    // For now, we'll just log the event
+    logger.debug(`Audio event for call ${callId}:`, {
+      event,
+      conversationId,
+      dataSize: data.audioBuffer?.length || 0,
+      timestamp: data.timestamp
+    });
+
+    // If you have access to the telephony service, you can emit events there
+    // this.telephonyService?.handleCallAudioEvent(callId, event, data);
+  }
+
+  /**
+   * Handle user started speaking event (like Deepgram Voice Agent)
+   * @param callId Call ID
+   * @param conversationId Conversation ID
+   */
+  public handleUserStartedSpeaking(callId: string, conversationId: string): void {
+    this.emitAudioEvent(callId, conversationId, 'userStartedSpeaking', {
+      timestamp: Date.now().toString()
+    });
+    
+    logger.debug(`User started speaking in call ${callId}`);
+  }
+
+  /**
+   * Handle agent started speaking event (like Deepgram Voice Agent)
+   * @param callId Call ID
+   * @param conversationId Conversation ID
+   * @param responseLatency Response latency in milliseconds
+   */
+  public handleAgentStartedSpeaking(callId: string, conversationId: string, responseLatency: number): void {
+    this.emitAudioEvent(callId, conversationId, 'agentStartedSpeaking', {
+      responseLatency,
+      timestamp: Date.now().toString()
+    });
+    
+    logger.debug(`Agent started speaking in call ${callId} with ${responseLatency}ms latency`);
+  }
+
+  /**
+   * Handle agent audio done event (like Deepgram Voice Agent)
+   * @param callId Call ID
+   * @param conversationId Conversation ID
+   */
+  public handleAgentAudioDone(callId: string, conversationId: string): void {
+    this.emitAudioEvent(callId, conversationId, 'agentAudioDone', {
+      timestamp: Date.now().toString()
+    });
+    
+    logger.debug(`Agent audio completed for call ${callId}`);
+  }
+
+  /**
+   * Send audio response to Twilio (like Deepgram Voice Agent audio streaming)
+   * @param callId Call ID
+   * @param conversationId Conversation ID
+   * @param audioBuffer Audio buffer to send
+   */
+  public sendAudioResponse(callId: string, conversationId: string, audioBuffer: Buffer): void {
+    const connectionKey = `${callId}:${conversationId}`;
+    const ws = this.activeConnections.get(connectionKey);
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      logger.warn(`Cannot send audio response - connection not available for call ${callId}`);
+      return;
+    }
+
+    try {
+      // Convert audio buffer to base64 for Twilio
+      const audioPayload = audioBuffer.toString('base64');
+      
+      // Create Twilio media message
+      const mediaMessage = {
+        event: 'media',
+        streamSid: `MZ${callId.substring(0, 32)}`,
+        media: {
+          track: 'outbound',
+          chunk: Date.now().toString(),
+          timestamp: Date.now().toString(),
+          payload: audioPayload
+        }
+      };
+
+      ws.send(JSON.stringify(mediaMessage));
+      logger.debug(`Audio response sent to call ${callId}`, {
+        audioSize: audioBuffer.length,
+        payloadSize: audioPayload.length
+      });
+
+    } catch (error) {
+      logger.error(`Error sending audio response to call ${callId}:`, error);
+    }
   }
 }
 

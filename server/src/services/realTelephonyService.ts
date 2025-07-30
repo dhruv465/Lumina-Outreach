@@ -14,6 +14,13 @@ export class RealTelephonyService implements TelephonyServiceInterface {
   private activeCalls: Map<string, CallData>;
   private webhookBaseUrl: string;
   private fallbackMode: boolean = false;
+  // Voice Agent patterns
+  private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
+  private connectionHealthTimers: Map<string, NodeJS.Timeout> = new Map();
+  private readonly KEEP_ALIVE_INTERVAL = 15000; // 15 seconds (like Deepgram Voice Agent)
+  private readonly CONNECTION_HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
+  private readonly MAX_CONNECTION_RETRIES = 3;
+  private connectionRetries: Map<string, number> = new Map();
 
   constructor(
     accountSid: string,
@@ -84,6 +91,10 @@ export class RealTelephonyService implements TelephonyServiceInterface {
         startTime: new Date().toISOString(),
         recordings: []
       });
+
+      // Set up keep-alive and connection health monitoring (inspired by Deepgram Voice Agent)
+      this.setupCallKeepAlive(call.sid);
+      this.setupConnectionHealthCheck(call.sid);
       
       logger.info(`Call initiated: ${call.sid} to ${to} from ${from}`);
       
@@ -108,6 +119,10 @@ export class RealTelephonyService implements TelephonyServiceInterface {
           recordings: [],
           isFallback: true
         });
+
+        // Set up keep-alive and health monitoring even for fallback calls
+        this.setupCallKeepAlive(simulatedCallId);
+        this.setupConnectionHealthCheck(simulatedCallId);
         
         // Simulate call progress events
         setTimeout(() => this.handleCallStatusChange(simulatedCallId, 'ringing'), 1000);
@@ -226,6 +241,11 @@ export class RealTelephonyService implements TelephonyServiceInterface {
     
     // Clean up completed calls after a delay
     if (status === 'completed' || status === 'failed') {
+      // Clear timers immediately
+      this.clearCallKeepAlive(callId);
+      this.clearConnectionHealthCheck(callId);
+      this.connectionRetries.delete(callId);
+
       setTimeout(() => {
         this.activeCalls.delete(callId);
         logger.info(`Call ${callId} removed from active calls`);
@@ -318,6 +338,252 @@ export class RealTelephonyService implements TelephonyServiceInterface {
     
     // Check health every 5 minutes
     setInterval(checkApiHealth, 300000);
+  }
+
+  /**
+   * Set up keep-alive mechanism for a call (inspired by Deepgram Voice Agent)
+   * @param callId Call ID
+   */
+  private setupCallKeepAlive(callId: string): void {
+    // Clear any existing timer
+    this.clearCallKeepAlive(callId);
+
+    // Set up keep-alive timer
+    const timer = setInterval(() => {
+      this.sendCallKeepAlive(callId);
+    }, this.KEEP_ALIVE_INTERVAL);
+
+    this.keepAliveTimers.set(callId, timer);
+    logger.debug(`Keep-alive setup for call ${callId}`);
+  }
+
+  /**
+   * Send keep-alive signal for a call
+   * @param callId Call ID
+   */
+  private sendCallKeepAlive(callId: string): void {
+    const callData = this.activeCalls.get(callId);
+    
+    if (!callData) {
+      this.clearCallKeepAlive(callId);
+      return;
+    }
+
+    // Only send keep-alive for active calls
+    if (callData.status === 'completed' || callData.status === 'failed') {
+      this.clearCallKeepAlive(callId);
+      return;
+    }
+
+    // Emit keep-alive event
+    this.events.emit('call-keep-alive', {
+      callId,
+      timestamp: new Date().toISOString(),
+      status: callData.status,
+      duration: callData.endTime ? 
+        new Date(callData.endTime).getTime() - new Date(callData.startTime).getTime() : 
+        Date.now() - new Date(callData.startTime).getTime()
+    });
+
+    logger.debug(`Keep-alive sent for call ${callId}`);
+  }
+
+  /**
+   * Clear keep-alive timer for a call
+   * @param callId Call ID
+   */
+  private clearCallKeepAlive(callId: string): void {
+    const timer = this.keepAliveTimers.get(callId);
+    if (timer) {
+      clearInterval(timer);
+      this.keepAliveTimers.delete(callId);
+      logger.debug(`Keep-alive cleared for call ${callId}`);
+    }
+  }
+
+  /**
+   * Set up connection health monitoring for a call
+   * @param callId Call ID
+   */
+  private setupConnectionHealthCheck(callId: string): void {
+    // Clear any existing timer
+    this.clearConnectionHealthCheck(callId);
+
+    // Set up health check timer
+    const timer = setInterval(() => {
+      this.checkCallConnectionHealth(callId);
+    }, this.CONNECTION_HEALTH_CHECK_INTERVAL);
+
+    this.connectionHealthTimers.set(callId, timer);
+    logger.debug(`Connection health check setup for call ${callId}`);
+  }
+
+  /**
+   * Check connection health for a call
+   * @param callId Call ID
+   */
+  private async checkCallConnectionHealth(callId: string): Promise<void> {
+    const callData = this.activeCalls.get(callId);
+    
+    if (!callData) {
+      this.clearConnectionHealthCheck(callId);
+      return;
+    }
+
+    // Skip health check for completed calls
+    if (callData.status === 'completed' || callData.status === 'failed') {
+      this.clearConnectionHealthCheck(callId);
+      return;
+    }
+
+    try {
+      // For real calls, check Twilio call status
+      if (!callData.isFallback && !this.fallbackMode) {
+        const twilioCall = await this.client.calls(callId).fetch();
+        
+        // Update local status if different
+        if (twilioCall.status !== callData.status) {
+          logger.info(`Call ${callId} status updated from health check: ${callData.status} -> ${twilioCall.status}`);
+          this.handleCallStatusChange(callId, twilioCall.status as TwilioCallStatus);
+        }
+      }
+
+      // Reset retry count on successful health check
+      this.connectionRetries.delete(callId);
+
+      // Emit health status
+      this.events.emit('call-health-check', {
+        callId,
+        isHealthy: true,
+        timestamp: new Date().toISOString(),
+        status: callData.status
+      });
+
+    } catch (error) {
+      logger.warn(`Connection health check failed for call ${callId}: ${getErrorMessage(error)}`);
+      
+      // Attempt connection recovery
+      await this.attemptCallConnectionRecovery(callId);
+    }
+  }
+
+  /**
+   * Attempt to recover call connection
+   * @param callId Call ID
+   */
+  private async attemptCallConnectionRecovery(callId: string): Promise<void> {
+    const retryCount = this.connectionRetries.get(callId) || 0;
+    this.connectionRetries.set(callId, retryCount + 1);
+
+    if (retryCount >= this.MAX_CONNECTION_RETRIES) {
+      logger.error(`Max connection retries exceeded for call ${callId}, marking as failed`);
+      
+      this.handleCallStatusChange(callId, 'failed');
+      this.clearCallKeepAlive(callId);
+      this.clearConnectionHealthCheck(callId);
+      this.connectionRetries.delete(callId);
+      
+      // Emit recovery failure event
+      this.events.emit('call-recovery-failed', {
+        callId,
+        attempts: retryCount,
+        timestamp: new Date().toISOString()
+      });
+      
+      return;
+    }
+
+    logger.info(`Attempting connection recovery for call ${callId} (attempt ${retryCount + 1})`);
+
+    // Emit recovery attempt event
+    this.events.emit('call-recovery-attempt', {
+      callId,
+      attempt: retryCount + 1,
+      maxAttempts: this.MAX_CONNECTION_RETRIES,
+      timestamp: new Date().toISOString()
+    });
+
+    // For fallback calls, just reset the health check
+    const callData = this.activeCalls.get(callId);
+    if (callData?.isFallback) {
+      // Simulate recovery for fallback calls
+      setTimeout(() => {
+        this.events.emit('call-health-check', {
+          callId,
+          isHealthy: true,
+          timestamp: new Date().toISOString(),
+          recovered: true
+        });
+      }, 1000);
+    }
+  }
+
+  /**
+   * Clear connection health check timer
+   * @param callId Call ID
+   */
+  private clearConnectionHealthCheck(callId: string): void {
+    const timer = this.connectionHealthTimers.get(callId);
+    if (timer) {
+      clearInterval(timer);
+      this.connectionHealthTimers.delete(callId);
+      logger.debug(`Connection health check cleared for call ${callId}`);
+    }
+  }
+
+  /**
+   * Handle call audio streaming events (inspired by Deepgram Voice Agent)
+   * @param callId Call ID
+   * @param event Event type
+   * @param data Event data
+   */
+  public handleCallAudioEvent(callId: string, event: string, data: any): void {
+    const callData = this.activeCalls.get(callId);
+    if (!callData) {
+      logger.warn(`Received audio event for unknown call: ${callId}`);
+      return;
+    }
+
+    switch (event) {
+      case 'userStartedSpeaking':
+        this.events.emit('call-user-started-speaking', {
+          callId,
+          timestamp: new Date().toISOString(),
+          ...data
+        });
+        logger.debug(`User started speaking in call ${callId}`);
+        break;
+
+      case 'agentStartedSpeaking':
+        this.events.emit('call-agent-started-speaking', {
+          callId,
+          timestamp: new Date().toISOString(),
+          ...data
+        });
+        logger.debug(`Agent started speaking in call ${callId}`);
+        break;
+
+      case 'agentAudioDone':
+        this.events.emit('call-agent-audio-done', {
+          callId,
+          timestamp: new Date().toISOString(),
+          ...data
+        });
+        logger.debug(`Agent audio completed for call ${callId}`);
+        break;
+
+      case 'audioChunkReceived':
+        // Don't log every chunk to avoid spam
+        this.events.emit('call-audio-chunk-received', {
+          callId,
+          timestamp: new Date().toISOString(),
+          ...data
+        });
+        break;
+
+      default:
+        logger.debug(`Unknown audio event for call ${callId}: ${event}`);
+    }
   }
   
   /**

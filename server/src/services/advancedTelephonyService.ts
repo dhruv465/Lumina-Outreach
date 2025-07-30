@@ -146,6 +146,13 @@ export class AdvancedTelephonyService {
   private configuration: any = null;
   private initialized: boolean = false;
   private initializationPromise: Promise<void> | null = null;
+  // Voice Agent patterns
+  private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
+  private connectionHealthTimers: Map<string, NodeJS.Timeout> = new Map();
+  private readonly KEEP_ALIVE_INTERVAL = 15000; // 15 seconds (like Deepgram Voice Agent)
+  private readonly CONNECTION_HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
+  private readonly MAX_CONNECTION_RETRIES = 3;
+  private connectionRetries: Map<string, number> = new Map();
   private dialingWindowsByTimezone: Record<string, {start: number, end: number}> = {
     'America/New_York': {start: 9, end: 20},
     'America/Chicago': {start: 9, end: 20},
@@ -519,8 +526,14 @@ export class AdvancedTelephonyService {
           },
           qualityScore: 0
         },
-        needsFinalSave: true
+        needsFinalSave: true,
+        isConnectionHealthy: true,
+        lastKeepAlive: Date.now()
       });
+
+      // Set up keep-alive and connection health monitoring (inspired by Deepgram Voice Agent)
+      this.setupConversationKeepAlive(callId);
+      this.setupConversationHealthCheck(callId);
       
       // Return TwiML response to handle the call
       const twiml = new twilio.twiml.VoiceResponse();
@@ -935,6 +948,244 @@ export class AdvancedTelephonyService {
   }
 
   private isShuttingDown = false;
+
+  /**
+   * Set up keep-alive mechanism for a conversation (inspired by Deepgram Voice Agent)
+   * @param callId Call ID
+   */
+  private setupConversationKeepAlive(callId: string): void {
+    // Clear any existing timer
+    this.clearConversationKeepAlive(callId);
+
+    // Set up keep-alive timer
+    const timer = setInterval(() => {
+      this.sendConversationKeepAlive(callId);
+    }, this.KEEP_ALIVE_INTERVAL);
+
+    this.keepAliveTimers.set(callId, timer);
+    logger.debug(`Keep-alive setup for conversation ${callId}`);
+  }
+
+  /**
+   * Send keep-alive signal for a conversation
+   * @param callId Call ID
+   */
+  private sendConversationKeepAlive(callId: string): void {
+    const conversation = this.activeConversations.get(callId);
+    
+    if (!conversation) {
+      this.clearConversationKeepAlive(callId);
+      return;
+    }
+
+    // Update last keep-alive time
+    conversation.lastKeepAlive = Date.now();
+    conversation.lastActivity = Date.now();
+
+    // Emit keep-alive event (you can integrate with your event system)
+    logger.debug(`Keep-alive sent for conversation ${callId}`, {
+      duration: Date.now() - conversation.startTime,
+      isHealthy: conversation.isConnectionHealthy
+    });
+  }
+
+  /**
+   * Clear keep-alive timer for a conversation
+   * @param callId Call ID
+   */
+  private clearConversationKeepAlive(callId: string): void {
+    const timer = this.keepAliveTimers.get(callId);
+    if (timer) {
+      clearInterval(timer);
+      this.keepAliveTimers.delete(callId);
+      logger.debug(`Keep-alive cleared for conversation ${callId}`);
+    }
+  }
+
+  /**
+   * Set up connection health monitoring for a conversation
+   * @param callId Call ID
+   */
+  private setupConversationHealthCheck(callId: string): void {
+    // Clear any existing timer
+    this.clearConversationHealthCheck(callId);
+
+    // Set up health check timer
+    const timer = setInterval(() => {
+      this.checkConversationHealth(callId);
+    }, this.CONNECTION_HEALTH_CHECK_INTERVAL);
+
+    this.connectionHealthTimers.set(callId, timer);
+    logger.debug(`Connection health check setup for conversation ${callId}`);
+  }
+
+  /**
+   * Check connection health for a conversation
+   * @param callId Call ID
+   */
+  private async checkConversationHealth(callId: string): Promise<void> {
+    const conversation = this.activeConversations.get(callId);
+    
+    if (!conversation) {
+      this.clearConversationHealthCheck(callId);
+      return;
+    }
+
+    const now = Date.now();
+    const lastKeepAlive = conversation.lastKeepAlive || conversation.startTime;
+    const healthCheckThreshold = this.KEEP_ALIVE_INTERVAL * 3; // 3x keep-alive interval
+
+    // Check if we've missed keep-alive signals
+    const isHealthy = (now - lastKeepAlive) < healthCheckThreshold;
+
+    if (conversation.isConnectionHealthy !== isHealthy) {
+      conversation.isConnectionHealthy = isHealthy;
+
+      if (!isHealthy) {
+        logger.warn(`Connection health degraded for conversation ${callId}`);
+        
+        // Attempt connection recovery
+        await this.attemptConversationRecovery(callId);
+      } else {
+        logger.info(`Connection health restored for conversation ${callId}`);
+        this.connectionRetries.delete(callId); // Reset retry count
+      }
+    }
+  }
+
+  /**
+   * Attempt to recover conversation connection
+   * @param callId Call ID
+   */
+  private async attemptConversationRecovery(callId: string): Promise<void> {
+    const retryCount = this.connectionRetries.get(callId) || 0;
+    this.connectionRetries.set(callId, retryCount + 1);
+
+    if (retryCount >= this.MAX_CONNECTION_RETRIES) {
+      logger.error(`Max connection retries exceeded for conversation ${callId}, ending call`);
+      
+      // End the call due to connection issues
+      try {
+        if (this.twilioClient) {
+          await this.twilioClient.calls(callId).update({ status: 'completed' });
+        }
+      } catch (error) {
+        logger.error(`Failed to end call ${callId} after connection recovery failure:`, error);
+      }
+      
+      this.finalizeCall(callId, 'failed');
+      return;
+    }
+
+    logger.info(`Attempting connection recovery for conversation ${callId} (attempt ${retryCount + 1})`);
+
+    // Reset keep-alive to try to restore connection
+    this.setupConversationKeepAlive(callId);
+  }
+
+  /**
+   * Clear connection health check timer
+   * @param callId Call ID
+   */
+  private clearConversationHealthCheck(callId: string): void {
+    const timer = this.connectionHealthTimers.get(callId);
+    if (timer) {
+      clearInterval(timer);
+      this.connectionHealthTimers.delete(callId);
+      logger.debug(`Connection health check cleared for conversation ${callId}`);
+    }
+  }
+
+  /**
+   * Handle conversation audio events (inspired by Deepgram Voice Agent)
+   * @param callId Call ID
+   * @param event Event type
+   * @param data Event data
+   */
+  public handleConversationAudioEvent(callId: string, event: string, data: any): void {
+    const conversation = this.activeConversations.get(callId);
+    if (!conversation) {
+      logger.warn(`Received audio event for unknown conversation: ${callId}`);
+      return;
+    }
+
+    // Update last activity time
+    conversation.lastActivity = Date.now();
+
+    switch (event) {
+      case 'userStartedSpeaking':
+        logger.debug(`User started speaking in conversation ${callId}`);
+        break;
+
+      case 'agentStartedSpeaking':
+        logger.debug(`Agent started speaking in conversation ${callId}`);
+        if (data.responseLatency) {
+          // Track response latency
+          if (!conversation.metrics.responseTimes) {
+            conversation.metrics.responseTimes = [];
+          }
+          conversation.metrics.responseTimes.push(data.responseLatency);
+        }
+        break;
+
+      case 'agentAudioDone':
+        logger.debug(`Agent audio completed for conversation ${callId}`);
+        break;
+
+      case 'audioChunkReceived':
+        // Update activity without logging every chunk
+        break;
+
+      default:
+        logger.debug(`Unknown audio event for conversation ${callId}: ${event}`);
+    }
+  }
+
+  /**
+   * Enhanced finalize call with voice agent cleanup
+   */
+  private async finalizeCall(callId: string, status: string): Promise<void> {
+    const conversation = this.activeConversations.get(callId);
+    if (!conversation) return;
+
+    try {
+      // Clear voice agent timers
+      this.clearConversationKeepAlive(callId);
+      this.clearConversationHealthCheck(callId);
+      this.connectionRetries.delete(callId);
+
+      const duration = Date.now() - conversation.startTime;
+      
+      // Update call metrics with voice agent data
+      const enhancedMetrics = {
+        ...conversation.metrics,
+        duration,
+        outcome: this.mapStatusToOutcome(status),
+        connectionHealth: {
+          wasHealthy: conversation.isConnectionHealthy,
+          lastKeepAlive: conversation.lastKeepAlive,
+          retryAttempts: this.connectionRetries.get(callId) || 0
+        }
+      };
+
+      await this.updateCallMetrics(callId, enhancedMetrics);
+
+      // Log call completion with voice agent metrics
+      logger.info(`Call ${callId} finalized with enhanced voice agent metrics`, {
+        status,
+        duration,
+        connectionHealth: enhancedMetrics.connectionHealth,
+        responseTimes: enhancedMetrics.responseTimes?.length || 0
+      });
+      
+      // Clean up
+      this.activeConversations.delete(callId);
+      this.callQueue.delete(callId);
+      
+    } catch (error) {
+      logger.error(`Error finalizing call ${callId}:`, error);
+    }
+  }
 }
 
 export const advancedTelephonyService = new AdvancedTelephonyService();

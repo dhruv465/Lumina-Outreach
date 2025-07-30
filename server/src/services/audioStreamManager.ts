@@ -1,4 +1,5 @@
 import { Transform, Readable, Writable } from 'stream';
+import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../utils/logger';
 
@@ -21,12 +22,13 @@ interface StreamManagerOptions {
  * AudioStreamManager handles efficient audio processing with backpressure support
  * It manages a collection of audio streams and their processing pipelines
  */
-export class AudioStreamManager {
+export class AudioStreamManager extends EventEmitter {
   private streams: Map<string, AudioStreamContext>;
   private readonly bufferSize: number;
   private readonly maxBufferCount: number;
 
   constructor(options: StreamManagerOptions = {}) {
+    super();
     this.streams = new Map();
     this.bufferSize = options.bufferSize || 4096;
     this.maxBufferCount = options.maxBufferCount || 3;
@@ -51,11 +53,15 @@ export class AudioStreamManager {
       objectMode: true,
       highWaterMark: this.maxBufferCount,
       transform: (chunk, encoding, callback) => {
-        // Process audio chunk (could add VAD, preprocessing, etc.)
-        setTimeout(() => {
-          // Simulate some processing (would be actual DSP in production)
-          callback(null, chunk);
-        }, 10);
+        // Process audio chunk with voice activity detection patterns
+        this.processAudioChunk(streamId, chunk)
+          .then((processedChunk) => {
+            callback(null, processedChunk);
+          })
+          .catch((error) => {
+            logger.error(`Error processing audio chunk for stream ${streamId}: ${error.message}`);
+            callback(error);
+          });
       }
     });
     
@@ -191,6 +197,93 @@ export class AudioStreamManager {
    */
   private getStream(streamId: string): AudioStreamContext | undefined {
     return this.streams.get(streamId);
+  }
+
+  /**
+   * Process audio chunk with voice activity detection (inspired by Deepgram Voice Agent)
+   * @param streamId Stream ID
+   * @param chunk Audio chunk
+   * @returns Processed chunk
+   */
+  private async processAudioChunk(streamId: string, chunk: Buffer): Promise<Buffer> {
+    const stream = this.getStream(streamId);
+    
+    if (!stream) {
+      throw new Error(`Stream ${streamId} not found`);
+    }
+
+    // Simple voice activity detection (in production, use more sophisticated VAD)
+    const audioLevel = this.calculateAudioLevel(chunk);
+    const isVoiceActive = audioLevel > 0.01; // Threshold for voice activity
+
+    // Emit voice activity events (like Deepgram Voice Agent)
+    if (isVoiceActive) {
+      this.emit('voiceActivityDetected', {
+        streamId,
+        clientId: stream.clientId,
+        audioLevel,
+        timestamp: new Date()
+      });
+    }
+
+    // Apply audio preprocessing if needed
+    const processedChunk = this.preprocessAudio(chunk, stream.config);
+
+    return processedChunk;
+  }
+
+  /**
+   * Calculate audio level for voice activity detection
+   * @param chunk Audio chunk
+   * @returns Audio level (0-1)
+   */
+  private calculateAudioLevel(chunk: Buffer): number {
+    if (chunk.length === 0) return 0;
+
+    let sum = 0;
+    // Assuming 16-bit PCM audio
+    for (let i = 0; i < chunk.length; i += 2) {
+      const sample = chunk.readInt16LE(i);
+      sum += Math.abs(sample);
+    }
+
+    const average = sum / (chunk.length / 2);
+    return Math.min(average / 32768, 1); // Normalize to 0-1
+  }
+
+  /**
+   * Preprocess audio chunk
+   * @param chunk Audio chunk
+   * @param config Stream configuration
+   * @returns Processed chunk
+   */
+  private preprocessAudio(chunk: Buffer, config: AudioStreamConfig): Buffer {
+    // In production, this could include:
+    // - Noise reduction
+    // - Automatic gain control
+    // - Echo cancellation
+    // - Format conversion
+    
+    // For now, just return the original chunk
+    return chunk;
+  }
+
+  /**
+   * Handle stream events (inspired by Deepgram Voice Agent event handling)
+   * @param streamId Stream ID
+   * @param event Event name
+   * @param data Event data
+   */
+  public emitStreamEvent(streamId: string, event: string, data: any): void {
+    const stream = this.getStream(streamId);
+    
+    if (stream) {
+      this.emit(`stream:${event}`, {
+        streamId,
+        clientId: stream.clientId,
+        ...data
+      });
+    }
   }
 }
 

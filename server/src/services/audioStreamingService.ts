@@ -15,6 +15,8 @@ export class AudioStreamingService {
   private streamManager: AudioStreamManager;
   private readonly bufferSize: number = 4096; // Default buffer size (can be optimized)
   private readonly maxBufferCount: number = 3; // Max number of buffers to queue
+  private readonly keepAliveInterval: number = 15000; // 15 seconds (like Deepgram Voice Agent)
+  private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(port: number = 3002) {
     this.app = express();
@@ -59,8 +61,12 @@ export class AudioStreamingService {
         streamId, 
         bufferSize: this.bufferSize,
         channels: 1,
-        sampleRate: 16000
+        sampleRate: 16000,
+        keepAliveInterval: this.keepAliveInterval
       });
+
+      // Set up keep-alive for this stream (inspired by Deepgram Voice Agent)
+      this.setupStreamKeepAlive(socket.id, streamId);
 
       // Handle incoming audio data
       socket.on('stream:audio', async (data) => {
@@ -96,12 +102,60 @@ export class AudioStreamingService {
         this.streamManager.configureStream(streamId, config);
       });
 
+      // Handle keep-alive response
+      socket.on('stream:keepAliveResponse', (data) => {
+        logger.debug(`Keep-alive response received from ${socket.id}: ${JSON.stringify(data)}`);
+      });
+
       // Handle disconnection
       socket.on('disconnect', () => {
         logger.info(`Audio streaming connection closed: ${socket.id}`);
+        this.clearStreamKeepAlive(socket.id);
         this.streamManager.destroyStream(streamId);
       });
     });
+  }
+
+  /**
+   * Set up keep-alive mechanism for a stream (inspired by Deepgram Voice Agent)
+   * @param socketId Socket ID
+   * @param streamId Stream ID
+   */
+  private setupStreamKeepAlive(socketId: string, streamId: string): void {
+    // Clear any existing timer
+    this.clearStreamKeepAlive(socketId);
+
+    // Set up new keep-alive timer
+    const timer = setInterval(() => {
+      const socket = this.io.sockets.sockets.get(socketId);
+      if (socket && socket.connected) {
+        socket.emit('stream:keepAlive', {
+          streamId,
+          timestamp: Date.now(),
+          message: 'Connection alive'
+        });
+        logger.debug(`Keep-alive sent to stream ${streamId}`);
+      } else {
+        // Socket disconnected, clear timer
+        this.clearStreamKeepAlive(socketId);
+      }
+    }, this.keepAliveInterval);
+
+    this.keepAliveTimers.set(socketId, timer);
+    logger.debug(`Keep-alive setup for stream ${streamId} (socket: ${socketId})`);
+  }
+
+  /**
+   * Clear keep-alive timer for a socket
+   * @param socketId Socket ID
+   */
+  private clearStreamKeepAlive(socketId: string): void {
+    const timer = this.keepAliveTimers.get(socketId);
+    if (timer) {
+      clearInterval(timer);
+      this.keepAliveTimers.delete(socketId);
+      logger.debug(`Keep-alive cleared for socket ${socketId}`);
+    }
   }
 }
 

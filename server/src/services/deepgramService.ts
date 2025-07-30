@@ -154,12 +154,85 @@ export class DeepgramService extends EventEmitter {
     // Set up periodic cache cleanup (every 30 minutes)
     setInterval(() => this.cleanupCache(), 30 * 60 * 1000);
     
+    // Set up connection health monitoring (inspired by Deepgram Voice Agent)
+    setInterval(() => this.monitorConnections(), 30 * 1000); // Every 30 seconds
+    
     // Initialize with optimal model configuration
     this.initializeOptimalModel().catch(error => {
       logger.warn(`Failed to initialize optimal model: ${getErrorMessage(error)}`);
     });
   }
   
+  /**
+   * Monitor active connections health (inspired by Deepgram Voice Agent)
+   */
+  private monitorConnections(): void {
+    const now = Date.now();
+    const staleConnectionThreshold = 5 * 60 * 1000; // 5 minutes
+    
+    for (const [connectionId, connectionData] of this.activeConnections.entries()) {
+      if (connectionData.createdAt) {
+        const connectionAge = now - connectionData.createdAt.getTime();
+        
+        // Check for stale connections
+        if (connectionAge > staleConnectionThreshold) {
+          logger.warn(`Stale connection detected: ${connectionId}, age: ${connectionAge}ms`);
+          
+          // Emit connection health event
+          this.emit(DeepgramEvent.CONNECTION_STATUS, {
+            connectionId,
+            callId: connectionData.callId,
+            status: 'stale',
+            age: connectionAge
+          });
+          
+          // Attempt to refresh connection if it's a real connection (not fallback)
+          if (!connectionData.isFallback && !connectionData.isEmergencyFallback) {
+            this.refreshConnection(connectionId);
+          }
+        }
+      }
+    }
+    
+    logger.debug(`Connection health check completed. Active connections: ${this.activeConnections.size}`);
+  }
+
+  /**
+   * Refresh a stale connection
+   * @param connectionId Connection ID to refresh
+   */
+  private refreshConnection(connectionId: string): void {
+    const connectionData = this.activeConnections.get(connectionId);
+    
+    if (!connectionData) {
+      return;
+    }
+    
+    logger.info(`Attempting to refresh connection: ${connectionId}`);
+    
+    try {
+      // Send a keep-alive message to test connection
+      if (connectionData.connection && typeof connectionData.connection.send === 'function') {
+        connectionData.connection.send(JSON.stringify({
+          type: 'KeepAlive',
+          timestamp: Date.now()
+        }));
+        
+        logger.debug(`Keep-alive sent to connection: ${connectionId}`);
+      }
+    } catch (error) {
+      logger.error(`Failed to refresh connection ${connectionId}: ${getErrorMessage(error)}`);
+      
+      // Mark connection as unhealthy
+      this.emit(DeepgramEvent.CONNECTION_STATUS, {
+        connectionId,
+        callId: connectionData.callId,
+        status: 'unhealthy',
+        error: getErrorMessage(error)
+      });
+    }
+  }
+
   /**
    * Cleanup the local transcription cache to prevent memory leaks
    */

@@ -930,6 +930,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
             apiKey: '',
             isEnabled: false,
             defaultModel: 'aura-2-thalia-en',
+            availableModels: ['aura-2-thalia-en', 'aura-2-luna-en', 'aura-2-stella-en'],
             voiceSettings: {
               encoding: 'mp3',
               sampleRate: 24000
@@ -955,6 +956,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
             apiKey: '',
             isEnabled: false,
             defaultModel: 'aura-2-thalia-en',
+            availableModels: ['aura-2-thalia-en', 'aura-2-luna-en', 'aura-2-stella-en'],
             voiceSettings: {
               encoding: 'mp3',
               sampleRate: 24000
@@ -1755,7 +1757,7 @@ export const testElevenLabsConnection = async (req: Request, res: Response) => {
 // @access  Private
 export const testVoiceSynthesis = async (req: Request, res: Response) => {
   try {
-    const { voiceId, text, apiKey } = req.body;
+    const { voiceId, text, apiKey, campaignId, useConfigSettings = true } = req.body;
     logger.info(`Voice synthesis test request received with voiceId: ${voiceId}`);
     
     if (!voiceId || !text) {
@@ -1785,16 +1787,41 @@ export const testVoiceSynthesis = async (req: Request, res: Response) => {
     logger.info(`Making ElevenLabs API request with voice ID: ${voiceId}`);
 
     try {
+      // Get voice settings from configuration and campaign
+      let voiceSettings = {
+        stability: 0.8,
+        similarity_boost: 0.8,
+        style: 0.3,
+        use_speaker_boost: true
+      };
+
+      if (useConfigSettings) {
+        // Import EnhancedVoiceAIService to get combined settings
+        const { EnhancedVoiceAIService } = await import('../services/enhancedVoiceAIService');
+        const combinedSettings = await EnhancedVoiceAIService.getCombinedVoiceSettings(campaignId);
+        
+        voiceSettings = {
+          stability: combinedSettings.stability,
+          similarity_boost: combinedSettings.similarityBoost,
+          style: combinedSettings.style,
+          use_speaker_boost: combinedSettings.useSpeakerBoost
+        };
+
+        logger.info(`Using combined voice settings for test (campaign: ${campaignId || 'none'}):`, voiceSettings);
+      } else {
+        logger.info(`Using default voice settings for test:`, voiceSettings);
+      }
+
+      // Get configuration for model selection
+      const config = await Configuration.findOne();
+
       // Test voice synthesis with ElevenLabs
       const elevenLabsResponse = await axios.post(
         `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
         {
           text: text,
-          model_id: "eleven_monolingual_v1",
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.5
-          }
+          model_id: config?.elevenLabsConfig?.useFlashModel ? "eleven_flash_v2_5" : "eleven_multilingual_v2",
+          voice_settings: voiceSettings
         },
         {
           headers: {
@@ -1810,11 +1837,11 @@ export const testVoiceSynthesis = async (req: Request, res: Response) => {
       const audioBase64 = audioBuffer.toString('base64');
 
       // Update ElevenLabs status in database
-      const configuration = await Configuration.findOne();
-      if (configuration) {
-        configuration.elevenLabsConfig.lastVerified = new Date();
-        configuration.elevenLabsConfig.status = 'verified';
-        await configuration.save();
+      const configForUpdate = await Configuration.findOne();
+      if (configForUpdate) {
+        configForUpdate.elevenLabsConfig.lastVerified = new Date();
+        configForUpdate.elevenLabsConfig.status = 'verified';
+        await configForUpdate.save();
         logger.info('ElevenLabs configuration status updated to verified after successful voice synthesis');
       }
 

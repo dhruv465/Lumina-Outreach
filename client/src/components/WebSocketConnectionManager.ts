@@ -63,7 +63,7 @@ export const createReliableWebSocket = (
     socket = new WebSocket(url);
     
     // Set up event handlers
-    socket.onopen = (event) => {
+    socket.onopen = (_event) => {
       // Clear the timeout since we've connected successfully
       if (timeoutId) {
         clearTimeout(timeoutId);

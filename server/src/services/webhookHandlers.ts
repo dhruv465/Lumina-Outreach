@@ -241,8 +241,10 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                               
                               if (!isTTSProviderConfigured(configuration)) {
                                     logger.warn(`Selected TTS provider ${selectedTTSProvider} is not properly configured`);
-                                    twiml.say({ voice: 'alice', language: 'en-US' }, initialGreeting);
-                                    return res.type('text/xml').send(twiml.toString());
+                                    const fallbackGreeting = campaign.openingMessage?.trim() || campaign.initialPrompt?.trim() || 'Hello, this is an automated call.';
+                                    twiml.say({ voice: 'alice', language: 'en-US' }, fallbackGreeting);
+                                    res.type('text/xml').send(twiml.toString());
+                                    return;
                               }
 
                               // Debug campaign voice configuration for initial greeting
@@ -316,20 +318,23 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                                                 useElevenLabs = true;
                                           }
 
-                                          // Clean up temp file
-                                          try {
-                                                fs.unlinkSync(speechFilePath);
-                                          } catch (cleanupError) {
-                                                logger.warn(`Failed to clean up temp file ${speechFilePath}: ${getErrorMessage(cleanupError)}`);
+                                          // Clean up temp file if it exists (speechResponse may have filePath in some implementations)
+                                          if ('filePath' in speechResponse && speechResponse.filePath && typeof speechResponse.filePath === 'string') {
+                                                try {
+                                                      fs.unlinkSync(speechResponse.filePath);
+                                                } catch (cleanupError) {
+                                                      logger.warn(`Failed to clean up temp file ${speechResponse.filePath}: ${getErrorMessage(cleanupError)}`);
+                                                }
                                           }
                                     } else {
-                                          throw new Error(`Speech file empty or missing: ${speechFilePath}`);
+                                          throw new Error(`Speech synthesis failed or returned empty content`);
                                     }
                               } catch (fileMethodError) {
                                     // Fall back to adaptive voice method if file method fails
                                     logger.warn(`File synthesis method failed, trying adaptive method: ${fileMethodError}`);
 
-                                    const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
+                                    const voiceAIService = new EnhancedVoiceAIService(configuration.elevenLabsConfig?.apiKey || '');
+                                    const speechResponse = await voiceAIService.synthesizeAdaptiveVoice({
                                           text: formattedGreeting,
                                           personalityId: voiceId,
                                           language: campaign.primaryLanguage === 'hi' ? 'hi' : 'en'
@@ -626,6 +631,7 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
       const callId = req.query.callId as string;
       const conversationId = req.query.conversationId as string;
       const speechResult = req.body.SpeechResult;
+      let useElevenLabs = false;
       // Get webhook base URL from environment variable only
       const baseUrl = process.env.WEBHOOK_BASE_URL;
 

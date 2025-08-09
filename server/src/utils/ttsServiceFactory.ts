@@ -1,4 +1,4 @@
-import { logger } from './logger';
+import logger from './logger';
 import { getErrorMessage } from '../index';
 import { EnhancedVoiceAIService } from '../services/enhancedVoiceAIService';
 import { TTSProviderService } from '../services/ttsProviderService';
@@ -25,7 +25,6 @@ export async function getTTSService(configuration: any): Promise<any> {
         if (configuration?.ttsConfig?.deepgramTTS?.apiKey) {
           // Use the TTS Provider Service for Deepgram
           const ttsService = new TTSProviderService();
-          await ttsService.loadConfiguration();
           return ttsService;
         } else {
           logger.warn('Deepgram selected as TTS provider but no API key available');

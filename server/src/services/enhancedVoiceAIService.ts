@@ -182,6 +182,68 @@ export class EnhancedVoiceAIService {
   }
 
   /**
+   * Get combined voice settings from configuration and campaign
+   */
+  static async getCombinedVoiceSettings(campaignId?: string): Promise<{
+    stability: number;
+    similarityBoost: number;
+    style: number;
+    useSpeakerBoost: boolean;
+    speed: number;
+  }> {
+    try {
+      // Get base settings from configuration
+      const configuration = await mongoose.model('Configuration').findOne();
+      let settings = {
+        stability: configuration?.elevenLabsConfig?.voiceStability || 0.8,
+        similarityBoost: configuration?.elevenLabsConfig?.voiceClarity || 0.8,
+        style: 0.3,
+        useSpeakerBoost: true,
+        speed: configuration?.elevenLabsConfig?.voiceSpeed || 1.0
+      };
+
+      // Apply speed to style mapping
+      settings.style = Math.min(1.0, (settings.speed - 0.5) * 0.6 + 0.3);
+
+      // Override with campaign settings if available
+      if (campaignId) {
+        try {
+          const campaign = await Campaign.findById(campaignId);
+          if (campaign?.voiceConfiguration) {
+            if (campaign.voiceConfiguration.speed !== undefined) {
+              settings.speed = campaign.voiceConfiguration.speed;
+              settings.style = Math.min(1.0, (campaign.voiceConfiguration.speed - 0.5) * 0.6 + 0.3);
+            }
+            if (campaign.voiceConfiguration.stability !== undefined) {
+              settings.stability = campaign.voiceConfiguration.stability;
+            }
+            if (campaign.voiceConfiguration.clarity !== undefined) {
+              settings.similarityBoost = campaign.voiceConfiguration.clarity;
+            }
+            if (campaign.voiceConfiguration.style !== undefined) {
+              settings.style = campaign.voiceConfiguration.style;
+            }
+          }
+        } catch (error) {
+          logger.warn(`Failed to get campaign voice settings: ${getErrorMessage(error)}`);
+        }
+      }
+
+      return settings;
+    } catch (error) {
+      logger.error(`Error getting combined voice settings: ${getErrorMessage(error)}`);
+      // Return default settings
+      return {
+        stability: 0.8,
+        similarityBoost: 0.8,
+        style: 0.3,
+        useSpeakerBoost: true,
+        speed: 1.0
+      };
+    }
+  }
+
+  /**
    * Get enhanced voice personalities from configuration
    */
   static async getEnhancedVoicePersonalities(): Promise<VoicePersonality[]> {
@@ -376,8 +438,14 @@ export class EnhancedVoiceAIService {
     text: string;
     personalityId: string;
     language?: string;
+    campaignVoiceSettings?: {
+      speed?: number;
+      pitch?: number;
+      stability?: number;
+      clarity?: number;
+    };
   }): Promise<any> {
-    const { text, personalityId, language = 'en' } = params;
+    const { text, personalityId, language = 'en', campaignVoiceSettings } = params;
 
     try {
 
@@ -403,33 +471,86 @@ export class EnhancedVoiceAIService {
         );
 
         if (availableVoice) {
+          // Use voice settings from configuration
+          let voiceSettings = {
+            stability: config.elevenLabsConfig.voiceStability || 0.8,
+            similarityBoost: config.elevenLabsConfig.voiceClarity || 0.8,
+            style: 0.3,
+            useSpeakerBoost: true
+          };
+
+          // Apply speed setting if available
+          if (config.elevenLabsConfig.voiceSpeed) {
+            voiceSettings.style = Math.min(1.0, (config.elevenLabsConfig.voiceSpeed - 0.5) * 0.6 + 0.3);
+          }
+
+          logger.info('Using configuration voice settings:', {
+            configSettings: {
+              voiceSpeed: config.elevenLabsConfig.voiceSpeed,
+              voiceStability: config.elevenLabsConfig.voiceStability,
+              voiceClarity: config.elevenLabsConfig.voiceClarity
+            },
+            appliedSettings: voiceSettings
+          });
+
+          // Override with campaign-specific voice settings if provided
+          if (campaignVoiceSettings) {
+            logger.info('Applying campaign voice settings:', campaignVoiceSettings);
+            if (campaignVoiceSettings.stability !== undefined) {
+              voiceSettings.stability = Math.max(0, Math.min(1, campaignVoiceSettings.stability));
+            }
+            if (campaignVoiceSettings.clarity !== undefined) {
+              voiceSettings.similarityBoost = Math.max(0, Math.min(1, campaignVoiceSettings.clarity));
+            }
+            if (campaignVoiceSettings.speed !== undefined) {
+              voiceSettings.style = Math.min(1.0, (campaignVoiceSettings.speed - 0.5) * 0.6 + 0.3);
+            }
+            logger.info(`Applied campaign voice settings - final settings:`, voiceSettings);
+          }
+
           personality = {
             id: availableVoice.voiceId,
             voiceId: availableVoice.voiceId,
             name: availableVoice.name,
-            settings: {
-              stability: 0.8,
-              similarityBoost: 0.8,
-              style: 0.3,
-              useSpeakerBoost: true
-            }
+            settings: voiceSettings
           };
-          logger.info(`Created minimal personality from available voice: ${availableVoice.name}`);
+          logger.info(`Created personality from available voice with config settings: ${availableVoice.name}`, voiceSettings);
         } else {
           const fallbackVoice = config.elevenLabsConfig.availableVoices[0];
           if (fallbackVoice) {
+            // Use voice settings from configuration for fallback too
+            let voiceSettings = {
+              stability: config.elevenLabsConfig.voiceStability || 0.8,
+              similarityBoost: config.elevenLabsConfig.voiceClarity || 0.8,
+              style: 0.3,
+              useSpeakerBoost: true
+            };
+
+            if (config.elevenLabsConfig.voiceSpeed) {
+              voiceSettings.style = Math.min(1.0, (config.elevenLabsConfig.voiceSpeed - 0.5) * 0.6 + 0.3);
+            }
+
+            // Override with campaign-specific voice settings if provided
+            if (campaignVoiceSettings) {
+              if (campaignVoiceSettings.stability !== undefined) {
+                voiceSettings.stability = Math.max(0, Math.min(1, campaignVoiceSettings.stability));
+              }
+              if (campaignVoiceSettings.clarity !== undefined) {
+                voiceSettings.similarityBoost = Math.max(0, Math.min(1, campaignVoiceSettings.clarity));
+              }
+              if (campaignVoiceSettings.speed !== undefined) {
+                voiceSettings.style = Math.min(1.0, (campaignVoiceSettings.speed - 0.5) * 0.6 + 0.3);
+              }
+              logger.info(`Applied campaign voice settings to fallback:`, campaignVoiceSettings);
+            }
+
             personality = {
               id: fallbackVoice.voiceId,
               voiceId: fallbackVoice.voiceId,
               name: fallbackVoice.name,
-              settings: {
-                stability: 0.8,
-                similarityBoost: 0.8,
-                style: 0.3,
-                useSpeakerBoost: true
-              }
+              settings: voiceSettings
             };
-            logger.warn(`Using fallback voice: ${fallbackVoice.name} instead of ${personalityId}`);
+            logger.warn(`Using fallback voice with config settings: ${fallbackVoice.name} instead of ${personalityId}`, voiceSettings);
           } else {
             throw new Error(`No voices available in configuration`);
           }
@@ -569,8 +690,13 @@ export class EnhancedVoiceAIService {
             // Store voice settings for use in synthesis
             campaignVoiceSettings = {
               speed: campaign.voiceConfiguration.speed,
-              pitch: campaign.voiceConfiguration.pitch
+              pitch: campaign.voiceConfiguration.pitch,
+              // Map pitch to stability for ElevenLabs (higher pitch = lower stability for more variation)
+              stability: campaign.voiceConfiguration.pitch ? Math.max(0.1, 1.2 - campaign.voiceConfiguration.pitch) : undefined,
+              // Use default clarity unless specified
+              clarity: 0.8
             };
+            logger.info(`Extracted campaign voice settings:`, campaignVoiceSettings);
           }
         } catch (error) {
           logger.warn(`Failed to get campaign voice settings: ${getErrorMessage(error)}`);
@@ -691,7 +817,8 @@ export class EnhancedVoiceAIService {
           const streamingResponse = await this.sdkService.synthesizeAdaptiveVoice({
             text: responseText,
             personalityId: campaignVoiceId, // Use campaign voice ID if available
-            language: options.language === 'Hindi' ? 'hi' : 'en'
+            language: options.language === 'Hindi' ? 'hi' : 'en',
+            campaignVoiceSettings: campaignVoiceSettings
           });
 
           // If campaign voice settings exist, log that they will be applied in the voice profile
@@ -723,7 +850,8 @@ export class EnhancedVoiceAIService {
           const adaptiveResponse = await this.sdkService.synthesizeAdaptiveVoice({
             text: responseText,
             personalityId: campaignVoiceId, // Use campaign voice ID if available
-            language: options.language === 'Hindi' ? 'hi' : 'en'
+            language: options.language === 'Hindi' ? 'hi' : 'en',
+            campaignVoiceSettings: campaignVoiceSettings
           });
 
           // If campaign voice settings exist, log that they will be applied in the voice profile
@@ -761,7 +889,8 @@ export class EnhancedVoiceAIService {
             const fallbackResponse = await this.synthesizeAdaptiveVoice({
               text: responseText,
               personalityId: campaignVoiceId, // Use campaign voice ID if available
-              language: options.language === 'Hindi' ? 'hi' : 'en'
+              language: options.language === 'Hindi' ? 'hi' : 'en',
+              campaignVoiceSettings: campaignVoiceSettings
             });
 
             if (options.onAudioChunk && fallbackResponse.audioContent) {

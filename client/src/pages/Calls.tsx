@@ -195,9 +195,23 @@ const Calls = () => {
   const handlePlayRecording = async (callId: string, recordingUrl?: string) => {
     try {
       let audioUrl = recordingUrl;
+      
+      // If no recording URL provided, fetch it from the API
       if (!audioUrl) {
+        console.log('Fetching recording URL for call:', callId);
         const response = await callsApi.getCallRecording(callId);
+        console.log('API response:', response);
         audioUrl = response.recordingUrl;
+        console.log('Extracted recording URL:', audioUrl);
+        
+        // Update the call with the fetched recording URL
+        setCalls(prevCalls => 
+          prevCalls.map(call => 
+            call._id === callId 
+              ? { ...call, recordingUrl: audioUrl } 
+              : call
+          )
+        );
       }
 
       if (!audioUrl) {
@@ -209,23 +223,27 @@ const Calls = () => {
         return;
       }
 
+      console.log('Original audioUrl:', audioUrl);
+      console.log('VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
+      
       if (!audioUrl.startsWith('http')) {
         audioUrl = `${import.meta.env.VITE_API_BASE_URL || ''}${audioUrl}`;
       }
+      
+      console.log('Final audioUrl for player:', audioUrl);
 
+      // Always expand the recording UI and start playing
       setCalls(prevCalls => 
         prevCalls.map(call => 
           call._id === callId 
-            ? { ...call, expandedRecording: !call.expandedRecording } 
-            : call
+            ? { ...call, expandedRecording: true, recordingUrl: audioUrl } 
+            : { ...call, expandedRecording: false } // Close other expanded recordings
         )
       );
       
-      if (currentPlayingId === callId) {
-        setCurrentPlayingId(null);
-      } else {
-        setCurrentPlayingId(callId);
-      }
+      // Set this call as the currently playing one
+      setCurrentPlayingId(callId);
+      
     } catch (error) {
       console.error('Error playing recording:', error);
       toast({

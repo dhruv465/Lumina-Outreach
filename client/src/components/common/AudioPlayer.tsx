@@ -40,43 +40,187 @@ const AudioPlayer = ({
   const [playbackRate, setPlaybackRate] = useState(1);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [useSimplePlayer, setUseSimplePlayer] = useState(false);
+  const [actuallyPlaying, setActuallyPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   // Function to fetch authenticated audio and create blob URL
   const fetchAuthenticatedAudio = async (url: string): Promise<string> => {
     try {
       console.log('Fetching authenticated audio for URL:', url);
       
-      // Check if it's a proxy URL that needs authentication
-      if (url.includes('/api/calls/') && url.includes('/recording')) {
+      // Check if it's already a streaming URL
+      if (url.includes('/api/calls/') && url.includes('/recording') && url.includes('stream=true')) {
+        console.log('URL is already a streaming URL, using directly');
+        
+        // Remove the base URL if present to make it relative
+        let apiUrl = url;
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          const urlObj = new URL(url);
+          apiUrl = urlObj.pathname + urlObj.search;
+        }
+        
+        console.log('Using API URL:', apiUrl);
+        
+        const response = await api.get(apiUrl, {
+          responseType: 'blob',
+          headers: {
+            'Accept': 'audio/mpeg, audio/wav, audio/*'
+          },
+          timeout: 30000 // 30 second timeout
+        });
+        
+        console.log('Direct streaming API response status:', response.status);
+        console.log('Direct streaming API response headers:', response.headers);
+        console.log('Direct streaming API response data type:', typeof response.data);
+        console.log('Direct streaming API response data size:', response.data?.size || 'unknown');
+        
+        // Create blob URL
+        const blob = new Blob([response.data], { 
+          type: response.headers['content-type'] || 'audio/mpeg' 
+        });
+        const blobUrl = URL.createObjectURL(blob);
+        console.log('Created blob URL from direct streaming:', blobUrl);
+        return blobUrl;
+      }
+      
+      // Check if it's a proxy URL that needs streaming parameter added
+      else if (url.includes('/api/calls/') && url.includes('/recording')) {
         // Extract call ID from URL like "/api/calls/CALL_ID/recording"
         const callIdMatch = url.match(/\/api\/calls\/([^\/]+)\/recording/);
         if (callIdMatch) {
           const extractedCallId = callIdMatch[1];
           console.log('Extracted call ID:', extractedCallId);
           
-          // Use the authenticated API to fetch the audio
-          const response = await api.get(`/calls/${extractedCallId}/recording`, {
+          // Use the streaming endpoint to fetch the audio with Twilio authentication
+          const streamingUrl = `/calls/${extractedCallId}/recording?stream=true`;
+          console.log('Using streaming URL:', streamingUrl);
+          
+          const response = await api.get(streamingUrl, {
             responseType: 'blob',
             headers: {
               'Accept': 'audio/mpeg, audio/wav, audio/*'
             }
           });
           
+          console.log('Streaming API response status:', response.status);
+          console.log('Streaming API response headers:', response.headers);
+          console.log('Streaming API response data type:', typeof response.data);
+          console.log('Streaming API response data size:', response.data?.size || 'unknown');
+          
           // Create blob URL
           const blob = new Blob([response.data], { 
             type: response.headers['content-type'] || 'audio/mpeg' 
           });
           const blobUrl = URL.createObjectURL(blob);
-          console.log('Created blob URL:', blobUrl);
+          console.log('Created blob URL from streaming endpoint:', blobUrl);
           return blobUrl;
         }
       }
       
-      // For direct URLs (non-proxy), return as-is
-      console.log('Using direct URL:', url);
-      return url;
+      // For direct URLs, we need to use the call ID to fetch through our API
+      console.log('Processing direct URL for authenticated access:', url);
+      
+      // Try to extract call ID from various URL patterns
+      let extractedCallId = null;
+      
+      // Pattern 1: /api/calls/CALL_ID/recording
+      let callIdMatch = url.match(/\/api\/calls\/([^\/]+)\/recording/);
+      if (callIdMatch) {
+        extractedCallId = callIdMatch[1];
+      }
+      
+      // Pattern 2: URL contains call ID in query params or path
+      if (!extractedCallId) {
+        callIdMatch = url.match(/[?&]callId=([^&]+)/);
+        if (callIdMatch) {
+          extractedCallId = callIdMatch[1];
+        }
+      }
+      
+      // Pattern 3: Use the callId prop if available
+      if (!extractedCallId && callId) {
+        extractedCallId = callId;
+        console.log('Using callId prop:', extractedCallId);
+      }
+      
+      if (extractedCallId) {
+        console.log('Fetching audio through API for call ID:', extractedCallId);
+        try {
+          const streamingUrl = `/calls/${extractedCallId}/recording?stream=true`;
+          console.log('Using streaming URL for extracted call ID:', streamingUrl);
+          
+          const response = await api.get(streamingUrl, {
+            responseType: 'blob',
+            headers: {
+              'Accept': 'audio/mpeg, audio/wav, audio/*'
+            }
+          });
+          
+          console.log('Streaming API response status:', response.status);
+          console.log('Streaming API response data size:', response.data?.size || 'unknown');
+          
+          const blob = new Blob([response.data], { 
+            type: response.headers['content-type'] || 'audio/mpeg' 
+          });
+          const blobUrl = URL.createObjectURL(blob);
+          console.log('Created blob URL from streaming API fetch:', blobUrl);
+          return blobUrl;
+        } catch (apiFetchError) {
+          console.error('API fetch failed:', apiFetchError);
+          throw new Error(`Failed to fetch authenticated audio: ${apiFetchError instanceof Error ? apiFetchError.message : 'Unknown error'}`);
+        }
+      } else {
+        console.error('Could not extract call ID from URL:', url);
+        console.log('Available callId prop:', callId);
+        
+        // Last resort: if we have a callId prop, try using that
+        if (callId) {
+          console.log('Using callId prop as fallback:', callId);
+          try {
+            const streamingUrl = `/calls/${callId}/recording?stream=true`;
+            console.log('Using streaming URL with callId prop:', streamingUrl);
+            
+            const response = await api.get(streamingUrl, {
+              responseType: 'blob',
+              headers: {
+                'Accept': 'audio/mpeg, audio/wav, audio/*'
+              }
+            });
+            
+            const blob = new Blob([response.data], { 
+              type: response.headers['content-type'] || 'audio/mpeg' 
+            });
+            const blobUrl = URL.createObjectURL(blob);
+            console.log('Created blob URL using callId prop streaming:', blobUrl);
+            return blobUrl;
+          } catch (fallbackError) {
+            console.error('Fallback API fetch failed:', fallbackError);
+            throw new Error(`Failed to fetch authenticated audio: ${fallbackError instanceof Error ? fallbackError.message : 'Unknown error'}`);
+          }
+        } else {
+          throw new Error('Unable to authenticate audio access - no call ID available');
+        }
+      }
     } catch (error) {
       console.error('Error fetching authenticated audio:', error);
+      
+      // Log detailed error information
+      if ((error as any).response) {
+        const axiosError = error as any;
+        console.error('API Error Details:', {
+          status: axiosError.response.status,
+          statusText: axiosError.response.statusText,
+          data: axiosError.response.data,
+          headers: axiosError.response.headers,
+          url: axiosError.config?.url
+        });
+      } else if ((error as any).request) {
+        console.error('Network Error - No response received:', (error as any).request);
+      } else {
+        console.error('Error setting up request:', (error as any).message);
+      }
+      
       throw error;
     }
   };
@@ -94,6 +238,7 @@ const AudioPlayer = ({
       try {
         setLoading(true);
         setError(null);
+        setActuallyPlaying(false);
         
         // Fetch authenticated audio and get blob URL
         const audioUrlToUse = await fetchAuthenticatedAudio(audioUrl);
@@ -126,24 +271,72 @@ const AudioPlayer = ({
           setDuration(wavesurfer.getDuration());
           // Set initial volume
           wavesurfer.setVolume(volume);
+          
+          // Auto-play if the parent component indicates it should be playing
+          if (isPlaying) {
+            wavesurfer.play();
+          }
         });
         
         wavesurfer.on('audioprocess', () => {
           setCurrentTime(wavesurfer.getCurrentTime());
         });
         
+        wavesurfer.on('play', () => {
+          console.log('WaveSurfer started playing');
+          setActuallyPlaying(true);
+          if (!isPlaying) {
+            onPlayPause(true);
+          }
+        });
+        
+        wavesurfer.on('pause', () => {
+          console.log('WaveSurfer paused');
+          setActuallyPlaying(false);
+          if (isPlaying) {
+            onPlayPause(false);
+          }
+        });
+        
         wavesurfer.on('finish', () => {
+          console.log('WaveSurfer finished playing');
+          setActuallyPlaying(false);
           onPlayPause(false);
         });
         
         wavesurfer.on('error', (err) => {
           console.error('Wavesurfer error for URL:', audioUrl, 'Error:', err);
+          console.error('Error details:', {
+            message: err?.message || 'Unknown error',
+            stack: err?.stack,
+            audioUrl: audioUrlToUse
+          });
           setLoading(false);
-          setError('Failed to load audio recording');
+          setError(`Failed to load audio recording: ${err?.message || 'Unknown error'}`);
         });
         
         wavesurfer.on('loading', (percent) => {
           console.log(`Loading audio: ${percent}%`);
+          if (percent === 100) {
+            console.log('Audio loading completed');
+          }
+        });
+        
+        // Add a timeout for loading
+        const loadingTimeout = setTimeout(() => {
+          if (loading) {
+            console.error('Audio loading timeout');
+            setLoading(false);
+            setError('Audio loading timed out. Please try again.');
+          }
+        }, 30000); // 30 second timeout
+        
+        wavesurfer.on('ready', () => {
+          clearTimeout(loadingTimeout);
+        });
+        
+        wavesurfer.on('error', () => {
+          clearTimeout(loadingTimeout);
         });
         
         // Use click event for seeking
@@ -156,12 +349,39 @@ const AudioPlayer = ({
         wavesurferRef.current = wavesurfer;
         
         // Load the audio file
+        console.log('Loading audio file:', audioUrlToUse);
         wavesurfer.load(audioUrlToUse);
+        
+        // Test if the audio URL is accessible by creating a test audio element
+        const testAudio = new Audio();
+        testAudio.oncanplaythrough = () => {
+          console.log('Audio URL is accessible and can play');
+        };
+        testAudio.onerror = (e) => {
+          console.error('Test audio failed to load:', e);
+          console.log('Audio URL that failed:', audioUrlToUse);
+        };
+        testAudio.src = audioUrlToUse;
+        
+        // Clean up test audio after 5 seconds
+        setTimeout(() => {
+          testAudio.src = '';
+        }, 5000);
         
       } catch (error) {
         console.error('Error initializing WaveSurfer:', error);
+        console.log('Falling back to simple HTML5 audio player');
         setLoading(false);
-        setError('Failed to load audio recording');
+        setUseSimplePlayer(true);
+        
+        // Try to set up simple audio player
+        try {
+          const audioUrlToUse = await fetchAuthenticatedAudio(audioUrl);
+          setBlobUrl(audioUrlToUse);
+        } catch (fallbackError) {
+          console.error('Fallback audio player also failed:', fallbackError);
+          setError('Failed to load audio recording');
+        }
       }
     };
     
@@ -181,14 +401,63 @@ const AudioPlayer = ({
   
   // Handle play/pause
   useEffect(() => {
-    if (wavesurferRef.current) {
-      if (isPlaying) {
-        wavesurferRef.current.play();
-      } else {
-        wavesurferRef.current.pause();
-      }
+    console.log('Play/pause state changed:', isPlaying, 'actuallyPlaying:', actuallyPlaying);
+    
+    // Avoid infinite loops by checking if the state is already correct
+    if (isPlaying === actuallyPlaying) {
+      return;
     }
-  }, [isPlaying]);
+    
+    if (useSimplePlayer && audioRef.current) {
+      console.log('Controlling simple audio player:', isPlaying ? 'play' : 'pause');
+      if (isPlaying && !actuallyPlaying) {
+        audioRef.current.play().catch(e => {
+          console.error('Simple player play error:', e);
+          setActuallyPlaying(false);
+          onPlayPause(false); // Reset state on error
+        });
+      } else if (!isPlaying && actuallyPlaying) {
+        audioRef.current.pause();
+      }
+    } else if (wavesurferRef.current && !loading && duration > 0) {
+      console.log('Controlling WaveSurfer:', isPlaying ? 'play' : 'pause');
+      console.log('WaveSurfer ready state - duration:', duration);
+      try {
+        if (isPlaying && !actuallyPlaying) {
+          try {
+            wavesurferRef.current.play();
+          } catch (playError) {
+            console.log('WaveSurfer not ready yet, waiting...', playError);
+            // Try again after a short delay
+            setTimeout(() => {
+              if (wavesurferRef.current && isPlaying && !actuallyPlaying) {
+                try {
+                  wavesurferRef.current.play();
+                } catch (retryError) {
+                  console.error('WaveSurfer play retry failed:', retryError);
+                  setActuallyPlaying(false);
+                  onPlayPause(false);
+                }
+              }
+            }, 100);
+          }
+        } else if (!isPlaying && actuallyPlaying) {
+          wavesurferRef.current.pause();
+        }
+      } catch (error) {
+        console.error('WaveSurfer control error:', error);
+        setActuallyPlaying(false);
+        onPlayPause(false); // Reset state on error
+      }
+    } else {
+      console.log('Cannot control audio player yet:', {
+        useSimplePlayer,
+        hasWaveSurfer: !!wavesurferRef.current,
+        loading,
+        duration
+      });
+    }
+  }, [isPlaying, useSimplePlayer, loading, actuallyPlaying, duration]);
   
   // Handle mute/unmute
   useEffect(() => {
@@ -255,6 +524,8 @@ const AudioPlayer = ({
   
   // Handle playback control
   const handlePlayPause = () => {
+    console.log('Play/pause button clicked, current state:', isPlaying);
+    console.log('Will change to:', !isPlaying);
     onPlayPause(!isPlaying);
   };
   
@@ -272,7 +543,13 @@ const AudioPlayer = ({
   };
   
   const handleRestart = () => {
-    if (wavesurferRef.current) {
+    console.log('Restart button clicked');
+    if (useSimplePlayer && audioRef.current) {
+      audioRef.current.currentTime = 0;
+      if (!isPlaying) {
+        onPlayPause(true);
+      }
+    } else if (wavesurferRef.current) {
       wavesurferRef.current.seekTo(0);
       if (!isPlaying) {
         onPlayPause(true);
@@ -281,7 +558,11 @@ const AudioPlayer = ({
   };
   
   const handleSkipBackward = () => {
-    if (wavesurferRef.current) {
+    console.log('Skip backward clicked');
+    if (useSimplePlayer && audioRef.current) {
+      const newTime = Math.max(0, currentTime - 5);
+      audioRef.current.currentTime = newTime;
+    } else if (wavesurferRef.current) {
       try {
         if (typeof wavesurferRef.current.skip === 'function') {
           wavesurferRef.current.skip(-5);
@@ -298,7 +579,11 @@ const AudioPlayer = ({
   };
   
   const handleSkipForward = () => {
-    if (wavesurferRef.current) {
+    console.log('Skip forward clicked');
+    if (useSimplePlayer && audioRef.current) {
+      const newTime = Math.min(duration, currentTime + 5);
+      audioRef.current.currentTime = newTime;
+    } else if (wavesurferRef.current) {
       try {
         if (typeof wavesurferRef.current.skip === 'function') {
           wavesurferRef.current.skip(5);
@@ -316,29 +601,27 @@ const AudioPlayer = ({
   
   const handleDownload = async () => {
     try {
-      let downloadUrl = audioUrl;
       let filename = `${leadName || 'Call'}_${new Date().toISOString().split('T')[0]}.mp3`;
       
-      // If it's a proxy URL, fetch the authenticated audio
-      if (audioUrl.includes('/api/calls/') && audioUrl.includes('/recording')) {
-        const callIdMatch = audioUrl.match(/\/api\/calls\/([^\/]+)\/recording/);
-        if (callIdMatch) {
-          const extractedCallId = callIdMatch[1];
-          const response = await api.get(`/calls/${extractedCallId}/recording`, {
-            responseType: 'blob',
-            headers: {
-              'Accept': 'audio/mpeg, audio/wav, audio/*'
-            }
-          });
-          
-          // Determine file extension from content type
-          const contentType = response.headers['content-type'] || 'audio/mpeg';
-          const extension = contentType.includes('wav') ? 'wav' : 'mp3';
-          filename = `${leadName || 'Call'}_${new Date().toISOString().split('T')[0]}.${extension}`;
-          
-          downloadUrl = URL.createObjectURL(new Blob([response.data], { type: contentType }));
+      // Always use authenticated API to fetch the audio
+      console.log('Downloading audio for call ID:', callId);
+      
+      const streamingUrl = `/calls/${callId}/recording?stream=true`;
+      console.log('Downloading audio using streaming URL:', streamingUrl);
+      
+      const response = await api.get(streamingUrl, {
+        responseType: 'blob',
+        headers: {
+          'Accept': 'audio/mpeg, audio/wav, audio/*'
         }
-      }
+      });
+      
+      // Determine file extension from content type
+      const contentType = response.headers['content-type'] || 'audio/mpeg';
+      const extension = contentType.includes('wav') ? 'wav' : 'mp3';
+      filename = `${leadName || 'Call'}_${new Date().toISOString().split('T')[0]}.${extension}`;
+      
+      const downloadUrl = URL.createObjectURL(new Blob([response.data], { type: contentType }));
       
       const link = document.createElement('a');
       link.href = downloadUrl;
@@ -347,10 +630,8 @@ const AudioPlayer = ({
       link.click();
       document.body.removeChild(link);
       
-      // Clean up blob URL if we created one
-      if (downloadUrl !== audioUrl) {
-        URL.revokeObjectURL(downloadUrl);
-      }
+      // Clean up blob URL
+      URL.revokeObjectURL(downloadUrl);
     } catch (error) {
       console.error('Error downloading audio:', error);
     }
@@ -374,7 +655,7 @@ const AudioPlayer = ({
             onClick={handlePlayPause}
             disabled={loading}
           >
-            {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            {(isPlaying || actuallyPlaying) ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           </Button>
           
           <div className="text-sm">
@@ -505,22 +786,100 @@ const AudioPlayer = ({
       ) : error ? (
         <div className="h-[60px] w-full flex flex-col justify-center items-center space-y-2">
           <div className="text-sm text-destructive">{error}</div>
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => {
-              setError(null);
-              setLoading(true);
-              // Force re-initialization by creating a new instance
-              if (wavesurferRef.current) {
-                wavesurferRef.current.destroy();
-                wavesurferRef.current = null;
-              }
-              // The useEffect dependency will trigger re-initialization
-            }}
-          >
-            Retry
-          </Button>
+          <div className="flex space-x-2">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => {
+                setError(null);
+                setLoading(true);
+                setUseSimplePlayer(false);
+                // Force re-initialization by creating a new instance
+                if (wavesurferRef.current) {
+                  wavesurferRef.current.destroy();
+                  wavesurferRef.current = null;
+                }
+                // The useEffect dependency will trigger re-initialization
+              }}
+            >
+              Retry WaveSurfer
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={async () => {
+                setError(null);
+                setLoading(true);
+                setUseSimplePlayer(true);
+                try {
+                  const audioUrlToUse = await fetchAuthenticatedAudio(audioUrl);
+                  setBlobUrl(audioUrlToUse);
+                  setLoading(false);
+                } catch (fallbackError) {
+                  console.error('Simple player fallback failed:', fallbackError);
+                  setError('Failed to load audio recording');
+                  setLoading(false);
+                }
+              }}
+            >
+              Use Simple Player
+            </Button>
+          </div>
+        </div>
+      ) : useSimplePlayer ? (
+        <div className="w-full">
+          {blobUrl ? (
+            <>
+              <audio 
+                ref={audioRef}
+                src={blobUrl}
+                controls
+                className="w-full"
+                onLoadedData={() => {
+                  console.log('Simple audio player loaded successfully');
+                  if (audioRef.current) {
+                    setDuration(audioRef.current.duration);
+                  }
+                }}
+                onTimeUpdate={() => {
+                  if (audioRef.current) {
+                    setCurrentTime(audioRef.current.currentTime);
+                  }
+                }}
+                onPlay={() => {
+                  console.log('Simple audio player started playing');
+                  setActuallyPlaying(true);
+                  if (!isPlaying) {
+                    onPlayPause(true);
+                  }
+                }}
+                onPause={() => {
+                  console.log('Simple audio player paused');
+                  setActuallyPlaying(false);
+                  if (isPlaying) {
+                    onPlayPause(false);
+                  }
+                }}
+                onEnded={() => {
+                  console.log('Simple audio player ended');
+                  setActuallyPlaying(false);
+                  onPlayPause(false);
+                }}
+                onError={(e) => {
+                  console.error('Simple audio player error:', e);
+                  setError('Failed to load audio recording');
+                }}
+              />
+              <div className="text-xs text-muted-foreground text-center mt-2">
+                Using simple audio player (WaveSurfer failed to load)
+              </div>
+            </>
+          ) : (
+            <div className="h-[60px] w-full flex flex-col justify-center items-center space-y-2">
+              <div className="text-sm text-muted-foreground">Loading authenticated audio...</div>
+              <Skeleton className="h-[30px] w-full rounded-md" />
+            </div>
+          )}
         </div>
       ) : (
         <div id={`waveform-${callId}`} ref={waveformRef} className="w-full" />

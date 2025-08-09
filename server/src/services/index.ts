@@ -191,7 +191,6 @@ export * as webhookHandlers from './webhookHandlers';
 
 // Export analytics services
 export { callAnalyticsService } from './callAnalyticsService';
-export { callMonitoring } from '../monitoring/callMonitoring';
 
 // Export individual services
 export {

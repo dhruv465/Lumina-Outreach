@@ -43,6 +43,9 @@ export interface ICampaign extends mongoose.Document {
     voiceId: string;
     speed: number;
     pitch: number;
+    stability?: number;
+    clarity?: number;
+    style?: number;
   };
   metrics: {
     totalCalls: number;
@@ -200,6 +203,24 @@ const CampaignSchema = new mongoose.Schema(
         default: 1,
         min: 0.5,
         max: 2,
+      },
+      stability: {
+        type: Number,
+        default: 0.8,
+        min: 0,
+        max: 1,
+      },
+      clarity: {
+        type: Number,
+        default: 0.8,
+        min: 0,
+        max: 1,
+      },
+      style: {
+        type: Number,
+        default: 0.3,
+        min: 0,
+        max: 1,
       },
     },
     metrics: {

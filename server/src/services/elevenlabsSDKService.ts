@@ -82,7 +82,7 @@ export class ElevenLabsSDKService extends EventEmitter {
   private activeConnections: Map<string, WebSocket> = new Map();
   private elevenlabs: ElevenLabs;
   private responseCache: any; // For caching common responses
-  
+
   // Rate limiting state
   private rateLimitState: RateLimitState = {
     requestCount: 0,
@@ -90,7 +90,7 @@ export class ElevenLabsSDKService extends EventEmitter {
     backoffUntil: 0,
     consecutiveErrors: 0
   };
-  
+
   // Rate limiting configuration
   private readonly RATE_LIMIT_WINDOW = 60000; // 1 minute window
   private readonly MAX_REQUESTS_PER_WINDOW = 10; // More conservative limit to avoid 429 errors
@@ -103,24 +103,24 @@ export class ElevenLabsSDKService extends EventEmitter {
    */
   constructor(apiKey: string) {
     super();
-    
+
     console.log('ElevenLabsSDKService constructor called with:', {
       hasApiKey: !!apiKey,
       apiKeyLength: apiKey?.length || 0
     });
-    
+
     if (!apiKey || apiKey.trim() === '') {
       throw new Error('ElevenLabs API key is required for SDK initialization');
     }
-    
+
     this.apiKey = apiKey;
-    
+
     try {
       // Initialize the ElevenLabs SDK
       this.elevenlabs = new ElevenLabs({
         apiKey: this.apiKey
       });
-      
+
       // Initialize response cache
       try {
         this.responseCache = require('../utils/responseCache').default;
@@ -129,12 +129,12 @@ export class ElevenLabsSDKService extends EventEmitter {
         logger.warn(`Failed to initialize response cache: ${getErrorMessage(cacheError)}`);
         this.responseCache = null;
       }
-      
+
       console.log('ElevenLabs SDK Service initialized successfully with API key', {
         keyLength: this.apiKey.length,
         keyPrefix: this.apiKey.substring(0, 3) + '...'
       });
-      
+
       logger.info('ElevenLabs SDK Service initialized with API key', {
         keyLength: this.apiKey.length,
         keyPrefix: this.apiKey.substring(0, 3) + '...'
@@ -152,12 +152,12 @@ export class ElevenLabsSDKService extends EventEmitter {
    */
   public updateApiKeys(apiKey: string): void {
     this.apiKey = apiKey;
-    
+
     // Re-initialize the SDK with the new API key
     this.elevenlabs = new ElevenLabs({
       apiKey: this.apiKey
     });
-    
+
     logger.info('ElevenLabs SDK Service API keys updated');
   }
 
@@ -166,7 +166,7 @@ export class ElevenLabsSDKService extends EventEmitter {
    */
   private async checkRateLimit(): Promise<void> {
     const now = Date.now();
-    
+
     // Check if we're still in backoff period
     if (now < this.rateLimitState.backoffUntil) {
       const waitTime = this.rateLimitState.backoffUntil - now;
@@ -174,13 +174,13 @@ export class ElevenLabsSDKService extends EventEmitter {
       await new Promise(resolve => setTimeout(resolve, waitTime));
       return;
     }
-    
+
     // Reset window if it has expired
     if (now - this.rateLimitState.windowStart > this.RATE_LIMIT_WINDOW) {
       this.rateLimitState.requestCount = 0;
       this.rateLimitState.windowStart = now;
     }
-    
+
     // Check if we're at the rate limit
     if (this.rateLimitState.requestCount >= this.MAX_REQUESTS_PER_WINDOW) {
       const waitTime = this.RATE_LIMIT_WINDOW - (now - this.rateLimitState.windowStart);
@@ -189,26 +189,26 @@ export class ElevenLabsSDKService extends EventEmitter {
       this.rateLimitState.requestCount = 0;
       this.rateLimitState.windowStart = Date.now();
     }
-    
+
     this.rateLimitState.requestCount++;
   }
-  
+
   /**
    * Handle rate limit error with exponential backoff
    */
   private handleRateLimitError(): void {
     this.rateLimitState.consecutiveErrors++;
-    
+
     const backoffTime = Math.min(
       this.BASE_BACKOFF_MS * Math.pow(2, this.rateLimitState.consecutiveErrors - 1),
       this.MAX_BACKOFF_MS
     );
-    
+
     this.rateLimitState.backoffUntil = Date.now() + backoffTime;
-    
+
     logger.warn(`Rate limit hit, backing off for ${backoffTime}ms (consecutive errors: ${this.rateLimitState.consecutiveErrors})`);
   }
-  
+
   /**
    * Reset rate limit error state on successful request
    */
@@ -225,7 +225,7 @@ export class ElevenLabsSDKService extends EventEmitter {
    */
   public createConversation(): string {
     const conversationId = uuidv4();
-    
+
     this.conversations.set(conversationId, {
       id: conversationId,
       createdAt: new Date(),
@@ -234,7 +234,7 @@ export class ElevenLabsSDKService extends EventEmitter {
       messages: [],
       isGenerating: false
     });
-    
+
     logger.info(`Created new conversation: ${conversationId}`);
     return conversationId;
   }
@@ -247,8 +247,8 @@ export class ElevenLabsSDKService extends EventEmitter {
    * @returns The message that was added
    */
   public addMessage(
-    conversationId: string, 
-    role: 'system' | 'user' | 'assistant', 
+    conversationId: string,
+    role: 'system' | 'user' | 'assistant',
     content: string
   ): ConversationMessage | null {
     const conversation = this.conversations.get(conversationId);
@@ -266,7 +266,7 @@ export class ElevenLabsSDKService extends EventEmitter {
 
     conversation.messages.push(message);
     conversation.lastActivity = new Date();
-    
+
     logger.info(`Added ${role} message to conversation ${conversationId}`);
     return message;
   }
@@ -292,12 +292,12 @@ export class ElevenLabsSDKService extends EventEmitter {
     try {
       // Check rate limits before making request
       await this.checkRateLimit();
-      
+
       // Validate input parameters
       if (!text || typeof text !== 'string' || text.trim() === '') {
         throw new Error(`Invalid text parameter: ${typeof text} - "${text}"`);
       }
-      
+
       if (!voiceId || typeof voiceId !== 'string' || voiceId.trim() === '') {
         throw new Error(`Invalid voiceId parameter: ${typeof voiceId} - "${voiceId}"`);
       }
@@ -320,7 +320,7 @@ export class ElevenLabsSDKService extends EventEmitter {
 
       // Get model selection from configuration if available
       let useFlashModel = true; // Default to using Flash v2.5
-      
+
       try {
         const Configuration = require('../models/Configuration').default;
         const config = await Configuration.findOne();
@@ -330,7 +330,7 @@ export class ElevenLabsSDKService extends EventEmitter {
       } catch (error) {
         logger.warn(`Could not get Flash model setting from configuration, using default: ${useFlashModel}`);
       }
-      
+
       // Use optimized model for latency-sensitive responses
       let modelId;
       if (useFlashModel) {
@@ -340,12 +340,12 @@ export class ElevenLabsSDKService extends EventEmitter {
       } else {
         modelId = options?.modelId || 'eleven_multilingual_v2'; // Default to multilingual
       }
-      
+
       // Use lower quality for faster responses
-      const outputFormat = options?.optimizeLatency 
+      const outputFormat = options?.optimizeLatency
         ? 'mp3_44100_64' // Lower bitrate for faster generation
         : 'mp3_44100_128';
-      
+
       logger.debug(`Making ElevenLabs API call with params:`, {
         voiceId: voiceId,
         textLength: text.length,
@@ -376,7 +376,7 @@ export class ElevenLabsSDKService extends EventEmitter {
       // Use the SDK to generate speech with proper error handling
       let audioResponse;
       const tempFileName = `temp_${Date.now()}.mp3`;
-      
+
       try {
         audioResponse = await this.elevenlabs.textToSpeech({
           voiceId: voiceId,
@@ -398,7 +398,7 @@ export class ElevenLabsSDKService extends EventEmitter {
         } catch (cleanupError) {
           logger.warn(`Failed to cleanup temp file after API error: ${tempFileName}`, cleanupError);
         }
-        
+
         // Handle specific API errors
         if (apiError.response?.status === 401) {
           logger.error(`API Key validation details:`, {
@@ -425,7 +425,7 @@ export class ElevenLabsSDKService extends EventEmitter {
 
       // Handle different response types from elevenlabs-node
       let buffer: Buffer;
-      
+
       if (!audioResponse) {
         throw new Error('ElevenLabs API returned empty response');
       }
@@ -457,7 +457,7 @@ export class ElevenLabsSDKService extends EventEmitter {
         if (responseObj.fileName && responseObj.status === 'ok') {
           const fs = require('fs');
           let tempFilePath: string | null = null;
-          
+
           try {
             tempFilePath = responseObj.fileName;
             buffer = fs.readFileSync(tempFilePath);
@@ -494,7 +494,7 @@ export class ElevenLabsSDKService extends EventEmitter {
         });
         throw new Error(`ElevenLabs API returned unexpected response type: ${typeof audioResponse}`);
       }
-      
+
       // Cache the result for common phrases (less than 100 chars)
       if (this.responseCache && text.length < 100) {
         this.responseCache.set(cacheKey, buffer);
@@ -512,7 +512,7 @@ export class ElevenLabsSDKService extends EventEmitter {
         logger.error(`Rate limit error in generateSpeech: ${getErrorMessage(error)}`);
         throw new Error(`Rate limit exceeded. Please try again in a few moments.`);
       }
-      
+
       logger.error(`Error generating speech: ${getErrorMessage(error)}`);
       throw new Error(`Speech generation failed: ${getErrorMessage(error)}`);
     }
@@ -546,7 +546,7 @@ export class ElevenLabsSDKService extends EventEmitter {
         onAudioChunk(this.responseCache.get(cacheKey));
         return;
       }
-      
+
       // Use optimized settings for latency by default
       const streamOptions = {
         latencyOptimization: options?.optimizeLatency !== false, // Convert to boolean
@@ -557,14 +557,14 @@ export class ElevenLabsSDKService extends EventEmitter {
           speakerBoost: true
         }
       };
-      
+
       // Determine conversation ID: use persistent one if provided, otherwise reuse last active or create new
       let conversationId: string;
       if (persistentConversationId) {
         conversationId = persistentConversationId;
         // Ensure the conversation exists in our tracking
         if (!this.conversations.has(conversationId)) {
-          this.conversations.set(conversationId, { 
+          this.conversations.set(conversationId, {
             id: conversationId,
             createdAt: new Date(),
             lastActivity: new Date(),
@@ -582,7 +582,7 @@ export class ElevenLabsSDKService extends EventEmitter {
           conversationId = this.createConversation();
         }
       }
-      
+
       // Use the streamSpeech method to stream the speech
       await this.streamSpeech(
         conversationId,
@@ -591,7 +591,7 @@ export class ElevenLabsSDKService extends EventEmitter {
         onAudioChunk,
         streamOptions
       );
-      
+
       // Cache the response if it's short (less than 100 chars)
       if (this.responseCache && text.length < 100) {
         try {
@@ -642,7 +642,7 @@ export class ElevenLabsSDKService extends EventEmitter {
     if (!voiceId || typeof voiceId !== 'string') {
       throw new Error(`Invalid voiceId parameter: ${voiceId}`);
     }
-    
+
     const conversation = this.conversations.get(conversationId);
     if (!conversation) {
       throw new Error(`Conversation ${conversationId} not found`);
@@ -651,21 +651,21 @@ export class ElevenLabsSDKService extends EventEmitter {
     try {
       // Check rate limits before making request
       await this.checkRateLimit();
-      
+
       // Use the standard text-to-speech API instead of WebSocket to maintain voice consistency
       logger.info(`Using text-to-speech API for conversation ${conversationId} with voice ${voiceId}`);
-      
+
       // Use a more reliable file path with absolute path
       const uploadsDir = path.join(__dirname, '../../uploads');
-      
+
       // Ensure uploads directory exists
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
-      
+
       // Use absolute path for the file
       const fileName = path.join(uploadsDir, `speech-${Date.now()}.mp3`);
-      
+
       const ttsParams = {
         voiceId: String(voiceId), // Ensure it's a string
         textInput: String(text), // Use textInput instead of text for elevenlabs-node
@@ -675,19 +675,19 @@ export class ElevenLabsSDKService extends EventEmitter {
         similarityBoost: options?.voiceSettings?.similarityBoost ?? 0.75,
         style: options?.voiceSettings?.style ?? 0.0
       };
-      
-      logger.debug(`TTS parameters:`, { 
-        voiceId: ttsParams.voiceId, 
-        textLength: ttsParams.textInput.length, 
+
+      logger.debug(`TTS parameters:`, {
+        voiceId: ttsParams.voiceId,
+        textLength: ttsParams.textInput.length,
         modelId: ttsParams.modelId,
         fileName: ttsParams.fileName
       });
-      
+
       const audioResponse = await this.elevenlabs.textToSpeech(ttsParams);
 
       // Handle the response properly - the elevenlabs-node SDK returns different types
       let audioBuffer: Buffer;
-      
+
       // Add detailed logging to understand the response format
       logger.debug(`Audio response type: ${typeof audioResponse}`, {
         isBuffer: Buffer.isBuffer(audioResponse),
@@ -696,7 +696,7 @@ export class ElevenLabsSDKService extends EventEmitter {
         constructor: audioResponse?.constructor?.name,
         keys: audioResponse && typeof audioResponse === 'object' ? Object.keys(audioResponse) : []
       });
-      
+
       try {
         if (Buffer.isBuffer(audioResponse)) {
           // If it's already a buffer, use it directly
@@ -726,16 +726,16 @@ export class ElevenLabsSDKService extends EventEmitter {
           // Handle the elevenlabs-node SDK response format that returns file info
           try {
             // Check if the fileName is an absolute path
-            const audioFilePath = path.isAbsolute(audioResponse.fileName) 
-              ? audioResponse.fileName 
+            const audioFilePath = path.isAbsolute(audioResponse.fileName)
+              ? audioResponse.fileName
               : path.resolve(audioResponse.fileName);
-              
+
             logger.debug(`Checking for audio file at: ${audioFilePath}`);
-            
+
             if (fs.existsSync(audioFilePath)) {
               audioBuffer = fs.readFileSync(audioFilePath);
               logger.debug(`Read audio from file: ${audioFilePath} (${audioBuffer.length} bytes)`);
-              
+
               // Clean up the file after reading
               try {
                 fs.unlinkSync(audioFilePath);
@@ -747,13 +747,13 @@ export class ElevenLabsSDKService extends EventEmitter {
               // Try to find the file in the uploads directory
               const uploadsDir = path.join(__dirname, '../../uploads');
               const alternativePath = path.join(uploadsDir, path.basename(audioResponse.fileName));
-              
+
               logger.debug(`File not found at ${audioFilePath}, trying alternative path: ${alternativePath}`);
-              
+
               if (fs.existsSync(alternativePath)) {
                 audioBuffer = fs.readFileSync(alternativePath);
                 logger.debug(`Read audio from alternative path: ${alternativePath} (${audioBuffer.length} bytes)`);
-                
+
                 // Clean up the file after reading
                 try {
                   fs.unlinkSync(alternativePath);
@@ -767,10 +767,10 @@ export class ElevenLabsSDKService extends EventEmitter {
             }
           } catch (fileError) {
             logger.error(`Error reading audio file ${audioResponse.fileName}: ${fileError}`);
-            
+
             // Try to generate a fallback response directly
             const fallbackText = "I'm sorry, there was an issue processing the audio. Could you please repeat that?";
-            
+
             // Use direct API call as fallback
             const fallbackResponse = await axios.post(
               `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
@@ -793,7 +793,7 @@ export class ElevenLabsSDKService extends EventEmitter {
                 responseType: 'arraybuffer'
               }
             );
-            
+
             audioBuffer = Buffer.from(fallbackResponse.data);
             logger.info(`Generated fallback response after file read error: ${audioBuffer.length} bytes`);
           }
@@ -809,10 +809,10 @@ export class ElevenLabsSDKService extends EventEmitter {
             keys: audioResponse && typeof audioResponse === 'object' ? Object.keys(audioResponse) : [],
             value: typeof audioResponse === 'object' ? JSON.stringify(audioResponse, null, 2).substring(0, 500) : audioResponse
           });
-          
+
           // Generate a fallback response
           const fallbackText = "I'm sorry, there was an issue processing the audio. Could you please repeat that?";
-          
+
           // Use direct API call as fallback
           const fallbackResponse = await axios.post(
             `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
@@ -835,7 +835,7 @@ export class ElevenLabsSDKService extends EventEmitter {
               responseType: 'arraybuffer'
             }
           );
-          
+
           audioBuffer = Buffer.from(fallbackResponse.data);
           logger.info(`Generated fallback response for unknown format: ${audioBuffer.length} bytes`);
         }
@@ -843,7 +843,7 @@ export class ElevenLabsSDKService extends EventEmitter {
         logger.error(`Error processing audio response: ${getErrorMessage(processingError)}`);
         throw new Error(`Failed to process audio response: ${getErrorMessage(processingError)}`);
       }
-      
+
       // Clean up the original file if it exists
       try {
         if (typeof fileName === 'string' && fs.existsSync(fileName)) {
@@ -856,13 +856,13 @@ export class ElevenLabsSDKService extends EventEmitter {
 
       // Send the complete audio buffer
       onAudioChunk(audioBuffer);
-      
+
       // Reset rate limit errors on successful request
       this.resetRateLimitErrors();
-      
+
       // Add message to conversation history
       this.addMessage(conversationId, 'assistant', text);
-      
+
       logger.info(`Successfully generated speech for conversation ${conversationId}`);
     } catch (error) {
       // Handle rate limiting errors specifically
@@ -871,7 +871,7 @@ export class ElevenLabsSDKService extends EventEmitter {
         logger.error(`Rate limit error in streamSpeech for conversation ${conversationId}: ${getErrorMessage(error)}`);
         throw new Error(`Rate limit exceeded. Please try again in a few moments.`);
       }
-      
+
       logger.error(`Error in streamSpeech for conversation ${conversationId}: ${getErrorMessage(error)}`);
       throw error;
     }
@@ -892,7 +892,7 @@ export class ElevenLabsSDKService extends EventEmitter {
     try {
       // Send interruption signal
       ws.send(JSON.stringify({ interrupt: true }));
-      
+
       // Mark the conversation as interrupted
       const conversation = this.conversations.get(conversationId);
       if (conversation && conversation.messages.length > 0) {
@@ -905,7 +905,7 @@ export class ElevenLabsSDKService extends EventEmitter {
       // Emit interruption event
       this.emit(ConversationEvent.USER_INTERRUPT, { conversationId });
       logger.info(`Interrupted stream for conversation ${conversationId}`);
-      
+
       return true;
     } catch (error) {
       logger.error(`Error interrupting stream for conversation ${conversationId}: ${getErrorMessage(error)}`);
@@ -920,7 +920,7 @@ export class ElevenLabsSDKService extends EventEmitter {
   public closeConversation(conversationId: string): void {
     // Interrupt any active stream
     this.interruptStream(conversationId);
-    
+
     // Update conversation state
     const conversation = this.conversations.get(conversationId);
     if (conversation) {
@@ -931,7 +931,7 @@ export class ElevenLabsSDKService extends EventEmitter {
     }
   }
 
-  
+
 
   /**
    * Synthesize adaptive voice with personality adaptation using ElevenLabs SDK
@@ -942,33 +942,43 @@ export class ElevenLabsSDKService extends EventEmitter {
     text: string;
     personalityId: string;
     language?: string;
+    campaignVoiceSettings?: {
+      speed?: number;
+      pitch?: number;
+      stability?: number;
+      clarity?: number;
+    };
   }): Promise<any> {
     try {
-      const { text, personalityId, language = 'en' } = params;
-      
+      const { text, personalityId, language = 'en', campaignVoiceSettings } = params;
+
       // Validate inputs
       if (!text || text.trim() === '') {
         throw new Error('Text for synthesis cannot be empty');
       }
-      
+
       if (!personalityId || personalityId.trim() === '') {
         throw new Error('Voice ID (personalityId) cannot be empty');
       }
-      
+
       // Log synthesis attempt
       logger.info(`Attempting to synthesize voice with ElevenLabs SDK: ${text.substring(0, 30)}...`, {
         voiceId: personalityId,
         language,
         textLength: text.length
       });
-      
-      // Use standard voice settings
+
+      // Use standard voice settings, override with campaign settings if provided
       const voiceSettings = {
-        stability: 0.8,
-        similarity_boost: 0.75,
-        style: 0.3,
+        stability: campaignVoiceSettings?.stability ?? 0.8,
+        similarity_boost: campaignVoiceSettings?.clarity ?? 0.75,
+        style: campaignVoiceSettings?.speed ? Math.min(1.0, (campaignVoiceSettings.speed - 0.5) * 0.6 + 0.3) : 0.3,
         use_speaker_boost: true
       };
+
+      if (campaignVoiceSettings) {
+        logger.info(`Applied campaign voice settings to SDK synthesis:`, campaignVoiceSettings);
+      }
 
       // Choose appropriate model based on language
       const modelId = language === 'hi' ? 'eleven_multilingual_v2' : 'eleven_monolingual_v1';
@@ -983,18 +993,18 @@ export class ElevenLabsSDKService extends EventEmitter {
         similarityBoost: voiceSettings.similarity_boost,
         style: voiceSettings.style
       });
-      
+
       // Add a timeout to prevent hanging on API issues
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('Voice synthesis timed out after 15 seconds')), 15000);
       });
-      
+
       // Race the promises
       const audioResponse = await Promise.race([synthesisPromise, timeoutPromise]);
 
       // Handle different response types from elevenlabs-node
       let audioBuffer: Buffer;
-      
+
       if (!audioResponse) {
         throw new Error('ElevenLabs API returned empty response');
       }
@@ -1044,31 +1054,31 @@ export class ElevenLabsSDKService extends EventEmitter {
           language: params.language
         }
       });
-      
+
       // Check if this is the "unusual activity" error from ElevenLabs
       // This can be in the error message, or in the error.response.data.detail.status field
       const errorMsg = error.message || '';
       const responseData = error.response?.data || {};
       const detailStatus = responseData.detail?.status || '';
-      
-      const isUnusualActivity = 
-        errorMsg.includes('detected_unusual_activity') || 
+
+      const isUnusualActivity =
+        errorMsg.includes('detected_unusual_activity') ||
         errorMsg.includes('unusual activity') ||
         detailStatus === 'detected_unusual_activity';
-      
+
       if (isUnusualActivity) {
         logger.error('ElevenLabs API unusual activity detected. This is likely due to quota or free tier limitations.', {
           errorMessage: errorMsg,
           statusCode: error.response?.status,
           detailStatus: detailStatus
         });
-        
+
         // Try to update configuration status in database
         try {
           const Configuration = require('../models/Configuration').default;
           await Configuration.findOneAndUpdate(
-            {}, 
-            { 
+            {},
+            {
               'elevenLabsConfig.status': 'failed',
               'elevenLabsConfig.lastVerified': new Date(),
               'elevenLabsConfig.lastError': 'Unusual activity detected. Free tier usage disabled.',
@@ -1079,23 +1089,23 @@ export class ElevenLabsSDKService extends EventEmitter {
               }
             }
           );
-          
+
           // Import the verification utility
           const { verifyAndUpdateElevenLabsApiStatus } = require('../utils/elevenLabsVerification');
-          
+
           // Trigger a verification to update quota info
           await verifyAndUpdateElevenLabsApiStatus(this.apiKey).catch(e => {
             logger.error(`Failed to verify ElevenLabs API after unusual activity: ${getErrorMessage(e)}`);
           });
-          
+
           logger.info('Updated configuration with ElevenLabs unusual activity status');
         } catch (dbError) {
           logger.error(`Failed to update ElevenLabs status in database: ${getErrorMessage(dbError)}`);
         }
-        
+
         throw new Error('ElevenLabs API reported unusual activity detected. Please check your account status and limits or upgrade to a paid plan.');
       }
-      
+
       throw new Error(`Voice synthesis failed: ${getErrorMessage(error)}`);
     }
   }
@@ -1131,10 +1141,10 @@ export class ElevenLabsSDKService extends EventEmitter {
       }
 
       const conversation = this.conversations.get(conversationId)!;
-      
+
       // Add user message
       this.addMessage(conversationId, 'user', text);
-      
+
       // Mark conversation as generating
       conversation.isGenerating = true;
 
@@ -1143,7 +1153,7 @@ export class ElevenLabsSDKService extends EventEmitter {
         conversationId,
         text,
         voiceId,
-        onAudioChunk || (() => {}),
+        onAudioChunk || (() => { }),
         options
       ).finally(() => {
         conversation.isGenerating = false;
@@ -1217,7 +1227,7 @@ export class ElevenLabsSDKService extends EventEmitter {
       const profile = options?.optimizationProfile || 'balanced';
       const { voiceSettings } = require('../config/latencyOptimization');
       const profileSettings = voiceSettings[profile];
-      
+
       // Combine profile settings with any custom overrides
       const speechSettings = {
         stability: options?.customSettings?.stability || profileSettings.stability,
@@ -1226,20 +1236,20 @@ export class ElevenLabsSDKService extends EventEmitter {
         modelId: profileSettings.model,
         optimizeLatency: profile === 'ultraLow' || profile === 'low'
       };
-      
+
       // Generate speech with selected profile
       const buffer = await this.generateSpeech(text, voiceId, speechSettings);
-      
+
       // Cache the result and mark as priority if requested
       if (this.responseCache) {
         this.responseCache.set(cacheKey, buffer);
-        
+
         if (options?.cacheAsPriority) {
           this.responseCache.addPriorityItem(cacheKey);
           logger.debug(`Cached as priority item: "${text.substring(0, 20)}..."`);
         }
       }
-      
+
       return buffer;
     } catch (error) {
       logger.error(`Error generating optimized speech: ${getErrorMessage(error)}`);
@@ -1270,22 +1280,22 @@ export class ElevenLabsSDKService extends EventEmitter {
     try {
       // Determine if this is the conversation overload or the text overload
       const isConversationOverload = this.conversations.has(textOrConversationId) && !options?.text;
-      
+
       // Set variables based on which overload is being used
       let conversationId = isConversationOverload ? textOrConversationId : options?.conversationId;
       const text = isConversationOverload ? (options?.text || '') : textOrConversationId;
-      
+
       // Validate text parameter
       if (!text || typeof text !== 'string') {
         logger.error(`Invalid text parameter in streamOptimizedSpeech: ${JSON.stringify({ text, textOrConversationId, options })}`);
         throw new Error('Text parameter is required and must be a string');
       }
-      
+
       if (isConversationOverload && !options?.text) {
         // This is a problem - we don't have text for the conversation overload
         throw new Error('Text parameter is required when using conversation overload');
       }
-      
+
       // If no conversationId is provided, reuse the last active one or create a new one
       if (!conversationId) {
         const existingIds = Array.from(this.conversations.keys());
@@ -1306,20 +1316,20 @@ export class ElevenLabsSDKService extends EventEmitter {
           logger.debug(`Created new persistent conversation ID: ${conversationId}`);
         }
       }
-      
+
       // Check cache first
       const cacheKey = `${voiceId}_${text}`;
       if (this.responseCache && this.responseCache.has(cacheKey)) {
         onAudioChunk(this.responseCache.get(cacheKey));
         return;
       }
-      
+
       // Default to balanced profile if none specified
       const profile = options?.optimizationProfile || 'balanced';
       // Import directly to avoid issues with voiceSettings
       const { voiceSettings } = require('../config/latencyOptimization');
       const profileSettings = voiceSettings[profile];
-      
+
       // Set latency optimization level based on profile
       let latencyOptimization: boolean | number = false;
       if (profile === 'ultraLow') {
@@ -1331,10 +1341,10 @@ export class ElevenLabsSDKService extends EventEmitter {
       } else {
         latencyOptimization = 0; // No optimization for high quality
       }
-      
+
       // Collect all chunks to store in cache if needed
       const chunks: Buffer[] = [];
-      
+
       // Create a proxy callback that captures audio chunks for caching
       const onAudioChunkProxy = (chunk: Buffer) => {
         // Ensure chunk is a proper Buffer
@@ -1344,7 +1354,7 @@ export class ElevenLabsSDKService extends EventEmitter {
         // Forward to caller
         onAudioChunk(bufferChunk);
       };
-      
+
       // Use appropriate method based on whether we have a valid conversationId
       if (conversationId && this.conversations.has(conversationId)) {
         // Use the persistent conversation for consistent voice settings
@@ -1375,7 +1385,7 @@ export class ElevenLabsSDKService extends EventEmitter {
           messages: [],
           isGenerating: false
         });
-        
+
         // Now use it for streaming
         await this.streamSpeech(
           conversationId,
@@ -1409,7 +1419,7 @@ export class ElevenLabsSDKService extends EventEmitter {
           conversationId  // Pass the persistent conversation ID
         );
       }
-      
+
       // Cache the complete audio if it's short or caching was explicitly requested
       if ((options?.cacheResult || text.length < 100) && chunks.length > 0 && this.responseCache) {
         // Ensure all chunks are proper Buffers before concatenating
@@ -1443,16 +1453,16 @@ export function initializeSDKService(
 ): ElevenLabsSDKService | null {
   try {
     console.log('initializeSDKService called with:', {
-        hasApiKey: !!apiKey,
-        apiKeyLength: apiKey?.length || 0,
-      });
-    
+      hasApiKey: !!apiKey,
+      apiKeyLength: apiKey?.length || 0,
+    });
+
     if (!apiKey || apiKey.trim() === '') {
       console.error('Cannot initialize SDK Service: ElevenLabs API key is missing or empty');
       logger.error('Cannot initialize SDK Service: ElevenLabs API key is missing or empty');
       return null;
     }
-    
+
     if (!sdkService) {
       console.log('Creating new ElevenLabsSDKService instance...');
       sdkService = new ElevenLabsSDKService(apiKey);
@@ -1465,13 +1475,13 @@ export function initializeSDKService(
       console.log('ElevenLabs SDK Service updated with new API keys');
       logger.info('ElevenLabs SDK Service updated with new API keys');
     }
-    
+
     // Do a quick validation of the API key by attempting to get voices
     // This is wrapped in a Promise.race to timeout if it takes too long
     const timeoutPromise = new Promise<void>((_, reject) => {
       setTimeout(() => reject(new Error('API validation timed out')), 5000);
     });
-    
+
     // Attempt to validate the API in the background without blocking
     Promise.race([
       (async () => {
@@ -1491,7 +1501,7 @@ export function initializeSDKService(
       console.warn(`API validation check: ${getErrorMessage(error)}`);
       logger.warn(`API validation check: ${getErrorMessage(error)}`);
     });
-    
+
     return sdkService;
   } catch (error) {
     console.error(`Failed to initialize ElevenLabs SDK Service: ${getErrorMessage(error)}`);

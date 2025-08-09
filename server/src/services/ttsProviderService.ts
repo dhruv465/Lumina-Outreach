@@ -184,10 +184,25 @@ export class TTSProviderService {
       throw new Error('ElevenLabs service not initialized');
     }
 
+    // Get configuration voice settings to pass to synthesis
+    const config = await this.getTTSConfig();
+    const campaignVoiceSettings = config?.elevenLabsConfig ? {
+      speed: config.elevenLabsConfig.voiceSpeed,
+      stability: config.elevenLabsConfig.voiceStability,
+      clarity: config.elevenLabsConfig.voiceClarity
+    } : undefined;
+
+    logger.info('TTS synthesis with voice settings:', {
+      voiceId: options.voiceId,
+      campaignVoiceSettings,
+      textLength: options.text.length
+    });
+
     const result = await this.elevenLabsService.synthesizeAdaptiveVoice({
       text: options.text,
       personalityId: options.voiceId || 'default-voice-id',
-      language: options.language || 'en'
+      language: options.language || 'en',
+      campaignVoiceSettings
     });
 
     return {

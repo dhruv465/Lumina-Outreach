@@ -19,29 +19,12 @@ export class PerformanceMonitorStub {
 
   public getCurrentMetrics(): PerformanceMetrics {
     return {
-      timestamp: new Date().toISOString(),
-      memory: {
-        used: 104857600, // 100MB
-        total: 8589934592, // 8GB
-        heapUsed: 26214400, // 25MB
-        heapTotal: 52428800, // 50MB
-        external: 10485760, // 10MB
-        rss: 104857600 // 100MB
-      },
-      cpu: {
-        usage: 25.5,
-        loadAverage: [0.5, 0.3, 0.2]
-      },
-      system: {
-        uptime: 3600,
-        platform: 'darwin',
-        arch: 'x64',
-        nodeVersion: process.version
-      },
-      v8: {
-        heapSpaceStatistics: [],
-        heapStatistics: {}
-      }
+      timestamp: new Date(),
+      cpuUsage: 25.5,
+      memoryUsage: process.memoryUsage().heapUsed / 1024 / 1024, // MB
+      responseTime: 150,
+      requestCount: 100,
+      errorCount: 2
     };
   }
 

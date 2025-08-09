@@ -195,6 +195,29 @@ export interface IConfiguration {
   save(): Promise<any>;
 }
 
+// TTS Configuration Types
+export interface DeepgramTTSConfig {
+  apiKey: string;
+  isEnabled: boolean;
+  defaultModel: string;
+  availableModels: string[];
+  voiceSettings: {
+    encoding: string;
+    sampleRate: number;
+  };
+  lastVerified?: Date | null;
+  status?: 'unverified' | 'verified' | 'failed';
+  lastError?: string;
+}
+
+export interface TTSConfig {
+  provider: 'elevenlabs' | 'deepgram' | 'openai' | 'google' | 'aws';
+  primaryProvider: string;
+  fallbackProviders: string[];
+  autoFallback: boolean;
+  deepgramTTS?: DeepgramTTSConfig;
+}
+
 // Update Configuration Interface
 export interface UpdatedConfig {
   twilioConfig?: Partial<TwilioConfig>;
@@ -211,4 +234,5 @@ export interface UpdatedConfig {
   webhookConfig?: Partial<WebhookConfig>;
   voiceAIConfig?: Partial<VoiceAIConfig>;
   deepgramConfig?: Partial<DeepgramConfig>;
+  ttsConfig?: Partial<TTSConfig>;
 }

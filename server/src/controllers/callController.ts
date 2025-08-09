@@ -281,8 +281,30 @@ export const getCallRecording = async (req: Request, res: Response): Promise<Res
     
     if (isStream) {
       const configuration = await Configuration.findOne();
+      console.log('Twilio configuration check:', {
+        hasConfiguration: !!configuration,
+        hasTwilioConfig: !!configuration?.twilioConfig,
+        hasAccountSid: !!configuration?.twilioConfig?.accountSid,
+        hasAuthToken: !!configuration?.twilioConfig?.authToken,
+        isEnabled: configuration?.twilioConfig?.isEnabled
+      });
+      
       if (!configuration || !configuration.twilioConfig || !configuration.twilioConfig.accountSid || !configuration.twilioConfig.authToken) {
-        return res.status(500).json({ message: 'Twilio configuration not found' });
+        logger.error('Twilio configuration missing or incomplete:', {
+          hasConfiguration: !!configuration,
+          hasTwilioConfig: !!configuration?.twilioConfig,
+          hasAccountSid: !!configuration?.twilioConfig?.accountSid,
+          hasAuthToken: !!configuration?.twilioConfig?.authToken
+        });
+        return res.status(500).json({ 
+          message: 'Twilio configuration not found or incomplete',
+          details: {
+            hasConfiguration: !!configuration,
+            hasTwilioConfig: !!configuration?.twilioConfig,
+            hasAccountSid: !!configuration?.twilioConfig?.accountSid,
+            hasAuthToken: !!configuration?.twilioConfig?.authToken
+          }
+        });
       }
       
       try {
@@ -292,8 +314,10 @@ export const getCallRecording = async (req: Request, res: Response): Promise<Res
         );
 
         const twilioRecordingUrl = await getTwilioRecordingUrl(call, client);
+        console.log('Twilio recording URL retrieved:', twilioRecordingUrl);
 
         if (!twilioRecordingUrl) {
+          logger.error('Recording not found in Twilio for call:', call._id);
           return res.status(404).json({ message: 'Recording not found in Twilio' });
         }
 
@@ -303,11 +327,23 @@ export const getCallRecording = async (req: Request, res: Response): Promise<Res
           password: configuration.twilioConfig.authToken
         };
         
+        console.log('Fetching recording from Twilio with auth:', {
+          url: twilioRecordingUrl,
+          hasAuth: !!auth.username && !!auth.password
+        });
+        
         const response = await axios({
           method: 'get',
           url: twilioRecordingUrl,
           responseType: 'stream',
-          auth: auth
+          auth: auth,
+          timeout: 30000 // 30 second timeout
+        });
+        
+        console.log('Twilio recording response:', {
+          status: response.status,
+          contentType: response.headers['content-type'],
+          contentLength: response.headers['content-length']
         });
         
         res.set('Content-Type', response.headers['content-type']);
@@ -317,9 +353,32 @@ export const getCallRecording = async (req: Request, res: Response): Promise<Res
         return response.data.pipe(res);
       } catch (error) {
         logger.error('Error streaming recording:', error);
+        
+        // Check if it's an axios error with response
+        if ((error as any).response) {
+          const axiosError = error as any;
+          logger.error('Axios error details:', {
+            status: axiosError.response.status,
+            statusText: axiosError.response.statusText,
+            data: axiosError.response.data,
+            headers: axiosError.response.headers
+          });
+          
+          if (axiosError.response.status === 401) {
+            return res.status(401).json({
+              message: 'Authentication failed with Twilio',
+              error: 'Invalid Twilio credentials'
+            });
+          }
+        }
+        
         return res.status(500).json({
           message: 'Error streaming recording',
-          error: (error as Error).message
+          error: (error as Error).message,
+          details: (error as any).response ? {
+            status: (error as any).response.status,
+            statusText: (error as any).response.statusText
+          } : undefined
         });
       }
     } else {

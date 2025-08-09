@@ -23,7 +23,8 @@ import {
   AlertCircle,
   ChevronDown,
   Info,
-  RotateCcw
+  RotateCcw,
+  MoreVertical
 } from 'lucide-react';
 import { callsApi } from '@/services/callsApi';
 import { useToast } from '@/hooks/useToast';
@@ -33,6 +34,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -610,14 +618,57 @@ const Calls = () => {
                                 {getOutcomeBadge(call.outcome)}
                               </div>
                               {call.recordingUrl && (
-                                <Button 
-                                  variant="outline" 
-                                  size="icon"
-                                  onClick={() => handlePlayRecording(call._id, call.recordingUrl)}
-                                  className="h-8 w-8"
-                                >
-                                  <Volume2 className="h-4 w-4" />
-                                </Button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button 
+                                      variant="outline" 
+                                      size="icon"
+                                      className="h-8 w-8"
+                                    >
+                                      <MoreVertical className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem 
+                                      onClick={() => {
+                                        // Stop any currently playing audio when toggling
+                                        setCurrentPlayingId(null);
+                                        setCalls(prevCalls => 
+                                          prevCalls.map(c => 
+                                            c._id === call._id 
+                                              ? { ...c, expandedRecording: !c.expandedRecording } 
+                                              : c
+                                          )
+                                        );
+                                      }}
+                                    >
+                                      <Volume2 className="h-4 w-4 mr-2" />
+                                      {call.expandedRecording ? 'Hide' : 'Show'} Audio Player
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem 
+                                      onClick={async () => {
+                                        try {
+                                          const response = await fetch(call.recordingUrl!);
+                                          const blob = await response.blob();
+                                          const url = window.URL.createObjectURL(blob);
+                                          const a = document.createElement('a');
+                                          a.href = url;
+                                          a.download = `${call.leadId?.name || 'call'}-${call._id}.mp3`;
+                                          document.body.appendChild(a);
+                                          a.click();
+                                          window.URL.revokeObjectURL(url);
+                                          document.body.removeChild(a);
+                                        } catch (error) {
+                                          console.error('Download failed:', error);
+                                        }
+                                      }}
+                                    >
+                                      <Download className="h-4 w-4 mr-2" />
+                                      Download Recording
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               )}
                               <Button 
                                 variant="ghost" 
@@ -679,15 +730,58 @@ const Calls = () => {
                               </div>
                               <div className="flex space-x-1">
                                 {call.recordingUrl && (
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm"
-                                    onClick={() => handlePlayRecording(call._id, call.recordingUrl)}
-                                    className="flex-shrink-0"
-                                  >
-                                    <Volume2 className="h-4 w-4 mr-1" />
-                                    {currentPlayingId === call._id ? 'Pause' : 'Play'}
-                                  </Button>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button 
+                                        variant="outline" 
+                                        size="sm"
+                                        className="flex-shrink-0"
+                                      >
+                                        <MoreVertical className="h-4 w-4 mr-1" />
+                                        Audio
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem 
+                                        onClick={() => {
+                                          // Stop any currently playing audio when toggling
+                                          setCurrentPlayingId(null);
+                                          setCalls(prevCalls => 
+                                            prevCalls.map(c => 
+                                              c._id === call._id 
+                                                ? { ...c, expandedRecording: !c.expandedRecording } 
+                                                : c
+                                            )
+                                          );
+                                        }}
+                                      >
+                                        <Volume2 className="h-4 w-4 mr-2" />
+                                        {call.expandedRecording ? 'Hide' : 'Show'} Audio Player
+                                      </DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem 
+                                        onClick={async () => {
+                                          try {
+                                            const response = await fetch(call.recordingUrl!);
+                                            const blob = await response.blob();
+                                            const url = window.URL.createObjectURL(blob);
+                                            const a = document.createElement('a');
+                                            a.href = url;
+                                            a.download = `${call.leadId?.name || 'call'}-${call._id}.mp3`;
+                                            document.body.appendChild(a);
+                                            a.click();
+                                            window.URL.revokeObjectURL(url);
+                                            document.body.removeChild(a);
+                                          } catch (error) {
+                                            console.error('Download failed:', error);
+                                          }
+                                        }}
+                                      >
+                                        <Download className="h-4 w-4 mr-2" />
+                                        Download Recording
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
                                 )}
                                 <Button 
                                   variant="ghost" 

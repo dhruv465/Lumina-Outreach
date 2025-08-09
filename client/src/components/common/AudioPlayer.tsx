@@ -397,10 +397,8 @@ const AudioPlayer = ({
           // Set initial volume
           wavesurfer.setVolume(volume);
 
-          // Auto-play if the parent component indicates it should be playing
-          if (isPlaying) {
-            wavesurfer.play();
-          }
+          // Don't auto-play on ready to prevent duplicate playback
+          // The useEffect will handle play/pause state changes
         });
 
         wavesurfer.on("audioprocess", () => {
@@ -410,6 +408,7 @@ const AudioPlayer = ({
         wavesurfer.on("play", () => {
           console.log("WaveSurfer started playing");
           setActuallyPlaying(true);
+          // Only update parent state if it's not already playing
           if (!isPlaying) {
             onPlayPause(true);
           }
@@ -418,6 +417,7 @@ const AudioPlayer = ({
         wavesurfer.on("pause", () => {
           console.log("WaveSurfer paused");
           setActuallyPlaying(false);
+          // Only update parent state if it's currently playing
           if (isPlaying) {
             onPlayPause(false);
           }
@@ -495,10 +495,25 @@ const AudioPlayer = ({
           clearTimeout(loadingTimeout);
         });
 
-        // Use click event for seeking
-        waveformRef.current!.addEventListener("click", () => {
-          if (isPlaying && wavesurfer) {
-            wavesurfer.play();
+        // Use click event for seeking to clicked position
+        waveformRef.current!.addEventListener("click", (e) => {
+          if (wavesurfer && !loading) {
+            const rect = waveformRef.current!.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const progress = clickX / rect.width;
+            const seekTime = progress * wavesurfer.getDuration();
+            
+            console.log("Waveform clicked - seeking to:", seekTime, "seconds");
+            wavesurfer.seekTo(progress);
+            
+            // If currently playing, continue playing after seek
+            if (isPlaying && !actuallyPlaying) {
+              setTimeout(() => {
+                if (wavesurfer && isPlaying) {
+                  wavesurfer.play();
+                }
+              }, 50);
+            }
           }
         });
 
@@ -579,8 +594,9 @@ const AudioPlayer = ({
       actuallyPlaying
     );
 
-    // Avoid infinite loops by checking if the state is already correct
+    // Avoid infinite loops by checking if state is already correct
     if (isPlaying === actuallyPlaying) {
+      console.log('State already synchronized, skipping action');
       return;
     }
 
@@ -884,10 +900,14 @@ const AudioPlayer = ({
           <Button
             variant="outline"
             size="sm"
-            className={`rounded-full h-8 w-8 p-0 flex items-center justify-center flex-shrink-0 border-2 hover:bg-accent hover:text-accent-foreground transition-all ${
+            className={`rounded-full h-10 w-10 p-0 flex items-center justify-center flex-shrink-0 border-2 hover:bg-accent hover:text-accent-foreground transition-all ${
               loading || error !== null
                 ? "opacity-50 cursor-not-allowed"
                 : "opacity-100 cursor-pointer"
+            } ${
+              isPlaying || actuallyPlaying 
+                ? "bg-primary text-primary-foreground hover:bg-primary/90" 
+                : "bg-background"
             }`}
             onClick={handlePlayPause}
             disabled={loading || error !== null}
@@ -897,8 +917,8 @@ const AudioPlayer = ({
                 : error
                 ? "Error - cannot play"
                 : isPlaying || actuallyPlaying
-                ? "Pause"
-                : "Play"
+                ? "Pause Audio"
+                : "Play Audio"
             }
             aria-label={
               loading
@@ -909,14 +929,14 @@ const AudioPlayer = ({
                 ? "Pause audio"
                 : "Play audio"
             }
-            style={{ minWidth: "32px", minHeight: "32px" }}
+            style={{ minWidth: "40px", minHeight: "40px" }}
           >
             {loading ? (
-              <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              <div className="h-5 w-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
             ) : isPlaying || actuallyPlaying ? (
-              <Pause className="h-4 w-4" />
+              <Pause className="h-5 w-5" />
             ) : (
-              <Play className="h-4 w-4 ml-0.5" />
+              <Play className="h-5 w-5 ml-0.5" />
             )}
           </Button>
 
@@ -1011,7 +1031,7 @@ const AudioPlayer = ({
         </div>
       </div>
 
-      <div className="flex items-center justify-center space-x-2 mb-3">
+      <div className="flex items-center justify-center space-x-3 mb-3">
         <Button
           variant="ghost"
           size="sm"
@@ -1032,6 +1052,36 @@ const AudioPlayer = ({
           title="Skip back 5 seconds"
         >
           <SkipBack className="h-4 w-4" />
+        </Button>
+
+        {/* Central Play/Pause Button */}
+        <Button
+          variant={isPlaying || actuallyPlaying ? "default" : "outline"}
+          size="sm"
+          className={`rounded-full h-12 w-12 p-0 flex items-center justify-center border-2 transition-all ${
+            loading || error !== null
+              ? "opacity-50 cursor-not-allowed"
+              : "opacity-100 cursor-pointer hover:scale-105"
+          }`}
+          onClick={handlePlayPause}
+          disabled={loading || error !== null}
+          title={
+            loading
+              ? "Loading..."
+              : error
+              ? "Error - cannot play"
+              : isPlaying || actuallyPlaying
+              ? "Pause Audio"
+              : "Play Audio"
+          }
+        >
+          {loading ? (
+            <div className="h-6 w-6 border-2 border-current border-t-transparent rounded-full animate-spin" />
+          ) : isPlaying || actuallyPlaying ? (
+            <Pause className="h-6 w-6" />
+          ) : (
+            <Play className="h-6 w-6 ml-0.5" />
+          )}
         </Button>
 
         <Button

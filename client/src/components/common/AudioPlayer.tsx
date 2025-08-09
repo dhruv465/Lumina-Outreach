@@ -44,6 +44,35 @@ const AudioPlayer = ({
   const [actuallyPlaying, setActuallyPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
+  // Test function to verify server endpoint (for debugging)
+  const testServerEndpoint = async (callId: string) => {
+    try {
+      console.log('Testing server endpoint for call ID:', callId);
+      const testUrl = `/calls/${callId}/recording?stream=true`;
+      console.log('Test URL:', testUrl);
+      
+      const response = await api.get(testUrl, {
+        responseType: 'blob',
+        headers: {
+          'Accept': 'audio/mpeg, audio/wav, audio/*'
+        },
+        timeout: 10000
+      });
+      
+      console.log('Test response:', {
+        status: response.status,
+        contentType: response.headers['content-type'],
+        size: response.data?.size,
+        hasData: !!response.data
+      });
+      
+      return response.data?.size > 0;
+    } catch (error) {
+      console.error('Test endpoint failed:', error);
+      return false;
+    }
+  };
+
   // Function to fetch authenticated audio and create blob URL
   const fetchAuthenticatedAudio = async (url: string): Promise<string> => {
     try {
@@ -225,6 +254,11 @@ const AudioPlayer = ({
     }
   };
   
+  // Expose test function globally for debugging
+  useEffect(() => {
+    (window as any).testAudioEndpoint = () => testServerEndpoint(callId);
+  }, [callId]);
+
   useEffect(() => {
     if (!waveformRef.current) return;
     
@@ -823,6 +857,18 @@ const AudioPlayer = ({
               }}
             >
               Use Simple Player
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={async () => {
+                console.log('Testing server endpoint...');
+                const result = await testServerEndpoint(callId);
+                console.log('Test result:', result);
+                alert(`Server endpoint test: ${result ? 'SUCCESS' : 'FAILED'} - Check console for details`);
+              }}
+            >
+              Test Server
             </Button>
           </div>
         </div>

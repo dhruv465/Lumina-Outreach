@@ -186,7 +186,7 @@ const CampaignSchema = new mongoose.Schema(
       provider: {
         type: String,
         default: 'elevenlabs',
-        enum: ['elevenlabs', 'google', 'aws'],
+        enum: ['elevenlabs', 'deepgram', 'openai', 'google', 'aws'],
       },
       voiceId: {
         type: String,
@@ -255,7 +255,7 @@ const CampaignSchema = new mongoose.Schema(
 );
 
 // Validate voice configuration before saving
-CampaignSchema.pre('save', async function(next) {
+CampaignSchema.pre('save', async function (next) {
   try {
     if (this.isModified('voiceConfiguration.voiceId')) {
       // Import directly to avoid circular dependencies
@@ -265,7 +265,7 @@ CampaignSchema.pre('save', async function(next) {
     }
     next();
   } catch (error) {
-    next(error); 
+    next(error);
   }
 });
 

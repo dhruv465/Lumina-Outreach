@@ -123,12 +123,19 @@ export class TwilioWebSocketServer {
             conversationId,
             streamSid: message.streamSid
           });
+          // Store stream metadata on WebSocket for later use
+          (ws as any).streamSid = message.streamSid;
+          (ws as any).sequenceNumber = 0;
         } else if (message.event === 'start') {
+          const streamSid = message.start?.streamSid || message.streamSid;
           logger.info('Twilio Media Stream started', {
             callId,
             conversationId,
-            streamSid: message.start?.streamSid
+            streamSid: streamSid
           });
+          // Store stream metadata on WebSocket for later use
+          (ws as any).streamSid = streamSid;
+          (ws as any).sequenceNumber = 0;
         } else if (message.event === 'media') {
           // Handle incoming audio data with chunking (inspired by Deepgram Voice Agent)
           const audioPayload = message.media?.payload;
@@ -628,8 +635,6 @@ export class TwilioWebSocketServer {
    * @param data Event data
    */
   private emitAudioEvent(callId: string, conversationId: string, event: string, data: any): void {
-    // You can integrate this with your telephony service
-    // For now, we'll just log the event
     logger.debug(`Audio event for call ${callId}:`, {
       event,
       conversationId,
@@ -637,8 +642,201 @@ export class TwilioWebSocketServer {
       timestamp: data.timestamp
     });
 
-    // If you have access to the telephony service, you can emit events there
-    // this.telephonyService?.handleCallAudioEvent(callId, event, data);
+    // Process audio chunks when received
+    if (event === 'audioChunkReceived' && data.audioBuffer) {
+      // Process audio asynchronously to avoid blocking the WebSocket
+      setImmediate(async () => {
+        try {
+          await this.processReceivedAudio(callId, conversationId, data.audioBuffer);
+        } catch (error) {
+          logger.error(`Error processing received audio for call ${callId}:`, error);
+        }
+      });
+    }
+  }
+
+  /**
+   * Process received audio chunk and generate AI response
+   */
+  private async processReceivedAudio(callId: string, conversationId: string, audioBuffer: Buffer): Promise<void> {
+    try {
+      logger.info(`Processing audio chunk for call ${callId}, size: ${audioBuffer.length} bytes`);
+      
+      // Get configuration for speech services
+      const Configuration = require('../models/Configuration').default;
+      const config = await Configuration.findOne();
+      if (!config) {
+        logger.error('No configuration found for audio processing');
+        return;
+      }
+      
+      // Get conversation session from the conversation engine
+      const { conversationEngine } = await import('./index');
+      let session = conversationEngine.getSession(conversationId);
+      if (!session) {
+        logger.warn(`No session found for conversation ${conversationId}, creating new one`);
+        const Call = require('../models/Call').default;
+        const call = await Call.findById(callId);
+        if (!call) {
+          logger.error(`No call found with ID ${callId}`);
+          return;
+        }
+        
+        const newConversationId = await conversationEngine.startConversation(
+          callId,
+          call.leadId.toString(),
+          call.campaignId.toString(),
+          call.personalityId
+        );
+        session = conversationEngine.getSession(newConversationId);
+        if (!session) {
+          logger.error('Failed to create conversation session');
+          return;
+        }
+      }
+      
+      // Transcribe audio using available speech recognition service
+      let transcribedText = '';
+      
+      // Try to use Deepgram if configured
+      if (config.deepgramConfig?.isEnabled && config.deepgramConfig?.apiKey) {
+        try {
+          const speechAnalysisService = conversationEngine.getSpeechAnalysisService();
+          const transcriptionResult = await speechAnalysisService.transcribeAudio(audioBuffer);
+          transcribedText = transcriptionResult.transcript || '';
+          
+          logger.info(`Deepgram transcription for call ${callId}: "${transcribedText.substring(0, 100)}..."`);
+        } catch (deepgramError) {
+          logger.error(`Deepgram transcription failed for call ${callId}:`, deepgramError);
+        }
+      }
+      
+      // Skip processing if no meaningful speech detected
+      if (!transcribedText || transcribedText.trim().length < 3) {
+        logger.debug(`No meaningful speech detected for call ${callId}`);
+        return;
+      }
+      
+      // Process the transcribed text with conversation engine
+      const aiResponse = await conversationEngine.processUserInput(conversationId, transcribedText);
+      
+      logger.info(`AI response for call ${callId}: "${aiResponse.text.substring(0, 100)}..."`);
+      
+      // Generate speech from AI response
+      await this.generateAndSendAudioResponse(aiResponse.text, callId, session, config);
+      
+    } catch (error) {
+      logger.error(`Error in processReceivedAudio for call ${callId}:`, error);
+    }
+  }
+
+  /**
+   * Generate audio from AI response and send to Twilio
+   */
+  private async generateAndSendAudioResponse(
+    responseText: string,
+    callId: string,
+    session: any,
+    config: any
+  ): Promise<void> {
+    try {
+      // Get voice configuration
+      const Call = require('../models/Call').default;
+      const Campaign = require('../models/Campaign').default;
+      const call = await Call.findById(callId);
+      const campaign = call ? await Campaign.findById(call.campaignId) : null;
+      
+      // Determine voice ID
+      const voiceId = call?.personalityId || 
+                    session.currentPersonality?.voiceId ||
+                    campaign?.voiceConfiguration?.voiceId ||
+                    config?.voiceAIConfig?.conversationalAI?.defaultVoiceId ||
+                    'default';
+      
+      // Get TTS provider configuration
+      const selectedTTSProvider = config.ttsConfig?.provider || 'elevenlabs';
+      
+      if (selectedTTSProvider === 'elevenlabs' && config.elevenLabsConfig?.isEnabled) {
+        // Use ElevenLabs for synthesis
+        const { EnhancedVoiceAIService } = await import('./enhancedVoiceAIService');
+        const voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
+        const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
+          text: responseText,
+          personalityId: voiceId,
+          language: session.language === 'Hindi' ? 'hi' : 'en'
+        });
+        
+        if (speechResponse?.audioContent) {
+          this.sendAudioToCall(callId, speechResponse.audioContent);
+          logger.info(`Sent ElevenLabs audio response for call ${callId}`);
+        }
+      } else if (selectedTTSProvider === 'deepgram' && config.deepgramConfig?.isEnabled) {
+        // Use Deepgram TTS
+        const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
+        const speechResponse = await synthesizeSpeechWithProvider(
+          config,
+          responseText,
+          voiceId,
+          session.language === 'Hindi' ? 'hi' : 'en'
+        );
+        
+        if (speechResponse?.audioContent) {
+          this.sendAudioToCall(callId, speechResponse.audioContent);
+          logger.info(`Sent Deepgram audio response for call ${callId}`);
+        }
+      } else {
+        logger.warn(`TTS provider ${selectedTTSProvider} not configured or available for call ${callId}`);
+      }
+      
+    } catch (error) {
+      logger.error(`Error generating audio response for call ${callId}:`, error);
+    }
+  }
+
+  /**
+   * Send audio data to a specific call via WebSocket
+   */
+  private sendAudioToCall(callId: string, audioData: Buffer): void {
+    // Find the WebSocket connection for this call
+    const connection = this.findConnectionByCallId(callId);
+    if (connection) {
+      const message = {
+        event: 'media',
+        streamSid: connection.streamSid,
+        media: {
+          track: 'outbound',
+          chunk: (++connection.sequenceNumber).toString(),
+          timestamp: Date.now().toString(),
+          payload: audioData.toString('base64')
+        }
+      };
+      
+      if (connection.ws.readyState === WebSocket.OPEN) {
+        connection.ws.send(JSON.stringify(message));
+        logger.debug(`Sent audio to call ${callId}, size: ${audioData.length} bytes`);
+      } else {
+        logger.warn(`WebSocket not open for call ${callId}, state: ${connection.ws.readyState}`);
+      }
+    } else {
+      logger.warn(`No WebSocket connection found for call ${callId}`);
+    }
+  }
+
+  /**
+   * Find WebSocket connection by call ID
+   */
+  private findConnectionByCallId(callId: string): { ws: WebSocket, streamSid: string, sequenceNumber: number } | null {
+    for (const [connectionKey, ws] of this.activeConnections.entries()) {
+      if (connectionKey.startsWith(callId + ':')) {
+        // Get stream metadata stored on the WebSocket
+        const streamSid = (ws as any).streamSid;
+        const sequenceNumber = (ws as any).sequenceNumber || 0;
+        (ws as any).sequenceNumber = sequenceNumber + 1;
+        
+        return { ws, streamSid, sequenceNumber };
+      }
+    }
+    return null;
   }
 
   /**

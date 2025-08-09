@@ -769,14 +769,14 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                         !aiResponse.text.toLowerCase().includes('thank you for your time');
 
                   if (shouldContinue) {
-                        // Continue the conversation with another gather
+                        // Continue the conversation with another gather - use longer timeouts
                         twiml.gather({
                               input: 'speech',
                               action: `${baseUrl}/api/calls/gather?callId=${callId}&conversationId=${conversationId}`,
                               method: 'POST',
-                              speechTimeout: 3,
+                              speechTimeout: 5,  // Increased from 3 to 5
                               speechModel: 'phone_call',
-                              timeout: 5
+                              timeout: 15  // Increased from 5 to 15 for better user experience
                         });
 
                         // Handle no-speech fallback with reasonable behavior
@@ -796,13 +796,14 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                               }
                         );
 
+                        // Give another chance with even longer timeout
                         twiml.gather({
                               input: 'speech',
                               action: `${baseUrl}/api/calls/gather?callId=${callId}&conversationId=${conversationId}`,
                               method: 'POST',
-                              speechTimeout: 3,
+                              speechTimeout: 5,
                               speechModel: 'phone_call',
-                              timeout: 5
+                              timeout: 20  // Increased from 5 to 20 for final attempt
                         });
                   } else {
                         // End the call gracefully
@@ -858,14 +859,14 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                         }
                   );
 
-                  // Give the user another chance to speak
+                  // Give the user another chance to speak with better timeouts
                   twiml.gather({
                         input: 'speech',
                         action: `${baseUrl}/api/calls/gather?callId=${callId}&conversationId=${conversationId}`,
                         method: 'POST',
-                        speechTimeout: 3,
+                        speechTimeout: 5,  // Increased from 3 to 5
                         speechModel: 'phone_call',
-                        timeout: 5
+                        timeout: 15  // Increased from 5 to 15
                   });
 
                   // End the call if they still don't speak
@@ -909,6 +910,30 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
       let callId: string | undefined;
       let conversationId: string | undefined;
       let streamSid: string | undefined;
+      let audioBuffer: Buffer[] = [];
+      let sequenceNumber = 0;
+      let isProcessingAudio = false;
+      
+      // Helper function to send audio back to Twilio
+      const sendAudioToTwilio = (audioData: Buffer) => {
+            if (!streamSid || ws.readyState !== WebSocket.OPEN) {
+                  return;
+            }
+            
+            const message = {
+                  event: 'media',
+                  streamSid: streamSid,
+                  media: {
+                        track: 'outbound',
+                        chunk: (++sequenceNumber).toString(),
+                        timestamp: Date.now().toString(),
+                        payload: audioData.toString('base64')
+                  }
+            };
+            
+            ws.send(JSON.stringify(message));
+      };
+      
       ws.on('message', async (data) => {
             let msg;
             try {
@@ -924,12 +949,21 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
                   }
                   return;
             }
+            
             if (msg.event === 'start') {
-                  streamSid = msg.streamSid;
-                  if (msg.start?.customParameters) {
+                  streamSid = msg.streamSid || msg.start?.streamSid;
+                  
+                  // Extract callId and conversationId from URL path or custom parameters
+                  const urlPath = req.url || '';
+                  const pathMatch = urlPath.match(/\/voice\/optimized-stream\/([^\/]+)\/([^\/\?]+)/);
+                  if (pathMatch) {
+                        callId = pathMatch[1];
+                        conversationId = pathMatch[2];
+                  } else if (msg.start?.customParameters) {
                         callId = msg.start.customParameters.callId;
                         conversationId = msg.start.customParameters.conversationId;
                   }
+                  
                   logger.info(`Media stream started for call ${callId}, conv ${conversationId}, streamSid: ${streamSid}`);
 
                   // Send acknowledgment
@@ -941,23 +975,191 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
                   }
                   return;
             }
+            
             if (!callId || !conversationId || !streamSid) {
                   // still waiting for start event with proper parameters
                   return;
             }
+            
             if (msg.event === 'media' && msg.media?.payload) {
                   // Process inbound audio chunk
                   const payload = msg.media.payload; // base64-encoded audio
-                  // TODO: feed payload to Deepgram or conversation engine
+                  const audioChunk = Buffer.from(payload, 'base64');
+                  audioBuffer.push(audioChunk);
+                  
+                  // Process accumulated audio when we have enough data (every ~1 second of audio)
+                  const totalBufferSize = audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
+                  if (totalBufferSize >= 8192 && !isProcessingAudio) { // 8KB threshold
+                        isProcessingAudio = true;
+                        const completeAudio = Buffer.concat(audioBuffer);
+                        audioBuffer = []; // Reset buffer
+                        
+                        try {
+                              // Process the audio asynchronously to avoid blocking the WebSocket
+                              setImmediate(async () => {
+                                    try {
+                                          await processAudioChunk(completeAudio, callId!, conversationId!, sendAudioToTwilio);
+                                    } catch (error) {
+                                          logger.error(`Error processing audio for call ${callId}:`, error);
+                                    } finally {
+                                          isProcessingAudio = false;
+                                    }
+                              });
+                        } catch (error) {
+                              logger.error(`Error setting up audio processing for call ${callId}:`, error);
+                              isProcessingAudio = false;
+                        }
+                  }
             } else if (msg.event === 'stop') {
                   logger.info(`Media stream stopped for call ${callId}`);
                   streamSid = undefined;
+                  audioBuffer = [];
             }
             // Handle other events if needed...
       });
+      
       ws.on('close', () => {
             logger.info(`Media stream closed for call ${callId}`);
+            audioBuffer = [];
       });
+}
+
+/**
+ * Process an audio chunk and generate AI response
+ */
+async function processAudioChunk(
+      audioData: Buffer, 
+      callId: string, 
+      conversationId: string, 
+      sendAudioToTwilio: (audio: Buffer) => void
+): Promise<void> {
+      try {
+            logger.info(`Processing audio chunk for call ${callId}, size: ${audioData.length} bytes`);
+            
+            // Get configuration for speech services
+            const config = await Configuration.findOne();
+            if (!config) {
+                  logger.error('No configuration found for audio processing');
+                  return;
+            }
+            
+            // Get conversation session
+            let session = conversationEngine.getSession(conversationId);
+            if (!session) {
+                  logger.warn(`No session found for conversation ${conversationId}, creating new one`);
+                  const call = await Call.findById(callId);
+                  if (!call) {
+                        logger.error(`No call found with ID ${callId}`);
+                        return;
+                  }
+                  
+                  const newConversationId = await conversationEngine.startConversation(
+                        callId,
+                        call.leadId.toString(),
+                        call.campaignId.toString(),
+                        call.personalityId
+                  );
+                  session = conversationEngine.getSession(newConversationId);
+                  if (!session) {
+                        logger.error('Failed to create conversation session');
+                        return;
+                  }
+            }
+            
+            // Transcribe audio using available speech recognition service
+            let transcribedText = '';
+            
+            // Try to use Deepgram if configured
+            if (config.deepgramConfig?.isEnabled && config.deepgramConfig?.apiKey) {
+                  try {
+                        const speechAnalysisService = conversationEngine.getSpeechAnalysisService();
+                        const transcriptionResult = await speechAnalysisService.transcribeAudio(audioData);
+                        transcribedText = transcriptionResult.transcript || '';
+                        
+                        logger.info(`Deepgram transcription for call ${callId}: "${transcribedText.substring(0, 100)}..."`);
+                  } catch (deepgramError) {
+                        logger.error(`Deepgram transcription failed for call ${callId}:`, deepgramError);
+                  }
+            }
+            
+            // Skip processing if no meaningful speech detected
+            if (!transcribedText || transcribedText.trim().length < 3) {
+                  logger.debug(`No meaningful speech detected for call ${callId}`);
+                  return;
+            }
+            
+            // Process the transcribed text with conversation engine
+            const aiResponse = await conversationEngine.processUserInput(conversationId, transcribedText);
+            
+            logger.info(`AI response for call ${callId}: "${aiResponse.text.substring(0, 100)}..."`);
+            
+            // Generate speech from AI response
+            await generateAndSendAudioResponse(aiResponse.text, callId, session, config, sendAudioToTwilio);
+            
+      } catch (error) {
+            logger.error(`Error in processAudioChunk for call ${callId}:`, error);
+      }
+}
+
+/**
+ * Generate audio from AI response and send to Twilio
+ */
+async function generateAndSendAudioResponse(
+      responseText: string,
+      callId: string,
+      session: any,
+      config: any,
+      sendAudioToTwilio: (audio: Buffer) => void
+): Promise<void> {
+      try {
+            // Get voice configuration
+            const call = await Call.findById(callId);
+            const campaign = call ? await Campaign.findById(call.campaignId) : null;
+            
+            // Determine voice ID
+            const voiceId = call?.personalityId || 
+                          session.currentPersonality?.voiceId ||
+                          campaign?.voiceConfiguration?.voiceId ||
+                          config?.voiceAIConfig?.conversationalAI?.defaultVoiceId ||
+                          'default';
+            
+            // Get TTS provider configuration
+            const selectedTTSProvider = config.ttsConfig?.provider || 'elevenlabs';
+            
+            if (selectedTTSProvider === 'elevenlabs' && config.elevenLabsConfig?.isEnabled) {
+                  // Use ElevenLabs for synthesis
+                  const voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
+                  const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
+                        text: responseText,
+                        personalityId: voiceId,
+                        language: session.language === 'Hindi' ? 'hi' : 'en'
+                  });
+                  
+                  if (speechResponse?.audioContent) {
+                        sendAudioToTwilio(speechResponse.audioContent);
+                        logger.info(`Sent ElevenLabs audio response for call ${callId}`);
+                  }
+            } else if (selectedTTSProvider === 'deepgram' && config.deepgramConfig?.isEnabled) {
+                  // Use Deepgram TTS
+                  const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
+                  const speechResponse = await synthesizeSpeechWithProvider(
+                        config,
+                        responseText,
+                        voiceId,
+                        session.language === 'Hindi' ? 'hi' : 'en'
+                  );
+                  
+                  if (speechResponse?.audioContent) {
+                        sendAudioToTwilio(speechResponse.audioContent);
+                        logger.info(`Sent Deepgram audio response for call ${callId}`);
+                  }
+            } else {
+                  logger.warn(`TTS provider ${selectedTTSProvider} not configured or available for call ${callId}`);
+            }
+            
+      } catch (error) {
+            logger.error(`Error generating audio response for call ${callId}:`, error);
+      }
 }
 /**
  * Update a call with outcome and notes

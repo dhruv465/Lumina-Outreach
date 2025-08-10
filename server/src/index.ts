@@ -510,10 +510,9 @@ const initializeServices = async () => {
       const googleProvider = config.llmConfig?.providers?.find((p: any) => p.name === 'google');
       googleSpeechApiKey = googleProvider?.apiKey || '';
 
-      // Deepgram for STT (Nova-2)
-      deepgramApiKey = config.deepgramConfig?.apiKey || process.env.DEEPGRAM_API_KEY || '';
-      logger.info('Deepgram API key ' + (deepgramApiKey ? 'found' : 'not found') + ' in configuration' +
-        (process.env.DEEPGRAM_API_KEY && !config.deepgramConfig?.apiKey ? ' (using environment fallback)' : ''));
+      // Deepgram for STT (Nova-2) - now purely database-driven
+      deepgramApiKey = config.deepgramConfig?.apiKey || '';
+      logger.info('Deepgram API key ' + (deepgramApiKey ? 'found' : 'not found') + ' in database configuration');
 
       // Initialize and validate Deepgram auto-configuration with graceful startup
       if (deepgramApiKey) {
@@ -592,12 +591,14 @@ const initializeServices = async () => {
         logger.info('3. Background validation will ensure continued compatibility');
       }
     } else {
-      logger.warn('No configuration found in database, using environment variables as fallback');
-      elevenLabsApiKey = process.env.ELEVENLABS_API_KEY || '';
-      openAIApiKey = process.env.OPENAI_API_KEY || '';
-      anthropicApiKey = process.env.ANTHROPIC_API_KEY || '';
-      googleSpeechApiKey = process.env.GOOGLE_SPEECH_API_KEY || '';
-      deepgramApiKey = process.env.DEEPGRAM_API_KEY || '';
+      logger.info('No configuration found in database, all services will start with empty configuration');
+      logger.info('API keys can be configured dynamically through the web interface');
+      // No environment variable fallbacks - system is now fully dynamic
+      elevenLabsApiKey = '';
+      openAIApiKey = '';
+      anthropicApiKey = '';
+      googleSpeechApiKey = '';
+      deepgramApiKey = '';
     }
 
     // Speech synthesis service

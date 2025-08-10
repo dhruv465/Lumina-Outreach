@@ -770,19 +770,40 @@ export class TwilioWebSocketServer {
           this.sendAudioToCall(callId, speechResponse.audioContent);
           logger.info(`Sent ElevenLabs audio response for call ${callId}`);
         }
-      } else if (selectedTTSProvider === 'deepgram' && config.deepgramConfig?.isEnabled) {
+      } else if (selectedTTSProvider === 'deepgram' && config.ttsConfig?.deepgramTTS?.isEnabled) {
         // Use Deepgram TTS
         const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
+        
+        // Determine appropriate Deepgram model to use
+        let deepgramModel = voiceId;
+        const deepgramModels = [
+          'aura-2-thalia-en', 'aura-asteria-en', 'aura-luna-en', 'aura-stella-en',
+          'aura-athena-en', 'aura-hera-en', 'aura-orion-en', 'aura-arcas-en',
+          'aura-perseus-en', 'aura-angus-en', 'aura-orpheus-en', 'aura-helios-en', 'aura-zeus-en'
+        ];
+        
+        // If voiceId is not a valid Deepgram model, use configured default or safe fallback
+        if (!deepgramModels.includes(voiceId)) {
+          deepgramModel = config.ttsConfig.deepgramTTS.defaultModel || 'aura-2-thalia-en';
+          logger.info(`Voice ID ${voiceId} is not a Deepgram model, using ${deepgramModel} instead`);
+        }
+        
         const speechResponse = await synthesizeSpeechWithProvider(
           config,
           responseText,
-          voiceId,
-          session.language === 'Hindi' ? 'hi' : 'en'
+          deepgramModel,
+          session.language === 'Hindi' ? 'hi' : 'en',
+          { encoding: 'linear16', sampleRate: 8000, model: deepgramModel }
         );
         
         if (speechResponse?.audioContent) {
           this.sendAudioToCall(callId, speechResponse.audioContent);
-          logger.info(`Sent Deepgram audio response for call ${callId}`);
+          logger.info(`Sent Deepgram audio response for call ${callId}`, {
+            model: deepgramModel,
+            encoding: 'linear16',
+            sampleRate: 8000,
+            audioSize: speechResponse.audioContent.length
+          });
         }
       } else {
         logger.warn(`TTS provider ${selectedTTSProvider} not configured or available for call ${callId}`);

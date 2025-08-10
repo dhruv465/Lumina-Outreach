@@ -54,7 +54,8 @@ export async function synthesizeSpeechWithProvider(
   configuration: any,
   text: string,
   voiceId?: string,
-  language: string = 'en'
+  language: string = 'en',
+  options?: { encoding?: string; sampleRate?: number; model?: string }
 ): Promise<{ audioContent: Buffer | null; method: 'tts' | 'fallback' }> {
   try {
     // Auto-detect provider based on voice ID if it looks like a Deepgram model
@@ -92,7 +93,10 @@ export async function synthesizeSpeechWithProvider(
     const response = await ttsProviderService.synthesizeSpeech({
       text,
       voiceId: voiceId || (selectedProvider === 'deepgram' ? 'aura-2-thalia-en' : 'XvRdSQXvmv5jHPGBw0XU'),
-      language
+      model: options?.model,
+      language,
+      encoding: options?.encoding,
+      sampleRate: options?.sampleRate
     });
     
     return {

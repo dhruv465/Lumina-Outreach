@@ -124,10 +124,12 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
       }
     }
     
-    // Initialize ElevenLabs for voice synthesis
-    voiceAI = new EnhancedVoiceAIService(
-      config.elevenLabsConfig.apiKey
-    );
+    // Initialize voice synthesis service only if using ElevenLabs
+    if (selectedTTSProvider === 'elevenlabs') {
+      voiceAI = new EnhancedVoiceAIService(
+        config.elevenLabsConfig.apiKey
+      );
+    }
     
     // Generate initial greeting if this is the first interaction
     if (session.conversationHistory.length === 0) {
@@ -155,8 +157,23 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
               if (pendingOpeningMessage) {
                 const { text, voiceId } = pendingOpeningMessage;
                 try {
-                  const audio = await voiceAI.synthesizeSimpleSpeech(text, voiceId);
-                  if (audio) sendAudioToTwilio(audio);
+                  if (selectedTTSProvider === 'elevenlabs' && voiceAI) {
+                    const audio = await voiceAI.synthesizeSimpleSpeech(text, voiceId);
+                    if (audio) sendAudioToTwilio(audio);
+                  } else if (selectedTTSProvider === 'deepgram') {
+                    // Use Deepgram TTS for opening message
+                    const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
+                    const speechResponse = await synthesizeSpeechWithProvider(
+                      config,
+                      text,
+                      voiceId,
+                      'en',
+                      { encoding: 'linear16', sampleRate: 8000 }
+                    );
+                    if (speechResponse?.audioContent) {
+                      sendAudioToTwilio(speechResponse.audioContent);
+                    }
+                  }
                 } catch (e) { logger.error(e); }
                 pendingOpeningMessage = null;
               }
@@ -278,35 +295,59 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
             // Use the same voice ID that worked for the opening message - prioritize call's personalityId (campaign voice)
             const voiceId = call.personalityId || 
                             session.currentPersonality.voiceId || 
-                            config.elevenLabsConfig.availableVoices[0].voiceId;
+                            (config.elevenLabsConfig?.availableVoices?.[0]?.voiceId);
             
             try {
-              // Synthesize speech using ElevenLabs
-              const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
-                text: aiResponse.text,
-                personalityId: voiceId,
-                language: session.language || 'English'
-              });
-              
-              // Send synthesized audio back through WebSocket
-              if (speechResponse && speechResponse.audioContent) {
-                sendAudioToTwilio(speechResponse.audioContent);
+              if (selectedTTSProvider === 'elevenlabs' && voiceAI) {
+                // Synthesize speech using ElevenLabs
+                const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
+                  text: aiResponse.text,
+                  personalityId: voiceId,
+                  language: session.language || 'English'
+                });
+                
+                // Send synthesized audio back through WebSocket
+                if (speechResponse && speechResponse.audioContent) {
+                  sendAudioToTwilio(speechResponse.audioContent);
+                } else {
+                  throw new Error('No audio content returned for response');
+                }
+              } else if (selectedTTSProvider === 'deepgram') {
+                // Use Deepgram TTS for response
+                const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
+                const speechResponse = await synthesizeSpeechWithProvider(
+                  config,
+                  aiResponse.text,
+                  voiceId,
+                  session.language === 'Hindi' ? 'hi' : 'en',
+                  { encoding: 'linear16', sampleRate: 8000 }
+                );
+                
+                if (speechResponse?.audioContent) {
+                  sendAudioToTwilio(speechResponse.audioContent);
+                } else {
+                  throw new Error('No audio content returned from Deepgram');
+                }
               } else {
-                throw new Error('No audio content returned for response');
+                throw new Error(`TTS provider ${selectedTTSProvider} not properly configured`);
               }
             } catch (voiceError) {
               logger.error(`Error in response voice synthesis for call ${callId}:`, voiceError);
               
-              // Fallback to simpler method
-              try {
-                const fallbackVoice = config.elevenLabsConfig.availableVoices[0].voiceId;
-                const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(aiResponse.text, fallbackVoice);
-                
-                if (fallbackResponse) {
-                  sendAudioToTwilio(fallbackResponse);
+              // Fallback to simpler method only for ElevenLabs
+              if (selectedTTSProvider === 'elevenlabs' && voiceAI) {
+                try {
+                  const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId;
+                  if (fallbackVoice) {
+                    const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(aiResponse.text, fallbackVoice);
+                    
+                    if (fallbackResponse) {
+                      sendAudioToTwilio(fallbackResponse);
+                    }
+                  }
+                } catch (fallbackError) {
+                  logger.error(`Fallback synthesis failed for response in call ${callId}:`, fallbackError);
                 }
-              } catch (fallbackError) {
-                logger.error(`Fallback synthesis failed for response in call ${callId}:`, fallbackError);
               }
             }
           }
@@ -362,13 +403,17 @@ export const handleConversationalAIStream = async (ws: WebSocket, req: Request):
   let voiceAI: EnhancedVoiceAIService | null = null;
   let config;
   let isProcessing = false;
+  let selectedTTSProvider: string;
   
   try {
     logger.info(`Conversational AI stream started: ${conversationId}`);
     
     // Get system configuration
     config = await Configuration.findOne();
-    if (!config || !config.elevenLabsConfig.isEnabled) {
+    selectedTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
+    
+    // Note: Conversational AI streaming is primarily an ElevenLabs feature
+    if (!config || (selectedTTSProvider === 'elevenlabs' && !config.elevenLabsConfig.isEnabled)) {
       logger.error('ElevenLabs not configured for conversational AI');
       ws.close(1008, 'Voice synthesis not configured');
       return;
@@ -434,60 +479,67 @@ export const handleConversationalAIStream = async (ws: WebSocket, req: Request):
             // Start processing flag to prevent other processing while synthesizing
             isProcessing = true;
             
-            // Collect audio chunks
-            const audioChunks: Buffer[] = [];
-            
-            // Start conversation with streaming
-            await voiceAI.createRealisticConversation(
-              initialMessage,
-              voiceId,
-              {
-                conversationId,
-                language: campaign.primaryLanguage || 'English',
-                interruptible: conversationalSettings.interruptible,
-                contextAwareness: true,
-                modelId: conversationalSettings.defaultModelId || 'eleven_multilingual_v2',
-                onAudioChunk: (chunk: Buffer) => {
-                  // Send audio chunk to client in Twilio format
-                  const message = {
-                    event: 'media',
-                    media: {
-                      payload: chunk.toString('base64')
-                    }
-                  };
-                  ws.send(JSON.stringify(message));
-                  audioChunks.push(chunk);
-                },
-                onInterruption: () => {
-                  ws.send(JSON.stringify({
-                    type: 'interrupted',
-                    conversationId
-                  }));
-                },
-                onCompletion: (response) => {
-                  ws.send(JSON.stringify({
-                    type: 'completed',
-                    conversationId,
-                    interrupted: response.interrupted || false,
-                    metadata: response.metadata || {}
-                  }));
-                  
-                  // After the opening message is complete, explicitly transition to listening state
-                  // This ensures the agent continues the conversation
-                  setTimeout(() => {
+            // Only use ElevenLabs conversational AI features when using ElevenLabs
+            if (selectedTTSProvider === 'elevenlabs' && voiceAI) {
+              // Collect audio chunks
+              const audioChunks: Buffer[] = [];
+              
+              // Start conversation with streaming
+              await voiceAI.createRealisticConversation(
+                initialMessage,
+                voiceId,
+                {
+                  conversationId,
+                  language: campaign.primaryLanguage || 'English',
+                  interruptible: conversationalSettings.interruptible,
+                  contextAwareness: true,
+                  modelId: conversationalSettings.defaultModelId || 'eleven_multilingual_v2',
+                  onAudioChunk: (chunk: Buffer) => {
+                    // Send audio chunk to client in Twilio format
+                    const message = {
+                      event: 'media',
+                      media: {
+                        payload: chunk.toString('base64')
+                      }
+                    };
+                    ws.send(JSON.stringify(message));
+                    audioChunks.push(chunk);
+                  },
+                  onInterruption: () => {
                     ws.send(JSON.stringify({
-                      type: 'listening',
+                      type: 'interrupted',
                       conversationId
                     }));
-                    logger.info(`Transitioned to listening state after initial script for conversation ${conversationId}`);
-                    isProcessing = false;
-                  }, 500); // Small delay to ensure client has processed completion
+                  },
+                  onCompletion: (response) => {
+                    ws.send(JSON.stringify({
+                      type: 'completed',
+                      conversationId,
+                      interrupted: response.interrupted || false,
+                      metadata: response.metadata || {}
+                    }));
+                    
+                    // After the opening message is complete, explicitly transition to listening state
+                    // This ensures the agent continues the conversation
+                    setTimeout(() => {
+                      ws.send(JSON.stringify({
+                        type: 'listening',
+                        conversationId
+                      }));
+                      logger.info(`Transitioned to listening state after initial script for conversation ${conversationId}`);
+                      isProcessing = false;
+                    }, 500); // Small delay to ensure client has processed completion
+                  }
                 }
-              }
-            ).catch((error) => {
-              logger.error(`Error sending initial script: ${error.message}`);
+              ).catch((error) => {
+                logger.error(`Error sending initial script: ${error.message}`);
+                isProcessing = false;
+              });
+            } else {
+              // For non-ElevenLabs providers, just send initial script as text
+              logger.info(`Conversational AI streaming not available for ${selectedTTSProvider}, sending script as text`);
               isProcessing = false;
-            });
+            }
           }
         }
       }
@@ -566,54 +618,65 @@ export const handleConversationalAIStream = async (ws: WebSocket, req: Request):
             conversationId
           }));
           
-          // Collect audio chunks
-          const audioChunks: Buffer[] = [];
-          
-          // Start conversation with streaming
-          voiceAI.createRealisticConversation(
-            text,
-            voiceId,
-            {
-              conversationId,
-              language: language,
-              interruptible: conversationalSettings.interruptible,
-              contextAwareness: true,
-              modelId: conversationalSettings.defaultModelId || 'eleven_multilingual_v2',
-              onAudioChunk: (chunk: Buffer) => {
-                // Send audio chunk to client in Twilio format
-                const message = {
-                  event: 'media',
-                  media: {
-                    payload: chunk.toString('base64')
-                  }
-                };
-                ws.send(JSON.stringify(message));
-                audioChunks.push(chunk);
-              },
-              onInterruption: () => {
-                ws.send(JSON.stringify({
-                  type: 'interrupted',
-                  conversationId
-                }));
-              },
-              onCompletion: (response) => {
-                ws.send(JSON.stringify({
-                  type: 'completed',
-                  conversationId,
-                  interrupted: response.interrupted || false,
-                  metadata: response.metadata || {}
-                }));
-                isProcessing = false;
+          // Only use ElevenLabs conversational AI features when using ElevenLabs
+          if (selectedTTSProvider === 'elevenlabs' && voiceAI) {
+            // Collect audio chunks
+            const audioChunks: Buffer[] = [];
+            
+            // Start conversation with streaming
+            voiceAI.createRealisticConversation(
+              text,
+              voiceId,
+              {
+                conversationId,
+                language: language,
+                interruptible: conversationalSettings.interruptible,
+                contextAwareness: true,
+                modelId: conversationalSettings.defaultModelId || 'eleven_multilingual_v2',
+                onAudioChunk: (chunk: Buffer) => {
+                  // Send audio chunk to client in Twilio format
+                  const message = {
+                    event: 'media',
+                    media: {
+                      payload: chunk.toString('base64')
+                    }
+                  };
+                  ws.send(JSON.stringify(message));
+                  audioChunks.push(chunk);
+                },
+                onInterruption: () => {
+                  ws.send(JSON.stringify({
+                    type: 'interrupted',
+                    conversationId
+                  }));
+                },
+                onCompletion: (response) => {
+                  ws.send(JSON.stringify({
+                    type: 'completed',
+                    conversationId,
+                    interrupted: response.interrupted || false,
+                    metadata: response.metadata || {}
+                  }));
+                  isProcessing = false;
+                }
               }
-            }
-          ).catch((error) => {
-            logger.error(`Error in conversational AI: ${error.message}`);
+            ).catch((error) => {
+              logger.error(`Error in conversational AI: ${error.message}`);
+              ws.send(JSON.stringify({
+                type: 'error',
+                message: error.message
+              }));
+              isProcessing = false;
+            });
+          } else {
+            // For non-ElevenLabs providers, conversational AI streaming not supported
+            logger.warn(`Conversational AI streaming not supported for ${selectedTTSProvider}`);
             ws.send(JSON.stringify({
               type: 'error',
-              message: error.message
+              message: 'Conversational AI streaming not supported for this TTS provider'
             }));
             isProcessing = false;
-          });
+          }
         }
       } catch (error: any) {
         logger.error(`Error processing message: ${error.message}`);

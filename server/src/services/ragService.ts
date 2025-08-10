@@ -7,7 +7,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { logger, getErrorMessage } from '../index';
+import logger, { getErrorMessage } from '../utils/logger';
 import { LLMService } from './llm/service';
 import { LLMProvider, LLMChatRequest } from './llm/types';
 import mongoose from 'mongoose';
@@ -94,32 +94,33 @@ export class RAGService extends EventEmitter {
         // Check if MongoDB is connected
         if (mongoose.connection.readyState !== 1) {
           logger.warn('MongoDB not connected. RAG Service will initialize with default configuration.');
-        }
-        
-        // Get configuration from database
-        const Configuration = mongoose.models.Configuration || mongoose.model('Configuration');
-        const config = await Configuration.findOne();
-        
-        if (!config || !config.ragConfig || !config.ragConfig.sources || config.ragConfig.sources.length === 0) {
-          logger.info('No RAG configuration or sources found in database. RAG service will operate with minimal functionality.');
           this.setupDefaultSources();
         } else {
-          // Initialize sources from configuration
-          for (const sourceConfig of config.ragConfig.sources) {
-            if (sourceConfig.isEnabled) {
-              this.sources.set(sourceConfig.id, {
-                id: sourceConfig.id,
-                name: sourceConfig.name,
-                type: sourceConfig.type,
-                connectionInfo: sourceConfig.connectionInfo,
-                isEnabled: true,
-                priority: sourceConfig.priority || 50,
-                maxResultsPerQuery: sourceConfig.maxResultsPerQuery || 5
-              });
-            }
-          }
+          // Get configuration from database
+          const Configuration = mongoose.models.Configuration || mongoose.model('Configuration');
+          const config = await Configuration.findOne();
           
-          logger.info(`RAG Service initialized with ${this.sources.size} sources`);
+          if (!config || !config.ragConfig || !config.ragConfig.sources || config.ragConfig.sources.length === 0) {
+            logger.info('No RAG configuration or sources found in database. RAG service will operate with minimal functionality.');
+            this.setupDefaultSources();
+          } else {
+            // Initialize sources from configuration
+            for (const sourceConfig of config.ragConfig.sources) {
+              if (sourceConfig.isEnabled) {
+                this.sources.set(sourceConfig.id, {
+                  id: sourceConfig.id,
+                  name: sourceConfig.name,
+                  type: sourceConfig.type,
+                  connectionInfo: sourceConfig.connectionInfo,
+                  isEnabled: true,
+                  priority: sourceConfig.priority || 50,
+                  maxResultsPerQuery: sourceConfig.maxResultsPerQuery || 5
+                });
+              }
+            }
+            
+            logger.info(`RAG Service initialized with ${this.sources.size} sources`);
+          }
         }
         
         this.isInitialized = true;

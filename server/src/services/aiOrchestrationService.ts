@@ -13,7 +13,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { logger, getErrorMessage } from '../index';
+import logger, { getErrorMessage } from '../utils/logger';
 import mongoose from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -171,24 +171,28 @@ export class AIOrchestrationService extends EventEmitter {
         // Check if MongoDB is connected
         if (mongoose.connection.readyState !== 1) {
           logger.warn('MongoDB not connected. AI Orchestration Service will initialize with default configuration.');
+          // Initialize services with default/empty configuration instead of querying database
+          await this.initializeLLMService(null);
+          await this.initializeVoiceService(null);
+          await this.initializeSpeechService(null);
+        } else {
+          // Get configuration from database
+          const Configuration = mongoose.models.Configuration || mongoose.model('Configuration');
+          const config = await Configuration.findOne();
+          
+          if (!config) {
+            logger.warn('No configuration found in database. Using default AI service configuration.');
+          }
+          
+          // Initialize LLM service
+          await this.initializeLLMService(config);
+          
+          // Initialize Voice service
+          await this.initializeVoiceService(config);
+          
+          // Initialize Speech service
+          await this.initializeSpeechService(config);
         }
-        
-        // Get configuration from database
-        const Configuration = mongoose.models.Configuration || mongoose.model('Configuration');
-        const config = await Configuration.findOne();
-        
-        if (!config) {
-          logger.warn('No configuration found in database. Using default AI service configuration.');
-        }
-        
-        // Initialize LLM service
-        await this.initializeLLMService(config);
-        
-        // Initialize Voice service
-        await this.initializeVoiceService(config);
-        
-        // Initialize Speech service
-        await this.initializeSpeechService(config);
         
         // Initialize Conversation Engine
         await this.initializeConversationEngine();

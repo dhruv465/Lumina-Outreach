@@ -812,13 +812,26 @@ const startServer = async () => {
       logger.error(`Error initializing rate limiters: ${error.message}`);
     }
 
-    // Initialize AI Orchestration service
-    const { getLLMService } = await import('./services');
-    const llmService = getLLMService();
-    const aiOrchestrationService = getAIOrchestrationService();
-    const ragService = getRAGService(llmService);
+    // Initialize AI Orchestration service with error handling
+    try {
+      const { getLLMService } = await import('./services');
+      const llmService = getLLMService();
+      const aiOrchestrationService = getAIOrchestrationService();
+      const ragService = getRAGService(llmService);
 
-    logger.info('AI Orchestration and RAG services initialized');
+      logger.info('AI Orchestration and RAG services initialized');
+    } catch (error) {
+      logger.error(`Failed to initialize AI Orchestration Service: ${getErrorMessage(error)}`);
+    }
+
+    try {
+      const { getLLMService } = await import('./services');
+      const llmService = getLLMService();
+      const ragService = getRAGService(llmService);
+      logger.info('RAG service initialized');
+    } catch (error) {
+      logger.error(`Failed to initialize RAG Service: ${getErrorMessage(error)}`);
+    }
 
     logger.info('Services initialization completed');
 

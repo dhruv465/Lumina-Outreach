@@ -139,6 +139,12 @@ export class EnhancedVoiceAIService {
    */
   private async initializeLLMService(): Promise<void> {
     try {
+      // Check if database is connected before attempting query
+      if (mongoose.connection.readyState !== 1) {
+        logger.debug('Database not connected yet, skipping LLM service initialization');
+        return;
+      }
+
       // Get LLM configuration from database instead of hardcoding
       const configuration = await mongoose.model('Configuration').findOne();
       if (!configuration || !configuration.llmConfig) {

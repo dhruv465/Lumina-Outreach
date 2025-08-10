@@ -73,7 +73,7 @@ export const callsApi = {
   },
 
   // Sync all Twilio recordings (admin only)
-  syncTwilioRecordings: async (days: number = 30) => {
+  syncTwilioRecordings: async (days = 30) => {
     const response = await api.post('/calls/sync-recordings', { days });
     return response.data;
   },

@@ -136,7 +136,7 @@ const AudioPlayer = ({
       // Check if it's a proxy URL that needs streaming parameter added
       else if (url.includes("/api/calls/") && url.includes("/recording")) {
         // Extract call ID from URL like "/api/calls/CALL_ID/recording"
-        const callIdMatch = url.match(/\/api\/calls\/([^\/]+)\/recording/);
+        const callIdMatch = url.match(/\/api\/calls\/([^/]+)\/recording/);
         if (callIdMatch) {
           const extractedCallId = callIdMatch[1];
           console.log("Extracted call ID:", extractedCallId);
@@ -180,7 +180,7 @@ const AudioPlayer = ({
       let extractedCallId = null;
 
       // Pattern 1: /api/calls/CALL_ID/recording
-      let callIdMatch = url.match(/\/api\/calls\/([^\/]+)\/recording/);
+      let callIdMatch = url.match(/\/api\/calls\/([^/]+)\/recording/);
       if (callIdMatch) {
         extractedCallId = callIdMatch[1];
       }

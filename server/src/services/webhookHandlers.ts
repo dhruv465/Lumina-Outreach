@@ -502,8 +502,6 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                               voiceId: campaign?.voiceConfiguration?.voiceId,
                               language: campaign.primaryLanguage === 'hi' ? 'hi' : 'en',
                               campaignId: campaign?._id?.toString(),
-                              elevenLabsApiKey: configuration?.elevenLabsConfig?.apiKey,
-                              llmApiKey: defaultLlmProvider?.apiKey, // Use the configured default LLM API key
                               fallbackBehavior: 'tts' // Use Twilio TTS as fallback instead of empty audio
                         }
                   );

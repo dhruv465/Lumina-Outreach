@@ -13,7 +13,7 @@ import logger from './logger';
  * @param fallbackVoiceId Optional fallback voice ID to use if no configuration is found
  * @returns Promise<string> The preferred voice ID
  */
-export async function getPreferredVoiceId(fallbackVoiceId: string = 'pFZP5JQG7iQjIQuC4Bku'): Promise<string> {
+export async function getPreferredVoiceId(fallbackVoiceId = 'pFZP5JQG7iQjIQuC4Bku'): Promise<string> {
   try {
     const configuration = await mongoose.model('Configuration').findOne();
     

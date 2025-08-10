@@ -312,7 +312,7 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                                     const voiceAIService = new EnhancedVoiceAIService(configuration.elevenLabsConfig?.apiKey || '');
                                     const speechResponse = await voiceAIService.synthesizeAdaptiveVoice({
                                           text: formattedGreeting,
-                                          personalityId: voiceId,
+                                          personalityId: requestedVoiceId,
                                           language: campaign.primaryLanguage === 'hi' ? 'hi' : 'en'
                                     });
 

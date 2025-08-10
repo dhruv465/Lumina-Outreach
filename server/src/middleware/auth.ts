@@ -43,3 +43,6 @@ export const authenticate = async (
     return res.status(401).json({ message: 'Token is not valid' });
   }
 };
+
+// Export as requireAuth for compatibility
+export const requireAuth = authenticate;

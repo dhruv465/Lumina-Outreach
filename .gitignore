@@ -732,4 +732,4 @@ deployment/backups/
 
 # remove kiros files
 
-.kiro/
+.kiro/test_*.js

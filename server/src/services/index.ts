@@ -218,8 +218,7 @@ export {
   getDeepgramValidationService
 } from './deepgramValidationService';
 
-// Export Deepgram Model Metrics
-export { deepgramModelMetrics } from '../monitoring/deepgramModelMetrics';
+// Deepgram Model Metrics removed
 
 // Export service instances
 export {
@@ -244,14 +243,7 @@ export const initializeServicesAfterDB = async () => {
       logger.error('Failed to initialize Deepgram controller:', deepgramError);
     }
 
-    // Initialize Deepgram Model Metrics service
-    try {
-      const { deepgramModelMetrics } = await import('../monitoring/deepgramModelMetrics');
-      deepgramModelMetrics.start();
-      logger.info('Deepgram model metrics service started successfully');
-    } catch (metricsError) {
-      logger.error('Failed to start Deepgram model metrics service:', metricsError);
-    }
+  // Monitoring metrics service initialization removed
     
     console.log('About to initialize services with keys:', {
       hasElevenLabsKey: !!elevenLabsApiKey,

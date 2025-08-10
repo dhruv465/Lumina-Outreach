@@ -25,7 +25,7 @@ import deepgramTTSRoutes from './routes/deepgramTTSRoutes';
 import ttsProviderRoutes from './routes/ttsProviderRoutes';
 import knowledgeRoutes from './routes/knowledgeRoutes';
 import leadRoutes from './routes/leadRoutes';
-import metricsRoutes from './routes/metricsRoutes';
+// Monitoring routes removed
 import rootWebhookRoutes from './routes/rootWebhookRoutes';
 import streamRoutes from './routes/streamRoutes';
 import telephonyRoutes from './routes/telephonyRoutes';
@@ -339,22 +339,7 @@ app.get('/', (_, res) =>
   res.json({ message: 'Lumina Outreach API is up 🚀' })
 );
 
-// Metrics endpoint for monitoring
-app.get('/metrics', (_req, res) => {
-  const metrics = {
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    cpu: process.cpuUsage(),
-    database: {
-      readyState: mongoose.connection.readyState,
-      name: mongoose.connection.name
-    },
-    activeConnections: io.engine.clientsCount
-  };
-
-  res.status(200).json(metrics);
-});
+// Metrics endpoint removed
 
 // API Routes with enhanced security and monitoring
 app.use('/api/users/login', authLimiter); // Apply strict rate limiting to login
@@ -384,7 +369,7 @@ app.use('/api/transcription', transcriptionRoutes);
 app.use('/api/deepgram-metrics', (req, res) => {
   res.status(503).json({ error: 'Deepgram metrics service temporarily unavailable' });
 }); // Temporarily disabled Deepgram metrics routes
-app.use('/api/metrics', metricsRoutes); // Advanced monitoring and metrics endpoints
+// Monitoring API routes removed
 app.use('/api/deepgram', deepgramTestRoutes); // Deepgram testing routes
 app.use('/api/deepgram-tts', deepgramTTSRoutes); // Deepgram TTS routes
 app.use('/api/tts-provider', ttsProviderRoutes); // TTS Provider management routes
@@ -852,7 +837,7 @@ const startServer = async () => {
       logger.info('Service endpoints:', {
         health: `http://${HOST}:${PORT}/health`,
         ready: `http://${HOST}:${PORT}/ready`,
-        metrics: `http://${HOST}:${PORT}/metrics`,
+  // metrics endpoint removed
         api: `http://${HOST}:${PORT}/api`
       });
 
@@ -897,14 +882,7 @@ const startServer = async () => {
         logger.error(`Error initializing temp file cleanup: ${error.message}`);
       }
 
-      // Initialize monitoring and metrics systems
-      try {
-        const { initializeMonitoringSystems } = require('./monitoring/initializeMetrics');
-        initializeMonitoringSystems();
-        logger.info('Monitoring and metrics systems initialized');
-      } catch (error) {
-        logger.error(`Error initializing monitoring systems: ${error.message}`);
-      }
+  // Monitoring and metrics systems removed
     });
 
     // Handle server errors

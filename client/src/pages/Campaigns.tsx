@@ -36,7 +36,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import CampaignForm from '@/components/campaigns/CampaignForm';
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@/components/ui/Skeleton";
 
 // Types
 interface Campaign {

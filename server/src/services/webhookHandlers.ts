@@ -476,24 +476,49 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                         input: 'speech',
                         action: `${process.env.WEBHOOK_BASE_URL}/api/calls/gather?callId=${callId}&conversationId=${conversationId}`,
                         method: 'POST',
-                        speechTimeout: 3,
+                        speechTimeout: 5,  // Increased from 3 to 5 seconds for better speech detection
                         speechModel: 'phone_call',
-                        timeout: 10,  // Increased timeout to give user more time
+                        timeout: 20,  // Increased from 10 to 20 seconds to give user more time to respond
                         numDigits: 1  // Allow for backup DTMF input
                   });
 
                   // Add a brief pause to let the greeting audio finish
-                  gather.pause({ length: 1 });
+                  gather.pause({ length: 2 }); // Increased pause to ensure greeting completes
 
-                  // Only add timeout fallback - this will only execute if no speech is detected
+                  // Add a prompt for user to respond within the gather
+                  const promptMessage = "Please feel free to share your thoughts or let me know if you have any questions.";
+                  gather.say({
+                        voice: 'alice',
+                        language: campaign.primaryLanguage === 'hi' ? 'hi-IN' : 'en-US'
+                  }, promptMessage);
+
+                  // IMPORTANT: Only add timeout fallback AFTER gather - this handles cases where user doesn't speak at all
                   // Get message from configuration for timeout handling
                   const config = await Configuration.findOne();
+                  const noResponseMessage = config?.errorMessages?.noSpeechDetected || "I didn't hear anything. Let me try once more - please speak when you're ready.";
+
+                  // Give one more chance with another gather after no response
+                  const secondGather = twiml.gather({
+                        input: 'speech',
+                        action: `${process.env.WEBHOOK_BASE_URL}/api/calls/gather?callId=${callId}&conversationId=${conversationId}`,
+                        method: 'POST',
+                        speechTimeout: 5,
+                        speechModel: 'phone_call',
+                        timeout: 25  // Even longer timeout for second attempt
+                  });
+
+                  secondGather.say({
+                        voice: 'alice',
+                        language: campaign.primaryLanguage === 'hi' ? 'hi-IN' : 'en-US'
+                  }, noResponseMessage);
+
+                  // Only hang up after giving user multiple chances to respond
                   const goodbyeMessage = config?.callResponses?.goodbye || "Thank you for your time. Goodbye.";
 
                   // Determine the default LLM provider and pass its key
                   const defaultLlmProviderName = configuration?.llmConfig?.defaultProvider;
                   const defaultLlmProvider = configuration?.llmConfig?.providers?.find(p => p.name === defaultLlmProviderName);
-                  // Use ElevenLabs for goodbye message - only on timeout
+                  // Use ElevenLabs for goodbye message - only after multiple timeout attempts
                   const usedElevenLabs = await synthesizeVoiceResponse(
                         twiml,
                         goodbyeMessage,
@@ -776,7 +801,7 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                               method: 'POST',
                               speechTimeout: 5,  // Increased from 3 to 5
                               speechModel: 'phone_call',
-                              timeout: 15  // Increased from 5 to 15 for better user experience
+                              timeout: 20  // Increased from 15 to 20 for better user experience
                         });
 
                         // Handle no-speech fallback with reasonable behavior
@@ -803,7 +828,7 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                               method: 'POST',
                               speechTimeout: 5,
                               speechModel: 'phone_call',
-                              timeout: 20  // Increased from 5 to 20 for final attempt
+                              timeout: 25  // Increased from 20 to 25 for final attempt
                         });
                   } else {
                         // End the call gracefully
@@ -866,7 +891,7 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                         method: 'POST',
                         speechTimeout: 5,  // Increased from 3 to 5
                         speechModel: 'phone_call',
-                        timeout: 15  // Increased from 5 to 15
+                        timeout: 20  // Increased from 15 to 20 for better patience
                   });
 
                   // End the call if they still don't speak

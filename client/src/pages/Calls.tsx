@@ -199,69 +199,6 @@ const Calls = () => {
     return matchesSearch && matchesStatus;
   });
 
-  // Function to play or pause a call recording
-  const handlePlayRecording = async (callId: string, recordingUrl?: string) => {
-    try {
-      let audioUrl = recordingUrl;
-      
-      // If no recording URL provided, fetch it from the API
-      if (!audioUrl) {
-        console.log('Fetching recording URL for call:', callId);
-        const response = await callsApi.getCallRecording(callId);
-        console.log('API response:', response);
-        audioUrl = response.recordingUrl;
-        console.log('Extracted recording URL:', audioUrl);
-        
-        // Update the call with the fetched recording URL
-        setCalls(prevCalls => 
-          prevCalls.map(call => 
-            call._id === callId 
-              ? { ...call, recordingUrl: audioUrl } 
-              : call
-          )
-        );
-      }
-
-      if (!audioUrl) {
-        toast({
-          title: "Playback Error",
-          description: "No recording available for this call.",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      console.log('Original audioUrl:', audioUrl);
-      console.log('VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
-      
-      if (!audioUrl.startsWith('http')) {
-        audioUrl = `${import.meta.env.VITE_API_BASE_URL || ''}${audioUrl}`;
-      }
-      
-      console.log('Final audioUrl for player:', audioUrl);
-
-      // Always expand the recording UI and start playing
-      setCalls(prevCalls => 
-        prevCalls.map(call => 
-          call._id === callId 
-            ? { ...call, expandedRecording: true, recordingUrl: audioUrl } 
-            : { ...call, expandedRecording: false } // Close other expanded recordings
-        )
-      );
-      
-      // Set this call as the currently playing one
-      setCurrentPlayingId(callId);
-      
-    } catch (error) {
-      console.error('Error playing recording:', error);
-      toast({
-        title: "Playback Error",
-        description: "There was a problem playing this recording. Please try again.",
-        variant: "destructive"
-      });
-    }
-  };
-  
   // Function for admins to sync all Twilio recordings
   const handleSyncRecordings = async () => {
     try {

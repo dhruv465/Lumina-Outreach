@@ -1,10 +1,7 @@
-import { EnhancedVoiceAIService } from '../services/enhancedVoiceAIService';
 import Configuration from '../models/Configuration';
 import Campaign from '../models/Campaign';
 import logger from './logger';
 import { getErrorMessage } from './logger';
-import fs from 'fs';
-import path from 'path';
 import { getPreferredVoiceId } from './voiceUtils';
 import cloudinaryService from './cloudinaryService';
 
@@ -21,8 +18,6 @@ export async function synthesizeVoiceResponse(
   options: {
     voiceId?: string;
     language?: string;
-    elevenLabsApiKey?: string;
-    llmApiKey?: string; // Changed from openAIApiKey to be more generic
     campaignId?: string;
     fallbackBehavior?: 'silent' | 'empty-audio' | 'tts';
   }
@@ -30,8 +25,6 @@ export async function synthesizeVoiceResponse(
   const {
     voiceId: requestedVoiceId,
     language = 'en',
-    elevenLabsApiKey,
-    llmApiKey, // Use the more generic llmApiKey
     campaignId,
     fallbackBehavior = 'empty-audio'
   } = options;

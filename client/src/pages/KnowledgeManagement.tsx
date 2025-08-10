@@ -1,5 +1,5 @@
 import { Edit, FileText, FolderTree, Plus, Search, Tag, Trash2, UploadCloud } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -46,10 +46,6 @@ interface Tag {
   color?: string;
 }
 
-interface UploadedFile extends File {
-  // Add any additional properties if needed
-}
-
 const KnowledgeManagement = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -61,7 +57,7 @@ const KnowledgeManagement = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadFiles, setUploadFiles] = useState<UploadedFile[]>([]);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [newTagName, setNewTagName] = useState('');
@@ -71,15 +67,8 @@ const KnowledgeManagement = () => {
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
 
-  // Fetch initial data
-  useEffect(() => {
-    fetchDocuments();
-    fetchCategories();
-    fetchTags();
-  }, []);
-
   // Fetch documents
-  const fetchDocuments = async (filters = {}) => {
+  const fetchDocuments = useCallback(async (filters = {}) => {
     try {
       setIsLoading(true);
       const response = await api.get('/api/knowledge/documents', { params: filters });
@@ -94,10 +83,10 @@ const KnowledgeManagement = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [toast]);
 
   // Fetch categories
-  const fetchCategories = async () => {
+  const fetchCategories = useCallback(async () => {
     try {
       const response = await api.get('/api/knowledge/categories');
       setCategories(response.data.categories || []);
@@ -109,10 +98,10 @@ const KnowledgeManagement = () => {
       });
       console.error('Error fetching categories:', error);
     }
-  };
+  }, [toast]);
 
   // Fetch tags
-  const fetchTags = async () => {
+  const fetchTags = useCallback(async () => {
     try {
       const response = await api.get('/api/knowledge/tags');
       setTags(response.data.tags || []);
@@ -124,12 +113,19 @@ const KnowledgeManagement = () => {
       });
       console.error('Error fetching tags:', error);
     }
-  };
+  }, [toast]);
+
+  // Fetch initial data
+  useEffect(() => {
+    fetchDocuments();
+    fetchCategories();
+    fetchTags();
+  }, [fetchDocuments, fetchCategories, fetchTags]);
 
   // Handle file selection
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const fileList = Array.from(e.target.files) as UploadedFile[];
+      const fileList = Array.from(e.target.files) as File[];
       setUploadFiles(fileList);
     }
   };

@@ -16,7 +16,7 @@
 export const createReliableWebSocket = (
   primaryUrl: string,
   fallbackUrls: string[],
-  timeoutMs: number = 5000,
+  timeoutMs = 5000,
   onOpen?: (socket: WebSocket) => void,
   onMessage?: (event: MessageEvent) => void,
   onError?: (event: Event) => void,

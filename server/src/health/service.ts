@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
 import { logger } from '../index';
 import { checkDatabaseHealth, isDatabaseConnected } from '../database/connection';
-import { validateGoogleConfig, validateElevenLabsConfig } from '../config/validation';
+import { validateGoogleConfig } from '../config/validation';
+import Configuration from '../models/Configuration';
 
 export interface HealthCheck {
   service: string;
@@ -54,110 +55,446 @@ export async function checkGoogleLLMHealth(): Promise<HealthCheck> {
 }
 
 /**
- * Check ElevenLabs service health
+ * Check ElevenLabs service health using database configuration
  */
 export async function checkElevenLabsHealth(): Promise<HealthCheck> {
   try {
-    const config = validateElevenLabsConfig();
+    // Get configuration from database instead of environment variables
+    const config = await Configuration.findOne();
+    const elevenLabsConfig = config?.elevenLabsConfig;
+    
+    if (!elevenLabsConfig) {
+      return {
+        service: 'elevenlabs',
+        status: 'degraded',
+        message: 'No ElevenLabs configuration found in database',
+        timestamp: new Date()
+      };
+    }
+    
+    const hasApiKey = !!elevenLabsConfig.apiKey && elevenLabsConfig.apiKey.trim() !== '';
+    const isEnabled = elevenLabsConfig.isEnabled;
+    const status = elevenLabsConfig.status || 'unverified';
+    
+    // Determine health status based on configuration state
+    let healthStatus: 'healthy' | 'unhealthy' | 'degraded';
+    let message: string;
+    
+    if (!isEnabled) {
+      healthStatus = 'degraded';
+      message = 'ElevenLabs is disabled in configuration';
+    } else if (!hasApiKey) {
+      healthStatus = 'degraded';
+      message = 'ElevenLabs API key not configured in database';
+    } else if (status === 'verified') {
+      healthStatus = 'healthy';
+      message = 'ElevenLabs API key verified and active';
+    } else if (status === 'failed') {
+      healthStatus = 'unhealthy';
+      message = 'ElevenLabs API key verification failed';
+    } else {
+      healthStatus = 'degraded';
+      message = 'ElevenLabs API key configured but not verified';
+    }
+    
     return {
       service: 'elevenlabs',
-      status: 'healthy',
-      message: 'API key configured',
+      status: healthStatus,
+      message,
       timestamp: new Date(),
       details: {
-        apiKeyConfigured: !!config.apiKey
+        isEnabled,
+        apiKeyConfigured: hasApiKey,
+        verificationStatus: status,
+        lastVerified: elevenLabsConfig.lastVerified,
+        unusualActivityDetected: elevenLabsConfig.unusualActivityDetected || false,
+        voiceSpeed: elevenLabsConfig.voiceSpeed,
+        voiceStability: elevenLabsConfig.voiceStability,
+        voiceClarity: elevenLabsConfig.voiceClarity
       }
     };
   } catch (error) {
     return {
       service: 'elevenlabs',
       status: 'unhealthy',
-      message: error instanceof Error ? error.message : String(error),
+      message: `Database error: ${error instanceof Error ? error.message : String(error)}`,
       timestamp: new Date()
     };
   }
 }
 
 /**
- * Check OpenAI service health
+ * Check OpenAI service health using database configuration
  */
 export async function checkOpenAIHealth(): Promise<HealthCheck> {
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!apiKey || apiKey.trim() === '') {
+  try {
+    // Get configuration from database instead of environment variables
+    const config = await Configuration.findOne();
+    const openAIProvider = config?.llmConfig?.providers?.find(p => p.name === 'openai');
+    
+    if (!openAIProvider) {
+      return {
+        service: 'openai',
+        status: 'degraded',
+        message: 'OpenAI provider not configured in database',
+        timestamp: new Date()
+      };
+    }
+    
+    const hasApiKey = !!openAIProvider.apiKey && openAIProvider.apiKey.trim() !== '';
+    const isEnabled = openAIProvider.isEnabled;
+    const status = openAIProvider.status || 'unverified';
+    
+    // Determine health status based on configuration state
+    let healthStatus: 'healthy' | 'unhealthy' | 'degraded';
+    let message: string;
+    
+    if (!isEnabled) {
+      healthStatus = 'degraded';
+      message = 'OpenAI provider is disabled in configuration';
+    } else if (!hasApiKey) {
+      healthStatus = 'degraded';
+      message = 'OpenAI API key not configured in database';
+    } else if (status === 'verified') {
+      healthStatus = 'healthy';
+      message = 'OpenAI API key verified and active';
+    } else if (status === 'failed') {
+      healthStatus = 'unhealthy';
+      message = 'OpenAI API key verification failed';
+    } else {
+      healthStatus = 'degraded';
+      message = 'OpenAI API key configured but not verified';
+    }
+    
     return {
       service: 'openai',
-      status: 'degraded',
-      message: 'API key not configured',
+      status: healthStatus,
+      message,
+      timestamp: new Date(),
+      details: {
+        isEnabled,
+        apiKeyConfigured: hasApiKey,
+        verificationStatus: status,
+        lastVerified: openAIProvider.lastVerified,
+        availableModels: openAIProvider.availableModels
+      }
+    };
+  } catch (error) {
+    return {
+      service: 'openai',
+      status: 'unhealthy',
+      message: `Database error: ${error instanceof Error ? error.message : String(error)}`,
       timestamp: new Date()
     };
   }
-
-  return {
-    service: 'openai',
-    status: 'healthy',
-    message: 'API key configured',
-    timestamp: new Date(),
-    details: {
-      apiKeyConfigured: true
-    }
-  };
 }
 
 /**
- * Check Anthropic service health
+ * Check Anthropic service health using database configuration
  */
 export async function checkAnthropicHealth(): Promise<HealthCheck> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-
-  if (!apiKey || apiKey.trim() === '') {
+  try {
+    // Get configuration from database instead of environment variables
+    const config = await Configuration.findOne();
+    const anthropicProvider = config?.llmConfig?.providers?.find(p => p.name === 'anthropic');
+    
+    if (!anthropicProvider) {
+      return {
+        service: 'anthropic',
+        status: 'degraded',
+        message: 'Anthropic provider not configured in database',
+        timestamp: new Date()
+      };
+    }
+    
+    const hasApiKey = !!anthropicProvider.apiKey && anthropicProvider.apiKey.trim() !== '';
+    const isEnabled = anthropicProvider.isEnabled;
+    const status = anthropicProvider.status || 'unverified';
+    
+    // Determine health status based on configuration state
+    let healthStatus: 'healthy' | 'unhealthy' | 'degraded';
+    let message: string;
+    
+    if (!isEnabled) {
+      healthStatus = 'degraded';
+      message = 'Anthropic provider is disabled in configuration';
+    } else if (!hasApiKey) {
+      healthStatus = 'degraded';
+      message = 'Anthropic API key not configured in database';
+    } else if (status === 'verified') {
+      healthStatus = 'healthy';
+      message = 'Anthropic API key verified and active';
+    } else if (status === 'failed') {
+      healthStatus = 'unhealthy';
+      message = 'Anthropic API key verification failed';
+    } else {
+      healthStatus = 'degraded';
+      message = 'Anthropic API key configured but not verified';
+    }
+    
     return {
       service: 'anthropic',
-      status: 'degraded',
-      message: 'API key not configured',
+      status: healthStatus,
+      message,
+      timestamp: new Date(),
+      details: {
+        isEnabled,
+        apiKeyConfigured: hasApiKey,
+        verificationStatus: status,
+        lastVerified: anthropicProvider.lastVerified,
+        availableModels: anthropicProvider.availableModels
+      }
+    };
+  } catch (error) {
+    return {
+      service: 'anthropic',
+      status: 'unhealthy',
+      message: `Database error: ${error instanceof Error ? error.message : String(error)}`,
       timestamp: new Date()
     };
   }
-
-  return {
-    service: 'anthropic',
-    status: 'healthy',
-    message: 'API key configured',
-    timestamp: new Date(),
-    details: {
-      apiKeyConfigured: true
-    }
-  };
 }
 
 /**
- * Check Twilio service health
+ * Check Twilio service health using database configuration
  */
 export async function checkTwilioHealth(): Promise<HealthCheck> {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-
-  if (!accountSid || !authToken) {
+  try {
+    // Get configuration from database instead of environment variables
+    const config = await Configuration.findOne();
+    const twilioConfig = config?.twilioConfig;
+    
+    if (!twilioConfig) {
+      return {
+        service: 'twilio',
+        status: 'degraded',
+        message: 'Twilio not configured in database',
+        timestamp: new Date()
+      };
+    }
+    
+    const hasAccountSid = !!twilioConfig.accountSid && twilioConfig.accountSid.trim() !== '';
+    const hasAuthToken = !!twilioConfig.authToken && twilioConfig.authToken.trim() !== '';
+    const isEnabled = twilioConfig.isEnabled;
+    const status = twilioConfig.status || 'unverified';
+    
+    // Determine health status based on configuration state
+    let healthStatus: 'healthy' | 'unhealthy' | 'degraded';
+    let message: string;
+    
+    if (!isEnabled) {
+      healthStatus = 'degraded';
+      message = 'Twilio is disabled in configuration';
+    } else if (!hasAccountSid || !hasAuthToken) {
+      healthStatus = 'degraded';
+      message = 'Twilio credentials not fully configured in database';
+    } else if (status === 'verified') {
+      healthStatus = 'healthy';
+      message = 'Twilio credentials verified and active';
+    } else if (status === 'failed') {
+      healthStatus = 'unhealthy';
+      message = 'Twilio credentials verification failed';
+    } else {
+      healthStatus = 'degraded';
+      message = 'Twilio credentials configured but not verified';
+    }
+    
+    return {
+      service: 'twilio',
+      status: healthStatus,
+      message,
+      timestamp: new Date(),
+      details: {
+        isEnabled,
+        accountSidConfigured: hasAccountSid,
+        authTokenConfigured: hasAuthToken,
+        verificationStatus: status,
+        lastVerified: twilioConfig.lastVerified,
+        phoneNumbers: twilioConfig.phoneNumbers?.length || 0
+      }
+    };
+  } catch (error) {
     return {
       service: 'twilio',
       status: 'unhealthy',
-      message: 'Account SID or Auth Token not configured',
+      message: `Database error: ${error instanceof Error ? error.message : String(error)}`,
       timestamp: new Date()
     };
   }
-
-  return {
-    service: 'twilio',
-    status: 'healthy',
-    message: 'Credentials configured',
-    timestamp: new Date(),
-    details: {
-      accountSidConfigured: !!accountSid,
-      authTokenConfigured: !!authToken
-    }
-  };
 }
 
+/**
+ * Check TTS provider service health using database configuration
+ */
+export async function checkTTSProviderHealth(): Promise<HealthCheck> {
+  try {
+    // Get configuration from database
+    const config = await Configuration.findOne();
+    const ttsConfig = config?.ttsConfig;
+    
+    if (!ttsConfig) {
+      return {
+        service: 'tts-provider',
+        status: 'degraded',
+        message: 'TTS provider not configured in database',
+        timestamp: new Date()
+      };
+    }
+    
+    const provider = ttsConfig.provider || 'elevenlabs';
+    const primaryProvider = ttsConfig.primaryProvider || provider;
+    const autoFallback = ttsConfig.autoFallback;
+    
+    // Check if the primary TTS provider is properly configured
+    let healthStatus: 'healthy' | 'unhealthy' | 'degraded';
+    let message: string;
+    let details: any = {
+      provider,
+      primaryProvider,
+      autoFallback,
+      fallbackProviders: ttsConfig.fallbackProviders || []
+    };
+    
+    if (primaryProvider === 'elevenlabs') {
+      const elevenLabsConfig = config?.elevenLabsConfig;
+      const hasApiKey = !!elevenLabsConfig?.apiKey && elevenLabsConfig.apiKey.trim() !== '';
+      const isEnabled = elevenLabsConfig?.isEnabled;
+      const status = elevenLabsConfig?.status;
+      
+      if (!isEnabled || !hasApiKey) {
+        healthStatus = 'degraded';
+        message = `Primary TTS provider (ElevenLabs) not properly configured`;
+      } else if (status === 'verified') {
+        healthStatus = 'healthy';
+        message = `TTS provider (ElevenLabs) is active and verified`;
+      } else {
+        healthStatus = 'degraded';
+        message = `TTS provider (ElevenLabs) configured but not verified`;
+      }
+      
+      details.elevenLabsStatus = {
+        isEnabled,
+        hasApiKey,
+        verificationStatus: status
+      };
+    } else if (primaryProvider === 'deepgram') {
+      const deepgramTTSConfig = ttsConfig.deepgramTTS;
+      const hasApiKey = !!deepgramTTSConfig?.apiKey && deepgramTTSConfig.apiKey.trim() !== '';
+      const isEnabled = deepgramTTSConfig?.isEnabled;
+      const status = deepgramTTSConfig?.status;
+      
+      if (!isEnabled || !hasApiKey) {
+        healthStatus = 'degraded';
+        message = `Primary TTS provider (Deepgram) not properly configured`;
+      } else if (status === 'verified') {
+        healthStatus = 'healthy';
+        message = `TTS provider (Deepgram) is active and verified`;
+      } else {
+        healthStatus = 'degraded';
+        message = `TTS provider (Deepgram) configured but not verified`;
+      }
+      
+      details.deepgramTTSStatus = {
+        isEnabled,
+        hasApiKey,
+        verificationStatus: status,
+        defaultModel: deepgramTTSConfig?.defaultModel
+      };
+    } else {
+      healthStatus = 'degraded';
+      message = `TTS provider (${primaryProvider}) not yet implemented`;
+    }
+    
+    return {
+      service: 'tts-provider',
+      status: healthStatus,
+      message,
+      timestamp: new Date(),
+      details
+    };
+  } catch (error) {
+    return {
+      service: 'tts-provider',
+      status: 'unhealthy',
+      message: `Database error: ${error instanceof Error ? error.message : String(error)}`,
+      timestamp: new Date()
+    };
+  }
+}
+
+/**
+ * Check Deepgram STT service health using database configuration
+ */
+export async function checkDeepgramSTTHealth(): Promise<HealthCheck> {
+  try {
+    // Get configuration from database
+    const config = await Configuration.findOne();
+    const deepgramConfig = config?.deepgramConfig;
+    
+    if (!deepgramConfig) {
+      return {
+        service: 'deepgram-stt',
+        status: 'degraded',
+        message: 'Deepgram STT not configured in database',
+        timestamp: new Date()
+      };
+    }
+    
+    const hasApiKey = !!deepgramConfig.apiKey && deepgramConfig.apiKey.trim() !== '';
+    const isEnabled = deepgramConfig.isEnabled;
+    const status = deepgramConfig.status || 'unverified';
+    const primaryModel = deepgramConfig.primaryModel;
+    
+    // Determine health status based on configuration state
+    let healthStatus: 'healthy' | 'unhealthy' | 'degraded';
+    let message: string;
+    
+    if (!isEnabled) {
+      healthStatus = 'degraded';
+      message = 'Deepgram STT is disabled in configuration';
+    } else if (!hasApiKey) {
+      healthStatus = 'degraded';
+      message = 'Deepgram STT API key not configured in database';
+    } else if (status === 'verified') {
+      healthStatus = 'healthy';
+      message = 'Deepgram STT API key verified and active';
+    } else if (status === 'failed') {
+      healthStatus = 'unhealthy';
+      message = 'Deepgram STT API key verification failed';
+    } else if (status === 'degraded') {
+      healthStatus = 'degraded';
+      message = 'Deepgram STT experiencing degraded performance';
+    } else {
+      healthStatus = 'degraded';
+      message = 'Deepgram STT API key configured but not verified';
+    }
+    
+    return {
+      service: 'deepgram-stt',
+      status: healthStatus,
+      message,
+      timestamp: new Date(),
+      details: {
+        isEnabled,
+        apiKeyConfigured: hasApiKey,
+        verificationStatus: status,
+        lastVerified: deepgramConfig.lastVerified,
+        primaryModel,
+        fallbackModels: deepgramConfig.fallbackModels,
+        autoFallback: deepgramConfig.autoFallback,
+        accountTier: deepgramConfig.accountTier,
+        availableModels: deepgramConfig.availableModels?.length || 0
+      }
+    };
+  } catch (error) {
+    return {
+      service: 'deepgram-stt',
+      status: 'unhealthy',
+      message: `Database error: ${error instanceof Error ? error.message : String(error)}`,
+      timestamp: new Date()
+    };
+  }
+}
 /**
  * Perform comprehensive system health check
  */
@@ -177,13 +514,17 @@ export async function performSystemHealthCheck(): Promise<SystemHealth> {
       details: dbHealth.details
     });
 
-    // LLM providers health
+    // LLM providers health (using database configuration)
     checks.push(await checkGoogleLLMHealth());
     checks.push(await checkOpenAIHealth());
     checks.push(await checkAnthropicHealth());
 
-    // Other services health
+    // TTS/STT services health (using database configuration)
     checks.push(await checkElevenLabsHealth());
+    checks.push(await checkTTSProviderHealth());
+    checks.push(await checkDeepgramSTTHealth());
+    
+    // Other services health (using database configuration)
     checks.push(await checkTwilioHealth());
 
     // Memory health check
@@ -234,7 +575,7 @@ export async function performSystemHealthCheck(): Promise<SystemHealth> {
     };
 
     const duration = Date.now() - startTime;
-    logger.debug(`Health check completed in ${duration}ms - Status: ${overallStatus}`);
+    logger.debug(`Health check completed in ${duration}ms - Status: ${overallStatus} (using database configuration)`);
 
     return result;
   } catch (error) {

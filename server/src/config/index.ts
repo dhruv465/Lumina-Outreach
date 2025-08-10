@@ -22,8 +22,11 @@ export const SERVER_CONFIG = {
   }
 };
 
-// API Keys configuration
+// API Keys configuration - Deprecated: Use database configuration instead
+// These are kept for backward compatibility only
 export const API_KEYS = {
+  // TTS/STT API keys should be managed through database configuration
+  // These environment variables are deprecated but maintained for compatibility
   elevenLabs: process.env.ELEVENLABS_API_KEY || '',
   openAI: process.env.OPENAI_API_KEY || '',
   anthropic: process.env.ANTHROPIC_API_KEY || '',
@@ -33,6 +36,14 @@ export const API_KEYS = {
     phoneNumber: process.env.TWILIO_PHONE_NUMBER || ''
   }
 };
+
+// Warning: Direct usage of API_KEYS is deprecated
+if (process.env.NODE_ENV !== 'production') {
+  const hasEnvKeys = API_KEYS.elevenLabs || API_KEYS.openAI || API_KEYS.anthropic || API_KEYS.twilio.accountSid;
+  if (hasEnvKeys) {
+    console.warn('⚠️  Environment-based API keys detected. Please migrate to database configuration for better security and flexibility.');
+  }
+}
 
 // JWT configuration
 export const JWT_CONFIG = {

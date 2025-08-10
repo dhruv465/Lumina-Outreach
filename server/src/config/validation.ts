@@ -45,16 +45,19 @@ export function validateGoogleConfig(): GoogleConfig {
 }
 
 /**
- * Validate ElevenLabs configuration
+ * Validate ElevenLabs configuration - now optional for dynamic configuration
+ * @deprecated Environment-based validation deprecated in favor of dynamic database configuration
  */
 export function validateElevenLabsConfig(): ElevenLabsConfig {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
+  const apiKey = process.env.ELEVENLABS_API_KEY || '';
   
-  if (!apiKey || apiKey.trim() === '') {
-    throw new Error('ELEVENLABS_API_KEY environment variable is required');
+  // ElevenLabs configuration is now optional since it's managed dynamically via database
+  if (apiKey) {
+    logger.info('ElevenLabs environment configuration found (will be overridden by database config)');
+  } else {
+    logger.info('No ElevenLabs environment configuration - using dynamic database configuration');
   }
   
-  logger.info('ElevenLabs configuration validated');
   return { apiKey };
 }
 
@@ -75,6 +78,7 @@ export function validateDatabaseConfig(): DatabaseConfig {
 
 /**
  * Validate all critical configurations at startup
+ * Updated to be more flexible with dynamic TTS/STT configuration
  */
 export function validateAllConfigurations(): ConfigValidationResult {
   const errors: string[] = [];
@@ -92,67 +96,65 @@ export function validateAllConfigurations(): ConfigValidationResult {
     errors.push(`Google/Gemini: ${error instanceof Error ? error.message : String(error)}`);
   }
   
+  // ElevenLabs and other TTS/STT API keys are now managed dynamically
+  // so we don't treat them as critical startup errors
   try {
     validateElevenLabsConfig();
   } catch (error) {
-    warnings.push(`ElevenLabs: ${error instanceof Error ? error.message : String(error)}`);
+    warnings.push(`ElevenLabs (environment): ${error instanceof Error ? error.message : String(error)} - Will use database configuration`);
   }
   
-  // Check optional configurations
+  // Check optional configurations - these are now informational only
   const openaiKey = process.env.OPENAI_API_KEY;
   if (!openaiKey || openaiKey.trim() === '') {
-    warnings.push('OpenAI: OPENAI_API_KEY not configured');
+    warnings.push('OpenAI: Environment variable not configured - Will use database configuration');
   }
   
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (!anthropicKey || anthropicKey.trim() === '') {
-    warnings.push('Anthropic: ANTHROPIC_API_KEY not configured');
+    warnings.push('Anthropic: Environment variable not configured - Will use database configuration');
   }
   
   const twilioSid = process.env.TWILIO_ACCOUNT_SID;
   const twilioToken = process.env.TWILIO_AUTH_TOKEN;
   if (!twilioSid || !twilioToken) {
-    warnings.push('Twilio: Account SID or Auth Token not configured');
+    warnings.push('Twilio: Environment variables not configured - Will use database configuration');
   }
   
   const isValid = errors.length === 0;
   
   if (isValid) {
-    logger.info('All critical configurations validated successfully');
+    logger.info('Critical configurations validated successfully - TTS/STT will be configured dynamically');
   } else {
-    logger.error(`Configuration validation failed with ${errors.length} errors`);
+    logger.error(`Configuration validation failed with ${errors.length} critical errors`);
   }
   
   if (warnings.length > 0) {
-    logger.warn(`Configuration validation completed with ${warnings.length} warnings`);
+    logger.info(`Configuration validation completed with ${warnings.length} informational warnings (services will use database configuration)`);
   }
   
   return { isValid, errors, warnings };
 }
 
 /**
- * Get required environment variables with defaults
+ * Get environment variables with defaults - Updated for dynamic configuration
+ * Note: TTS/STT API keys should be managed through database configuration
  */
 export function getRequiredEnvVars() {
   return {
-    // Database
+    // Database - Required
     MONGODB_URI: process.env.MONGODB_URI || 'mongodb://localhost:27017/lumina_outreach',
     DATABASE_NAME: process.env.DATABASE_NAME || 'lumina_outreach',
     
-    // Google/Gemini
+    // Google/Gemini - Required for core functionality
     GOOGLE_API_KEY: process.env.GOOGLE_API_KEY || '',
     GOOGLE_MODEL_NAME: process.env.GOOGLE_MODEL_NAME || 'gemini-1.5-flash',
     
-    // ElevenLabs
+    // TTS/STT API Keys - Optional environment variables (managed dynamically)
+    // These are provided for backward compatibility but should not be relied upon
     ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || '',
-    
-    // OpenAI
     OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
-    
-    // Anthropic
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
-    
-    // Twilio
     TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID || '',
     TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN || '',
     

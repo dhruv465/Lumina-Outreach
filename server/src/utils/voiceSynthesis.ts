@@ -55,168 +55,85 @@ export async function synthesizeVoiceResponse(
       return true;
     }
 
-    // Get configuration for ElevenLabs if not provided
-    if (!elevenLabsApiKey || !llmApiKey) {
-      const config = await Configuration.findOne();
-      
-      // Exit early if ElevenLabs is not configured
-      if (!config?.elevenLabsConfig?.isEnabled || !config?.elevenLabsConfig?.apiKey) {
-        logger.debug('ElevenLabs not configured, using TTS fallback');
-        twiml.say({ voice: 'alice', language: language === 'hi' ? 'hi-IN' : 'en-US' }, text);
-        return false;
-      }
-      
-      // Find the default LLM provider
-      const defaultProviderName = config.llmConfig.defaultProvider;
-      const defaultProvider = config.llmConfig.providers.find(p => p.name === defaultProviderName);
-      
-      if (!defaultProvider?.isEnabled || !defaultProvider?.apiKey) {
-        logger.debug(`Default LLM provider ${defaultProviderName} not configured, using TTS fallback`);
-        twiml.say({ voice: 'alice', language: language === 'hi' ? 'hi-IN' : 'en-US' }, text);
-        return false;
-      }
-      
-      // Check ElevenLabs status - if failed, use fallback immediately
-      if (config.elevenLabsConfig.status === 'failed') {
-        const lastVerifiedTime = config.elevenLabsConfig.lastVerified;
-        const now = new Date();
-        
-        // If last verification was within the last hour, use fallback
-        if (lastVerifiedTime && (now.getTime() - lastVerifiedTime.getTime() < 3600000)) {
-          logger.warn('ElevenLabs verification recently failed, using TTS fallback');
-          twiml.say({ voice: 'alice', language: language === 'hi' ? 'hi-IN' : 'en-US' }, text);
-          return false;
-        }
-      }
-      
-      // Initialize voice service with configuration values
-      const voiceAI = new EnhancedVoiceAIService(
-        config.elevenLabsConfig.apiKey
-      );
-      
+    // Get configuration for voice synthesis
+    const config = await Configuration.findOne();
+    
+    // Exit early if no configuration found
+    if (!config) {
+      logger.debug('No configuration found, using TTS fallback');
+      twiml.say({ voice: 'alice', language: language === 'hi' ? 'hi-IN' : 'en-US' }, text);
+      return false;
+    }
+
+    // Resolve voice ID - try campaign-specific voice first if campaignId is provided
+    let finalVoiceId = requestedVoiceId || await getPreferredVoiceId();
+    
+    if (campaignId) {
       try {
-        // Resolve voice ID - try campaign-specific voice first if campaignId is provided
-        // Use the preferred voice ID from configuration instead of hardcoded value
-        let finalVoiceId = await getPreferredVoiceId();
-        
-        if (campaignId) {
-          try {
-            const campaign = await Campaign.findById(campaignId);
-            if (campaign?.voiceConfiguration?.voiceId) {
-              const campaignVoiceId = campaign.voiceConfiguration.voiceId;
-              finalVoiceId = await EnhancedVoiceAIService.getValidVoiceId(campaignVoiceId);
-              logger.debug(`Using campaign voice ID for synthesis: ${finalVoiceId}`);
-            }
-          } catch (error) {
-            logger.error(`Error fetching campaign voice: ${getErrorMessage(error)}`);
-          }
-        } else if (requestedVoiceId) {
-          // If a specific voice ID was requested, try to use it
-          finalVoiceId = await EnhancedVoiceAIService.getValidVoiceId(requestedVoiceId);
-          logger.debug(`Using requested voice ID for synthesis: ${finalVoiceId}`);
+        const campaign = await Campaign.findById(campaignId);
+        if (campaign?.voiceConfiguration?.voiceId) {
+          finalVoiceId = campaign.voiceConfiguration.voiceId;
+          logger.debug(`Using campaign voice ID for synthesis: ${finalVoiceId}`);
         }
-        
-        // Synthesize speech
-        const speechResponse = await voiceAI.synthesizeVoice({
-          text,
-          personalityId: finalVoiceId,
-          language: language === 'en' ? 'English' : 'Hindi'
-        });
-        
-        // Check if the file exists and is not empty
-        if (fs.existsSync(speechResponse) && fs.statSync(speechResponse).size > 0) {
-          logger.debug(`Successfully synthesized speech: ${speechResponse}`);
-             // Instead of embedding as base64, upload to Cloudinary
-        if (cloudinaryService.isCloudinaryConfigured()) {
-          try {
-            // Upload the file to Cloudinary
-            const cloudinaryUrl = await cloudinaryService.uploadAudioFile(speechResponse);
-            
-            // Use the Cloudinary URL in TwiML
-            twiml.play(cloudinaryUrl);
-            logger.info(`Using Cloudinary URL for audio: ${cloudinaryUrl}`);
-            return true;
-          } catch (cloudinaryError) {
-            logger.error(`Cloudinary upload failed: ${getErrorMessage(cloudinaryError)}`);
-            
-            // Check file size before falling back to base64
-            const audioBuffer = fs.readFileSync(speechResponse);
-            
-            // Always use TTS fallback if Cloudinary fails - never use base64
-            logger.warn(`Avoiding base64 encoding to prevent empty audio issues, using TTS fallback`);
-            twiml.say({ voice: 'alice', language: language === 'hi' ? 'hi-IN' : 'en-US' }, text);
-            return false;
+      } catch (error) {
+        logger.error(`Error fetching campaign voice: ${getErrorMessage(error)}`);
+      }
+    }
+    
+    // Use TTS service factory for auto-detection and synthesis
+    const { synthesizeSpeechWithProvider } = await import('./ttsServiceFactory');
+    const speechResponse = await synthesizeSpeechWithProvider(
+      config,
+      text,
+      finalVoiceId,
+      language
+    );
+
+    // Check if synthesis was successful
+    if (speechResponse.audioContent && speechResponse.method === 'tts') {
+      // Process audio safely using helper function
+      const audioResult = await processAudioForTwiML(
+        speechResponse.audioContent,
+        text,
+        language
+      );
+
+      if (audioResult.method === 'cloudinary') {
+        // Use Cloudinary URL
+        twiml.play(prepareUrlForTwilioPlay(audioResult.url));
+        logger.info(`Used TTS provider for voice synthesis: ${speechResponse.audioContent.length} bytes`);
+        return true;
+      } else if (audioResult.method === 'tts') {
+        // Use chunked TTS fallback
+        const isChunked = audioResult.url.startsWith('USE_CHUNKED_AUDIO:');
+        if (isChunked) {
+          // Extract the full text from the marker
+          const fullText = audioResult.url.substring('USE_CHUNKED_AUDIO:'.length);
+          const hasCloudinaryError = fullText.startsWith('[CLOUDINARY_ERROR]');
+          const cleanText = hasCloudinaryError ? fullText.substring('[CLOUDINARY_ERROR]'.length).trim() : fullText;
+          
+          // Use smaller chunks for Cloudinary errors
+          const maxChunkLength = hasCloudinaryError ? 150 : 250;
+          const chunks = splitTextIntoChunks(cleanText, maxChunkLength);
+          
+          // Add each chunk as a separate say command
+          for (const chunk of chunks) {
+            if (chunk.trim()) {
+              twiml.say({
+                voice: 'alice',
+                language: language === 'hi' ? 'hi-IN' : 'en-US'
+              }, chunk);
+            }
           }
+          return false; // Indicates TTS was used as fallback
         } else {
-          // If Cloudinary is not configured, always use TTS
-          logger.error('CRITICAL: Cloudinary not configured - check environment variables');
-          logger.warn('Using TTS fallback to prevent empty audio issues');
-          twiml.say({ voice: 'alice', language: language === 'hi' ? 'hi-IN' : 'en-US' }, text);
+          // Regular TTS
+          twiml.say({ voice: 'alice', language: language === 'hi' ? 'hi-IN' : 'en-US' }, audioResult.url);
           return false;
-          }
-        } else {
-          throw new Error('Synthesized file is empty or does not exist');
         }
-      } catch (serviceError) {
-        logger.error(`Voice synthesis service error: ${getErrorMessage(serviceError)}`);
-        
-        // Mark as failed in the database if this was an API error
-        if (serviceError.message.includes('API') || serviceError.message.includes('400')) {
-          await Configuration.findOneAndUpdate(
-            {}, 
-            { 
-              'elevenLabsConfig.lastVerified': new Date(),
-              'elevenLabsConfig.status': 'failed'
-            }
-          );
-        }
-        
-        throw serviceError; // Re-throw to be caught by outer catch
       }
     } else {
-      // Use provided API keys
-      const voiceAI = new EnhancedVoiceAIService(elevenLabsApiKey);
-      
-      // Resolve voice ID
-      const finalVoiceId = requestedVoiceId ? 
-        await EnhancedVoiceAIService.getValidVoiceId(requestedVoiceId) : 
-        await getPreferredVoiceId('pFZP5JQG7iQjIQuC4Bku'); // Use preferred voice from config
-      
-      // Synthesize speech
-      const filePath = await voiceAI.synthesizeVoice({
-        text,
-        personalityId: finalVoiceId,
-        language: language === 'en' ? 'English' : 'Hindi'
-      });
-      
-      // Check if the file exists and is not empty
-      if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
-        // Instead of embedding as base64, upload to Cloudinary
-        if (cloudinaryService.isCloudinaryConfigured()) {
-          try {
-            // Upload the file to Cloudinary
-            const cloudinaryUrl = await cloudinaryService.uploadAudioFile(filePath);
-            
-            // Use the Cloudinary URL in TwiML
-            twiml.play(cloudinaryUrl);
-            logger.info(`Using Cloudinary URL for audio: ${cloudinaryUrl}`);
-            return true;
-          } catch (cloudinaryError) {
-            logger.error(`Cloudinary upload failed: ${getErrorMessage(cloudinaryError)}`);
-            // Always use TTS instead of base64 to prevent empty audio issues
-            logger.warn('Using TTS fallback to prevent empty audio issues');
-            twiml.say({ voice: 'alice', language: language === 'hi' ? 'hi-IN' : 'en-US' }, text);
-            return false;
-          }
-        } else {
-          // If Cloudinary is not configured, use TTS fallback
-          logger.error('CRITICAL: Cloudinary not configured for audio - using TTS fallback');
-          twiml.say({ voice: 'alice', language: language === 'hi' ? 'hi-IN' : 'en-US' }, text);
-          return false;
-        }
-      } else {
-        throw new Error('Synthesized file is empty or does not exist');
-      }
+      throw new Error('TTS synthesis failed or returned empty content');
     }
   } catch (error) {
     logger.error(`Error in voice synthesis: ${getErrorMessage(error)}`, {
@@ -484,6 +401,64 @@ async function validateAudioFormat(audioBuffer: Buffer): Promise<{buffer: Buffer
     // We'd ideally convert here, but to keep it simple, we'll just return with a warning
     return { buffer: audioBuffer, format: 'unknown', needsConversion: true };
   }
+}
+
+/**
+ * Split a large text into smaller chunks to avoid TwiML size limits
+ * This tries to split on sentence boundaries to maintain natural speech
+ * @param text Full text to split
+ * @param maxChunkLength Maximum length of each chunk (default: 250 characters)
+ * @returns Array of text chunks
+ */
+function splitTextIntoChunks(text: string, maxChunkLength: number = 250): string[] {
+  if (!text) return [];
+
+  // If text is already small enough, return it as a single chunk
+  if (text.length <= maxChunkLength) {
+    return [text];
+  }
+  const chunks: string[] = [];
+  let currentPosition = 0;
+  while (currentPosition < text.length) {
+    // Determine end of current chunk (max length or earlier)
+    let chunkEnd = Math.min(currentPosition + maxChunkLength, text.length);
+
+    // Try to find a sentence end (., !, ?) followed by a space or end of text
+    if (chunkEnd < text.length) {
+      // Search backward from max chunk length for a good break point
+      const sentenceEndMatch = text.substring(currentPosition, chunkEnd).match(/[.!?]\s+(?=[A-Z])/g);
+
+      if (sentenceEndMatch && sentenceEndMatch.length > 0) {
+        // Find the last sentence end within this chunk
+        const lastIndex = text.substring(currentPosition, chunkEnd).lastIndexOf(sentenceEndMatch[sentenceEndMatch.length - 1]);
+        if (lastIndex > 0) {
+          // +2 to include the period and space
+          chunkEnd = currentPosition + lastIndex + 2;
+        }
+      } else {
+        // No sentence end found, try to break at a comma or space
+        const commaIndex = text.substring(currentPosition, chunkEnd).lastIndexOf(', ');
+        if (commaIndex > 0) {
+          chunkEnd = currentPosition + commaIndex + 2; // Include the comma and space
+        } else {
+          // Last resort: break at the last space
+          const spaceIndex = text.substring(currentPosition, chunkEnd).lastIndexOf(' ');
+          if (spaceIndex > 0) {
+            chunkEnd = currentPosition + spaceIndex + 1; // Include the space
+          }
+          // If no space found, we'll just break at maxChunkLength
+        }
+      }
+    }
+
+    // Add the chunk to our results
+    chunks.push(text.substring(currentPosition, chunkEnd).trim());
+
+    // Move to next position
+    currentPosition = chunkEnd;
+  }
+
+  return chunks;
 }
 
 /**

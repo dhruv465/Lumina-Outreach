@@ -285,29 +285,46 @@ export class TTSProviderService {
       case 'deepgram':
         const deepgramConfig = config.deepgramTTS;
         
-        // Only return voices if Deepgram TTS has a valid API key
-        if (deepgramConfig?.apiKey) {
-          try {
-            // Create a temporary service instance with the current API key to test
-            const tempService = new DeepgramTTSService(deepgramConfig.apiKey);
-            
-            // Test if the API key is valid by checking service availability
-            const isAvailable = await tempService.isAvailable();
-            if (isAvailable) {
-              const models = tempService.getAvailableModels();
-              return models.map(model => ({
-                voiceId: model,
-                name: model.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                provider: 'deepgram'
-              }));
+        // Always return available Deepgram models, even without API key
+        // Users need to see available voices to make a selection
+        try {
+          // If there's a valid API key, test it to ensure it works
+          if (deepgramConfig?.apiKey) {
+            try {
+              const tempService = new DeepgramTTSService(deepgramConfig.apiKey);
+              const isAvailable = await tempService.isAvailable();
+              if (isAvailable) {
+                const models = tempService.getAvailableModels();
+                return models.map(model => ({
+                  voiceId: model,
+                  name: model.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                  provider: 'deepgram',
+                  status: 'verified'
+                }));
+              }
+            } catch (error) {
+              logger.warn('Deepgram TTS API key validation failed, returning models without verification', {
+                error: getErrorMessage(error)
+              });
             }
-          } catch (error) {
-            logger.warn('Deepgram TTS API key validation failed', {
-              error: getErrorMessage(error)
-            });
           }
+          
+          // Return available models even without API key or if validation failed
+          // This allows users to see and select voices before configuring API key
+          const tempService = new DeepgramTTSService('dummy-key'); // Use dummy key to get models list
+          const models = tempService.getAvailableModels();
+          return models.map(model => ({
+            voiceId: model,
+            name: model.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            provider: 'deepgram',
+            status: deepgramConfig?.apiKey ? 'unverified' : 'needs_api_key'
+          }));
+        } catch (error) {
+          logger.error('Failed to get Deepgram TTS models', {
+            error: getErrorMessage(error)
+          });
+          return [];
         }
-        return [];
 
       default:
         return [];

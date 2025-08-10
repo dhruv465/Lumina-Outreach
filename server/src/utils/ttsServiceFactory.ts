@@ -57,43 +57,46 @@ export async function synthesizeSpeechWithProvider(
   language: string = 'en'
 ): Promise<{ audioContent: Buffer | null; method: 'tts' | 'fallback' }> {
   try {
-    const ttsService = await getTTSService(configuration);
+    // Auto-detect provider based on voice ID if it looks like a Deepgram model
+    let selectedProvider = configuration?.ttsConfig?.provider || 'elevenlabs';
     
-    if (!ttsService) {
-      logger.warn('No TTS service available, using fallback');
-      return { audioContent: null, method: 'fallback' };
+    if (voiceId) {
+      const deepgramModels = [
+        'aura-2-thalia-en',
+        'aura-asteria-en',
+        'aura-luna-en',
+        'aura-stella-en',
+        'aura-athena-en',
+        'aura-hera-en',
+        'aura-orion-en',
+        'aura-arcas-en',
+        'aura-perseus-en',
+        'aura-angus-en',
+        'aura-orpheus-en',
+        'aura-helios-en',
+        'aura-zeus-en'
+      ];
+      
+      if (deepgramModels.includes(voiceId)) {
+        selectedProvider = 'deepgram';
+        logger.info(`Auto-detected Deepgram provider based on voice ID: ${voiceId}`);
+      }
     }
     
-    const selectedProvider = configuration?.ttsConfig?.provider || 'elevenlabs';
+    logger.info(`Synthesizing speech with provider: ${selectedProvider}, voice: ${voiceId}`);
     
-    if (selectedProvider === 'elevenlabs') {
-      // Use ElevenLabs service
-      const response = await ttsService.synthesizeAdaptiveVoice({
-        text,
-        personalityId: voiceId || 'XvRdSQXvmv5jHPGBw0XU',
-        language
-      });
-      
-      return {
-        audioContent: response.audioContent,
-        method: 'tts'
-      };
-    } else if (selectedProvider === 'deepgram') {
-      // Use TTS Provider Service for Deepgram
-      const response = await ttsService.synthesizeSpeech({
-        text,
-        voiceId: voiceId || 'aura-2-thalia-en',
-        language
-      });
-      
-      return {
-        audioContent: response.audioContent,
-        method: 'tts'
-      };
-    } else {
-      logger.warn(`TTS synthesis not implemented for provider: ${selectedProvider}`);
-      return { audioContent: null, method: 'fallback' };
-    }
+    // Use TTSProviderService for unified handling
+    const ttsProviderService = new TTSProviderService();
+    const response = await ttsProviderService.synthesizeSpeech({
+      text,
+      voiceId: voiceId || (selectedProvider === 'deepgram' ? 'aura-2-thalia-en' : 'XvRdSQXvmv5jHPGBw0XU'),
+      language
+    });
+    
+    return {
+      audioContent: response.audioContent,
+      method: 'tts'
+    };
   } catch (error) {
     logger.error(`Error synthesizing speech: ${getErrorMessage(error)}`);
     return { audioContent: null, method: 'fallback' };
@@ -103,8 +106,31 @@ export async function synthesizeSpeechWithProvider(
 /**
  * Check if the selected TTS provider is properly configured
  */
-export function isTTSProviderConfigured(configuration: any): boolean {
-  const selectedProvider = configuration?.ttsConfig?.provider || 'elevenlabs';
+export function isTTSProviderConfigured(configuration: any, voiceId?: string): boolean {
+  let selectedProvider = configuration?.ttsConfig?.provider || 'elevenlabs';
+  
+  // Auto-detect provider based on voice ID if it looks like a Deepgram model
+  if (voiceId) {
+    const deepgramModels = [
+      'aura-2-thalia-en',
+      'aura-asteria-en',
+      'aura-luna-en',
+      'aura-stella-en',
+      'aura-athena-en',
+      'aura-hera-en',
+      'aura-orion-en',
+      'aura-arcas-en',
+      'aura-perseus-en',
+      'aura-angus-en',
+      'aura-orpheus-en',
+      'aura-helios-en',
+      'aura-zeus-en'
+    ];
+    
+    if (deepgramModels.includes(voiceId)) {
+      selectedProvider = 'deepgram';
+    }
+  }
   
   switch (selectedProvider) {
     case 'elevenlabs':

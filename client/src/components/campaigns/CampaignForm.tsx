@@ -276,17 +276,28 @@ const CampaignForm = ({
           break;
           
         case "deepgram":
-          if (config.ttsConfig?.deepgramTTS?.apiKey) {
-            try {
-              const result = await configApi.testDeepgramTTSConnection({
-                apiKey: config.ttsConfig.deepgramTTS.apiKey,
-              });
-              if (result.success && result.details?.availableVoices) {
-                voices = result.details.availableVoices;
-                console.log(`Loaded ${voices.length} Deepgram TTS voices`);
+          try {
+            // Use the dedicated TTS provider voices endpoint instead of test connection
+            const response = await api.get(`/tts-provider/voices?provider=deepgram`);
+            if (response.data.success && response.data.voices) {
+              voices = response.data.voices;
+              console.log(`Loaded ${voices.length} Deepgram TTS voices`);
+            }
+          } catch (error) {
+            console.error("Error loading Deepgram TTS voices:", error);
+            // Fallback to test connection if available
+            if (config.ttsConfig?.deepgramTTS?.apiKey) {
+              try {
+                const result = await configApi.testDeepgramTTSConnection({
+                  apiKey: config.ttsConfig.deepgramTTS.apiKey,
+                });
+                if (result.success && result.details?.availableVoices) {
+                  voices = result.details.availableVoices;
+                  console.log(`Loaded ${voices.length} Deepgram TTS voices via fallback`);
+                }
+              } catch (fallbackError) {
+                console.error("Error loading Deepgram TTS voices via fallback:", fallbackError);
               }
-            } catch (error) {
-              console.error("Error loading Deepgram TTS voices:", error);
             }
           }
           break;

@@ -77,10 +77,12 @@ export async function synthesizeSpeechWithProvider(
         'aura-zeus-en'
       ];
       
+      // Only override provider if voice ID is explicitly a Deepgram model
       if (deepgramModels.includes(voiceId)) {
         selectedProvider = 'deepgram';
         logger.info(`Auto-detected Deepgram provider based on voice ID: ${voiceId}`);
       }
+      // For non-Deepgram voices, keep the configured provider
     }
     
     logger.info(`Synthesizing speech with provider: ${selectedProvider}, voice: ${voiceId}`);

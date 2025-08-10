@@ -171,7 +171,7 @@ export class TwilioWebSocketServer {
   }
 
   private setupEventHandlers() {
-    this.wss.on("connection", (ws: WebSocket, req: http.IncomingMessage) => {
+    this.wss.on("connection", async (ws: WebSocket, req: http.IncomingMessage) => {
       logger.info("New Twilio WebSocket connection established", {
         url: req.url,
         userAgent: req.headers["user-agent"],
@@ -301,8 +301,9 @@ export class TwilioWebSocketServer {
           }
         );
 
-        // Handle the optimized voice stream
-        handleOptimizedVoiceStream(ws, mockReq as Request);
+        // Handle the enhanced real-time media stream with new services
+        const { handleRealTimeMediaStream } = await import('../controllers/enhancedRealTimeController');
+        handleRealTimeMediaStream(ws, mockReq as Request);
 
         // CRITICAL: Send required Twilio start event immediately after connection
         this.sendTwilioStartEvent(ws, callId, conversationId);

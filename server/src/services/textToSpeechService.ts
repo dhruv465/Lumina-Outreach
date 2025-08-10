@@ -21,28 +21,22 @@ export interface TTSOptions {
 /**
  * Service for converting text to speech using ElevenLabs API
  */
+/**
+ * Service for converting text to speech using configurable TTS providers
+ * Updated to use database configuration instead of environment variables
+ */
 export class TextToSpeechService {
-  private apiKey: string;
   private outputDir: string;
   private apiUrl: string;
-  private defaultVoiceId: string;
-  private defaultModelId: string;
-  private circuitBreakerName: string = 'elevenlabs-tts';
+  private circuitBreakerName: string = 'tts-service';
 
-  constructor(apiKey: string = '') {
-    // Initialize with provided API key or from environment variable
-    this.apiKey = apiKey || process.env.ELEVENLABS_API_KEY || '';
-    
+  constructor() {
     // Create output directory for audio files
     this.outputDir = path.join(__dirname, '../../uploads/audio/tts');
     fs.mkdirSync(this.outputDir, { recursive: true });
     
-    // API URL for ElevenLabs text-to-speech service
-    this.apiUrl = process.env.ELEVENLABS_API_URL || 'https://api.elevenlabs.io/v1';
-    
-    // Default voice and model IDs
-    this.defaultVoiceId = process.env.ELEVENLABS_DEFAULT_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL';
-    this.defaultModelId = process.env.ELEVENLABS_DEFAULT_MODEL_ID || 'eleven_turbo_v2';
+    // Default API URL for ElevenLabs (can be overridden by database config)
+    this.apiUrl = 'https://api.elevenlabs.io/v1';
     
     // Initialize circuit breaker
     getCircuitBreakerService().getCircuit(this.circuitBreakerName, {
@@ -55,11 +49,63 @@ export class TextToSpeechService {
   }
 
   /**
-   * Update the API key
+   * Get current TTS configuration from database
    */
-  updateApiKey(apiKey: string): void {
-    this.apiKey = apiKey;
-    logger.info('TextToSpeechService API key updated');
+  private async getTTSConfig(): Promise<{
+    apiKey: string;
+    voiceId: string;
+    modelId: string;
+    isEnabled: boolean;
+    provider: string;
+  }> {
+    try {
+      const config = await Configuration.findOne();
+      
+      if (!config) {
+        logger.warn('No configuration found in database for TTS');
+        return {
+          apiKey: '',
+          voiceId: 'EXAVITQu4vr4xnSDxMaL', // Default fallback
+          modelId: 'eleven_turbo_v2', // Default fallback
+          isEnabled: false,
+          provider: 'elevenlabs'
+        };
+      }
+      
+      // Get TTS provider configuration
+      const ttsProvider = config.ttsConfig?.provider || 'elevenlabs';
+      
+      if (ttsProvider === 'elevenlabs') {
+        const elevenLabsConfig = config.elevenLabsConfig;
+        return {
+          apiKey: elevenLabsConfig?.apiKey || '',
+          voiceId: elevenLabsConfig?.selectedVoiceId || 
+                   elevenLabsConfig?.availableVoices?.[0]?.voiceId || 
+                   'EXAVITQu4vr4xnSDxMaL',
+          modelId: elevenLabsConfig?.useFlashModel ? 'eleven_flash_v2_5' : 'eleven_turbo_v2',
+          isEnabled: elevenLabsConfig?.isEnabled || false,
+          provider: 'elevenlabs'
+        };
+      } else {
+        // For other providers, return empty config for now
+        return {
+          apiKey: '',
+          voiceId: '',
+          modelId: '',
+          isEnabled: false,
+          provider: ttsProvider
+        };
+      }
+    } catch (error) {
+      logger.error(`Error getting TTS configuration: ${error.message}`);
+      return {
+        apiKey: '',
+        voiceId: 'EXAVITQu4vr4xnSDxMaL',
+        modelId: 'eleven_turbo_v2',
+        isEnabled: false,
+        provider: 'elevenlabs'
+      };
+    }
   }
 
   /**
@@ -75,23 +121,36 @@ export class TextToSpeechService {
           throw new Error('Text is required for speech generation');
         }
         
-        // For demo purposes, if no API key is set, use a simple fallback
-        if (!this.apiKey) {
-          logger.warn('No ElevenLabs API key found. Using fallback method.');
+        // Get current configuration from database
+        const ttsConfig = await this.getTTSConfig();
+        
+        // Check if TTS is enabled and properly configured
+        if (!ttsConfig.isEnabled || !ttsConfig.apiKey) {
+          logger.warn('TTS not enabled or API key not configured. Using fallback method.');
           return this.generateFallbackAudio(text);
         }
         
-        // Prepare options
-        const voiceId = options?.voiceId || this.defaultVoiceId;
-        const modelId = options?.modelId || this.defaultModelId;
+        // Only support ElevenLabs for now
+        if (ttsConfig.provider !== 'elevenlabs') {
+          logger.warn(`TTS provider ${ttsConfig.provider} not supported by this service. Using fallback.`);
+          return this.generateFallbackAudio(text);
+        }
+        
+        // Prepare options with database configuration
+        const voiceId = options?.voiceId || ttsConfig.voiceId;
+        const modelId = options?.modelId || ttsConfig.modelId;
+        
+        // Get voice settings from database configuration
+        const config = await Configuration.findOne();
+        const elevenLabsConfig = config?.elevenLabsConfig;
         
         // Prepare request payload
         const payload = {
           text,
           model_id: modelId,
           voice_settings: {
-            stability: options?.stability !== undefined ? options.stability : 0.5,
-            similarity_boost: options?.similarity !== undefined ? options.similarity : 0.75,
+            stability: options?.stability !== undefined ? options.stability : (elevenLabsConfig?.voiceStability || 0.8),
+            similarity_boost: options?.similarity !== undefined ? options.similarity : (elevenLabsConfig?.voiceClarity || 0.9),
             style: 0.0,
             use_speaker_boost: options?.speakerId ? true : false,
             speaker_id: options?.speakerId || undefined
@@ -100,16 +159,18 @@ export class TextToSpeechService {
         
         if (options?.speed !== undefined) {
           payload.voice_settings['speed'] = options.speed;
+        } else if (elevenLabsConfig?.voiceSpeed !== undefined) {
+          payload.voice_settings['speed'] = elevenLabsConfig.voiceSpeed;
         }
         
-        // Call the ElevenLabs API
+        // Call the ElevenLabs API with database API key
         const response = await axios.post(
           `${this.apiUrl}/text-to-speech/${voiceId}`,
           payload,
           {
             headers: {
               'Content-Type': 'application/json',
-              'xi-api-key': this.apiKey
+              'xi-api-key': ttsConfig.apiKey
             },
             responseType: 'arraybuffer'
           }
@@ -133,7 +194,7 @@ export class TextToSpeechService {
     
     // Define fallback function for when circuit is open
     const fallbackFunction = async () => {
-      logger.warn('ElevenLabs circuit breaker open, using fallback audio');
+      logger.warn('TTS circuit breaker open, using fallback audio');
       return this.generateFallbackAudio(text);
     };
     
@@ -177,23 +238,36 @@ export class TextToSpeechService {
         throw new Error('Text is required for speech generation');
       }
       
-      // For demo purposes, if no API key is set, use a simple fallback
-      if (!this.apiKey) {
-        logger.warn('No ElevenLabs API key found. Using fallback method for streaming.');
+      // Get current configuration from database
+      const ttsConfig = await this.getTTSConfig();
+      
+      // Check if TTS is enabled and properly configured
+      if (!ttsConfig.isEnabled || !ttsConfig.apiKey) {
+        logger.warn('TTS not enabled or API key not configured. Using fallback method for streaming.');
         return this.generateFallbackStream(text);
       }
       
-      // Prepare options
-      const voiceId = options?.voiceId || this.defaultVoiceId;
-      const modelId = options?.modelId || this.defaultModelId;
+      // Only support ElevenLabs for now
+      if (ttsConfig.provider !== 'elevenlabs') {
+        logger.warn(`TTS provider ${ttsConfig.provider} not supported by this service. Using fallback.`);
+        return this.generateFallbackStream(text);
+      }
+      
+      // Prepare options with database configuration
+      const voiceId = options?.voiceId || ttsConfig.voiceId;
+      const modelId = options?.modelId || ttsConfig.modelId;
+      
+      // Get voice settings from database configuration
+      const config = await Configuration.findOne();
+      const elevenLabsConfig = config?.elevenLabsConfig;
       
       // Prepare request payload
       const payload = {
         text,
         model_id: modelId,
         voice_settings: {
-          stability: options?.stability !== undefined ? options.stability : 0.5,
-          similarity_boost: options?.similarity !== undefined ? options.similarity : 0.75,
+          stability: options?.stability !== undefined ? options.stability : (elevenLabsConfig?.voiceStability || 0.8),
+          similarity_boost: options?.similarity !== undefined ? options.similarity : (elevenLabsConfig?.voiceClarity || 0.9),
           style: 0.0,
           use_speaker_boost: options?.speakerId ? true : false,
           speaker_id: options?.speakerId || undefined
@@ -203,16 +277,18 @@ export class TextToSpeechService {
       
       if (options?.speed !== undefined) {
         payload.voice_settings['speed'] = options.speed;
+      } else if (elevenLabsConfig?.voiceSpeed !== undefined) {
+        payload.voice_settings['speed'] = elevenLabsConfig.voiceSpeed;
       }
       
-      // Call the ElevenLabs streaming API
+      // Call the ElevenLabs streaming API with database API key
       const response = await axios.post(
         `${this.apiUrl}/text-to-speech/${voiceId}/stream`,
         payload,
         {
           headers: {
             'Content-Type': 'application/json',
-            'xi-api-key': this.apiKey
+            'xi-api-key': ttsConfig.apiKey
           },
           responseType: 'stream'
         }
@@ -259,12 +335,20 @@ export class TextToSpeechService {
   }
 
   /**
-   * Get available voices from ElevenLabs API
+   * Get available voices from ElevenLabs API using database configuration
    */
   async getVoices(): Promise<any[]> {
     try {
-      if (!this.apiKey) {
-        logger.warn('No ElevenLabs API key found. Cannot get voices.');
+      // Get current configuration from database
+      const ttsConfig = await this.getTTSConfig();
+      
+      if (!ttsConfig.apiKey) {
+        logger.warn('No TTS API key found in database. Cannot get voices.');
+        return [];
+      }
+      
+      if (ttsConfig.provider !== 'elevenlabs') {
+        logger.warn(`TTS provider ${ttsConfig.provider} not supported for voice retrieval.`);
         return [];
       }
       
@@ -273,7 +357,7 @@ export class TextToSpeechService {
         {
           headers: {
             'Content-Type': 'application/json',
-            'xi-api-key': this.apiKey
+            'xi-api-key': ttsConfig.apiKey
           }
         }
       );
@@ -286,12 +370,20 @@ export class TextToSpeechService {
   }
 
   /**
-   * Get available models from ElevenLabs API
+   * Get available models from ElevenLabs API using database configuration
    */
   async getModels(): Promise<any[]> {
     try {
-      if (!this.apiKey) {
-        logger.warn('No ElevenLabs API key found. Cannot get models.');
+      // Get current configuration from database
+      const ttsConfig = await this.getTTSConfig();
+      
+      if (!ttsConfig.apiKey) {
+        logger.warn('No TTS API key found in database. Cannot get models.');
+        return [];
+      }
+      
+      if (ttsConfig.provider !== 'elevenlabs') {
+        logger.warn(`TTS provider ${ttsConfig.provider} not supported for model retrieval.`);
         return [];
       }
       
@@ -300,7 +392,7 @@ export class TextToSpeechService {
         {
           headers: {
             'Content-Type': 'application/json',
-            'xi-api-key': this.apiKey
+            'xi-api-key': ttsConfig.apiKey
           }
         }
       );
@@ -318,29 +410,23 @@ let _textToSpeechService: TextToSpeechService | null = null;
 
 /**
  * Get the singleton instance of TextToSpeechService
+ * Updated to use database configuration
  */
 export async function getTextToSpeechService(): Promise<TextToSpeechService> {
   if (!_textToSpeechService) {
-    try {
-      // Get API key from database
-      const config = await Configuration.findOne();
-      const elevenLabsApiKey = config?.elevenLabsConfig?.apiKey || '';
-      
-      if (!elevenLabsApiKey) {
-        logger.warn('No ElevenLabs API key found in database, creating service with empty key');
-      } else {
-        logger.info('Creating TextToSpeechService with API key from database');
-      }
-      
-      _textToSpeechService = new TextToSpeechService(elevenLabsApiKey);
-    } catch (error) {
-      logger.error(`Error initializing TextToSpeechService: ${error.message}`);
-      // Create with empty key as fallback
-      _textToSpeechService = new TextToSpeechService('');
-    }
+    logger.info('Creating TextToSpeechService instance (database-driven configuration)');
+    _textToSpeechService = new TextToSpeechService();
   }
   
   return _textToSpeechService;
+}
+
+/**
+ * Reset the singleton instance (useful for testing or configuration updates)
+ */
+export function resetTextToSpeechService(): void {
+  _textToSpeechService = null;
+  logger.info('TextToSpeechService instance reset');
 }
 
 export default TextToSpeechService;

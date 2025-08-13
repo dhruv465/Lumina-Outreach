@@ -25,6 +25,7 @@ import deepgramTTSRoutes from './routes/deepgramTTSRoutes';
 import ttsProviderRoutes from './routes/ttsProviderRoutes';
 import knowledgeRoutes from './routes/knowledgeRoutes';
 import leadRoutes from './routes/leadRoutes';
+import ragRoutes from './routes/ragRoutes';
 // Monitoring routes removed
 import rootWebhookRoutes from './routes/rootWebhookRoutes';
 import streamRoutes from './routes/streamRoutes';
@@ -365,6 +366,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/ai', aiRoutes); // Core AI routes
 app.use('/api/ai-orchestration', aiOrchestrationRoutes); // AI orchestration layer routes
 app.use('/api/knowledge', knowledgeRoutes); // Knowledge management routes
+app.use('/api/rag', ragRoutes); // RAG (Retrieval-Augmented Generation) routes
 app.use('/api/transcription', transcriptionRoutes);
 app.use('/api/deepgram-metrics', (req, res) => {
   res.status(503).json({ error: 'Deepgram metrics service temporarily unavailable' });
@@ -814,7 +816,13 @@ const startServer = async () => {
       const { getLLMService } = await import('./services');
       const llmService = getLLMService();
       const ragService = getRAGService(llmService);
-      logger.info('RAG service initialized');
+      
+      // Ensure RAG models are imported and registered
+      await import('./models/KnowledgeBase');
+      await import('./models/FAQ');
+      await import('./models/Product');
+      
+      logger.info('RAG service initialized with models');
     } catch (error) {
       logger.error(`Failed to initialize RAG Service: ${getErrorMessage(error)}`);
     }

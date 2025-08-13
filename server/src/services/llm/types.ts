@@ -96,6 +96,30 @@ export interface LLMError extends Error {
   rawError?: any; // Original provider error
 }
 
+// LLMError class implementation
+export class LLMErrorImpl extends Error implements LLMError {
+  provider: LLMProvider;
+  statusCode?: number;
+  errorCode?: string;
+  retryable: boolean;
+  rawError?: any;
+
+  constructor(
+    message: string,
+    errorCode?: string,
+    statusCode?: number,
+    provider?: LLMProvider,
+    retryable: boolean = false
+  ) {
+    super(message);
+    this.name = 'LLMError';
+    this.errorCode = errorCode;
+    this.statusCode = statusCode;
+    this.provider = provider || 'openai';
+    this.retryable = retryable;
+  }
+}
+
 // Configuration interface
 export interface LLMProviderConfig {
   name: LLMProvider;

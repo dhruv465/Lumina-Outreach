@@ -14,6 +14,7 @@ import {
   LLMStreamChunk,
   LLMMessage,
   LLMError,
+  LLMErrorImpl,
   ModelInfo
 } from './types';
 import { ILLMProviderClient } from './base';
@@ -473,6 +474,60 @@ export class LLMService {
     
     // Reinitialize with new config
     this.initializeProviders();
+  }
+  
+  /**
+   * Generate embeddings for text
+   */
+  async generateEmbedding(request: {
+    provider?: LLMProvider;
+    model?: string;
+    input: string;
+  }): Promise<{ embedding: number[] }> {
+    const provider = request.provider || 'openai';
+    const model = request.model || 'text-embedding-3-small';
+    
+    try {
+      const providerClient = this.getProvider(provider);
+      const circuitBreaker = this.circuitBreakers.get(provider);
+      
+      if (!circuitBreaker) {
+        throw new LLMErrorImpl(
+          `Circuit breaker not found for provider: ${provider}`,
+          'CIRCUIT_BREAKER_ERROR',
+          500,
+          provider
+        );
+      }
+      
+      const result = await circuitBreaker.execute(async () => {
+        // For now, use the OpenAI client directly
+        if (provider === 'openai') {
+          const openaiClient = providerClient as OpenAIClient;
+          return await openaiClient.generateEmbedding({ model, input: request.input });
+        } else {
+          throw new LLMErrorImpl(
+            `Embedding not supported for provider: ${provider}`,
+            'UNSUPPORTED_OPERATION',
+            400,
+            provider
+          );
+        }
+      });
+      
+      return result;
+    } catch (error) {
+      if (error instanceof LLMErrorImpl) {
+        throw error;
+      }
+      
+      throw new LLMErrorImpl(
+        `Embedding generation failed: ${error instanceof Error ? error.message : String(error)}`,
+        'EMBEDDING_ERROR',
+        500,
+        request.provider || 'openai'
+      );
+    }
   }
   
   /**

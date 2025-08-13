@@ -779,6 +779,74 @@ export class AIOrchestrationLayer extends EventEmitter {
   }
   
   /**
+   * Generate embeddings for text using available embedding providers
+   */
+  public async generateEmbedding(options: {
+    provider?: 'openai' | 'google';
+    model?: string;
+    input: string;
+  }): Promise<{ embedding: number[] }> {
+    if (!this.llmService) {
+      throw new Error('LLM Service not initialized');
+    }
+    
+    const startTime = Date.now();
+    const provider = options.provider || 'openai';
+    const model = options.model || 'text-embedding-3-small';
+    
+    try {
+      // Use circuit breaker to make the request
+      const circuitBreaker = this.circuitBreakers.get('llm');
+      if (!circuitBreaker) {
+        throw new Error('LLM circuit breaker not initialized');
+      }
+      
+      // Generate embedding using the LLM service
+      const result = await circuitBreaker.execute(
+        'generateEmbedding',
+        {
+          provider,
+          model,
+          input: options.input
+        }
+      );
+      
+      // Update metrics
+      this.updateServiceMetrics(ServiceType.LLM, {
+        latency: Date.now() - startTime,
+        success: true
+      });
+      
+      this.emit(OrchestrationEvent.REQUEST_COMPLETE, {
+        serviceType: ServiceType.LLM,
+        provider,
+        action: 'generateEmbedding',
+        latency: Date.now() - startTime,
+        success: true
+      });
+      
+      return result;
+    } catch (error) {
+      // Update metrics
+      this.updateServiceMetrics(ServiceType.LLM, {
+        latency: Date.now() - startTime,
+        success: false
+      });
+      
+      this.emit(OrchestrationEvent.ERROR, {
+        serviceType: ServiceType.LLM,
+        provider,
+        action: 'generateEmbedding',
+        error: getErrorMessage(error)
+      });
+      
+      // For now, just rethrow the error
+      // TODO: Implement fallback to other embedding providers
+      throw error;
+    }
+  }
+  
+  /**
    * Update service metrics
    */
   private updateServiceMetrics(

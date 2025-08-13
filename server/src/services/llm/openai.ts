@@ -303,6 +303,35 @@ export class OpenAIClient implements ILLMProviderClient {
       return [];
     }
   }
+  
+  /**
+   * Generate embeddings for text
+   */
+  async generateEmbedding(request: {
+    model?: string;
+    input: string;
+  }): Promise<{ embedding: number[] }> {
+    try {
+      const model = request.model || 'text-embedding-3-small';
+      
+      const response = await this.client.embeddings.create({
+        model: model,
+        input: request.input,
+        encoding_format: 'float'
+      });
+      
+      if (!response.data || response.data.length === 0) {
+        throw new Error('No embedding data returned from OpenAI');
+      }
+      
+      return {
+        embedding: response.data[0].embedding
+      };
+    } catch (error) {
+      this.handleError(error);
+      throw error; // Re-throw after handling
+    }
+  }
 
   async getAvailableModels(): Promise<ModelInfo[]> {
     try {

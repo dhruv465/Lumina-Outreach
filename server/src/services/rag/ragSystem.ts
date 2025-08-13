@@ -214,17 +214,28 @@ Answer:`,
    * Generate embeddings for text
    */
   private async generateEmbedding(text: string): Promise<number[]> {
-    // This would be replaced with actual embedding API call
-    // For now, simulate with random embedding vector
-    const orchestration = getAIOrchestration();
-    if (!orchestration) {
-      throw new Error('AI Orchestration Layer not initialized');
-    }
-    
     try {
-      // In a real implementation, this would call an embedding API
-      // Simulate for now with random embedding
-      // TODO: Implement actual embedding API calls
+      const orchestration = getAIOrchestration();
+      if (!orchestration) {
+        throw new Error('AI Orchestration Layer not initialized');
+      }
+      
+      // Try to use real embedding API through orchestration
+      try {
+        const embeddingResponse = await orchestration.generateEmbedding({
+          provider: 'openai',
+          model: this.config.embeddingModel,
+          input: text
+        });
+        
+        if (embeddingResponse && embeddingResponse.embedding) {
+          return embeddingResponse.embedding;
+        }
+      } catch (apiError) {
+        logger.warn(`Failed to generate real embedding: ${getErrorMessage(apiError)}, falling back to simulation`);
+      }
+      
+      // Fallback to simulated embedding
       const embeddingDimension = this.config.embeddingDimension;
       const embedding = Array(embeddingDimension).fill(0).map(() => Math.random() * 2 - 1);
       

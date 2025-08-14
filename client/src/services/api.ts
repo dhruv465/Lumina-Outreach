@@ -96,12 +96,32 @@ api.interceptors.response.use(
         (error.config?.url?.includes('/campaigns') || 
          error.config?.url?.includes('/leads') || 
          error.config?.url?.includes('/analytics') ||
-         error.config?.url?.includes('/calls/analytics'))) {
+         error.config?.url?.includes('/calls/analytics') ||
+         error.config?.url?.includes('/dashboard'))) {
       
       // Handle different endpoint formats
       if (error.config?.url?.includes('/campaigns')) {
         return Promise.resolve({ 
           data: { campaigns: [], pagination: { page: 1, pages: 0, total: 0, limit: 10 } }
+        });
+      } else if (error.config?.url?.includes('/dashboard/overview')) {
+        return Promise.resolve({
+          data: {
+            stats: {
+              campaigns: 0,
+              leads: 0,
+              calls: 0,
+              successfulCalls: 0,
+              conversionRate: 0,
+              callsToday: 0,
+              averageDuration: 0
+            },
+            recentActivity: {
+              calls: [],
+              campaigns: [],
+              upcomingCallbacks: []
+            }
+          }
         });
       } else if (error.config?.url?.includes('/calls/analytics')) {
         return Promise.resolve({
@@ -119,6 +139,10 @@ api.interceptors.response.use(
             },
             callsByDay: []
           }
+        });
+      } else if (error.config?.url?.includes('/calls') && !error.config?.url?.includes('/calls/analytics')) {
+        return Promise.resolve({ 
+          data: { calls: [], pagination: { page: 1, pages: 0, total: 0, limit: 10 } }
         });
       } else {
         return Promise.resolve({ data: [] });

@@ -118,7 +118,14 @@ const Dashboard = () => {
               status: call.status || 'unknown',
               outcome: call.outcome || 'pending'
             })),
-            upcomingCallbacks: [], // Will be implemented
+            upcomingCallbacks: (data.recentActivity?.upcomingCallbacks || []).map((callback: any) => ({
+              id: callback._id,
+              leadName: callback.leadId?.name || callback.leadId?.phoneNumber || 'Unknown',
+              time: new Date(callback.scheduledAt).toLocaleTimeString(),
+              campaign: callback.campaignId?.name || 'Unknown',
+              company: callback.leadId?.company || 'Unknown',
+              date: new Date(callback.scheduledAt).toLocaleDateString()
+            })),
             campaigns: data.stats?.campaigns || 0,
             // Include analytics data for charts if available
             metrics: analyticsData?.summary || null,

@@ -38,6 +38,7 @@ export interface DashboardOverview {
   recentActivity: {
     calls: any[];
     campaigns: any[];
+    upcomingCallbacks: any[];
   };
 }
 
@@ -326,6 +327,16 @@ class UnifiedAnalyticsService {
         .populate('leadId', 'name phoneNumber')
         .populate('campaignId', 'name');
         
+      // Get upcoming callbacks (scheduled calls)
+      const upcomingCallbacks = await Call.find({
+        status: 'scheduled',
+        scheduledAt: { $gte: new Date() } // Only future scheduled calls
+      })
+        .sort({ scheduledAt: 1 }) // Sort by earliest first
+        .limit(5)
+        .populate('leadId', 'name phoneNumber')
+        .populate('campaignId', 'name');
+        
       // Get active campaigns
       const activeCampaigns = await Campaign.find(campaignQuery)
         .sort({ createdAt: -1 })
@@ -343,7 +354,8 @@ class UnifiedAnalyticsService {
         },
         recentActivity: {
           calls: recentCalls,
-          campaigns: activeCampaigns
+          campaigns: activeCampaigns,
+          upcomingCallbacks: upcomingCallbacks
         }
       };
     } catch (error) {

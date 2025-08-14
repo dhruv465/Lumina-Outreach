@@ -111,6 +111,15 @@ const logger = winston.createLogger({
         winston.format.json()
       )
     }),
+    new winston.transports.File({
+      filename: path.join('logs', 'server_log_lumina.txt'),
+      maxsize: logFileMaxSize,
+      maxFiles: logFileMaxFiles,
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+      )
+    }),
 
     // Console transport for production (structured logging)
     ...(process.env.NODE_ENV === 'production' ? [

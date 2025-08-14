@@ -22,7 +22,7 @@
     "prestart:prod": "npm run build",
     "docker:build": "docker build -t lumina-outreach-server .",
     "docker:run": "docker run -p 8000:8000 lumina-outreach-server",
-    "logs:clear": "rm -f logs/*.log",
+    "logs:clear": "rm -f logs/*.log logs/server_log_lumina.txt",
     "security:audit": "npm audit",
     "security:fix": "npm audit fix",
     "memory:monitor": "node --expose-gc --max-old-space-size=1536 --optimize-for-size dist/index.js",

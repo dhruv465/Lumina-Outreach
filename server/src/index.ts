@@ -607,9 +607,13 @@ const initializeServices = async () => {
     const selectedTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
     logger.info(`Initializing services for selected TTS provider: ${selectedTTSProvider}`);
 
-    // Initialize Enhanced Voice AI Service only if ElevenLabs is the selected TTS provider
+    // Import TTS configuration helper
+    const { isTTSProviderConfigured } = await import('./utils/ttsServiceFactory');
+    const isSelectedTTSConfigured = isTTSProviderConfigured(config);
+
+    // Initialize Enhanced Voice AI Service only if ElevenLabs is the selected TTS provider AND properly configured
     let enhancedVoiceAI;
-    if (selectedTTSProvider === 'elevenlabs' && elevenLabsApiKey) {
+    if (selectedTTSProvider === 'elevenlabs' && isSelectedTTSConfigured && elevenLabsApiKey) {
       enhancedVoiceAI = new EnhancedVoiceAIService(elevenLabsApiKey);
       logger.info('ElevenLabs Enhanced Voice AI Service initialized');
     } else {
@@ -617,13 +621,26 @@ const initializeServices = async () => {
       enhancedVoiceAI = new EnhancedVoiceAIService('');
       if (selectedTTSProvider !== 'elevenlabs') {
         logger.info(`Skipping ElevenLabs service initialization - selected TTS provider is ${selectedTTSProvider}`);
+      } else if (!isSelectedTTSConfigured) {
+        logger.warn('ElevenLabs selected as TTS provider but not properly configured');
       } else {
         logger.warn('ElevenLabs selected as TTS provider but no API key available');
       }
     }
 
-    // Initialize Deepgram TTS service as fallback
-    if (deepgramApiKey) {
+    // Initialize Deepgram TTS service if it's the selected provider or as fallback
+    const shouldInitializeDeepgramAsSelected = selectedTTSProvider === 'deepgram' && isSelectedTTSConfigured && deepgramApiKey;
+    const shouldInitializeDeepgramAsFallback = selectedTTSProvider !== 'deepgram' && deepgramApiKey;
+    
+    if (shouldInitializeDeepgramAsSelected) {
+      try {
+        const { initializeDeepgramTTS } = await import('./services/deepgramTTSService');
+        initializeDeepgramTTS(deepgramApiKey);
+        logger.info('Deepgram TTS service initialized as primary TTS provider');
+      } catch (error) {
+        logger.warn(`Failed to initialize Deepgram TTS service: ${getErrorMessage(error)}`);
+      }
+    } else if (shouldInitializeDeepgramAsFallback) {
       try {
         const { initializeDeepgramTTS } = await import('./services/deepgramTTSService');
         initializeDeepgramTTS(deepgramApiKey);
@@ -632,7 +649,13 @@ const initializeServices = async () => {
         logger.warn(`Failed to initialize Deepgram TTS service: ${getErrorMessage(error)}`);
       }
     } else {
-      logger.info('Deepgram TTS service not initialized - no API key available');
+      if (selectedTTSProvider === 'deepgram' && !isSelectedTTSConfigured) {
+        logger.warn('Deepgram selected as TTS provider but not properly configured');
+      } else if (selectedTTSProvider === 'deepgram' && !deepgramApiKey) {
+        logger.warn('Deepgram selected as TTS provider but no API key available');
+      } else {
+        logger.info('Deepgram TTS service not initialized - not selected and no API key for fallback');
+      }
     }
 
     // Initialize TTS Provider Service

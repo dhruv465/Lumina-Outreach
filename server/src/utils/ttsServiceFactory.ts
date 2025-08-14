@@ -1,5 +1,5 @@
 import logger from './logger';
-import { getErrorMessage } from '../index';
+import { getErrorMessage } from './logger';
 import { EnhancedVoiceAIService } from '../services/enhancedVoiceAIService';
 import { TTSProviderService } from '../services/ttsProviderService';
 
@@ -150,5 +150,36 @@ export function isTTSProviderConfigured(configuration: any, voiceId?: string): b
       return false;
     default:
       return false;
+  }
+}
+
+/**
+ * Check if any TTS provider is properly configured, regardless of which one is selected
+ */
+export function hasAnyTTSProviderConfigured(configuration: any): boolean {
+  return !!(
+    configuration?.elevenLabsConfig?.apiKey || 
+    configuration?.ttsConfig?.deepgramTTS?.apiKey
+    // Add more providers as they are implemented
+  );
+}
+
+/**
+ * Get required API keys for a specific TTS provider
+ */
+export function getRequiredApiKeysForProvider(provider: string): string[] {
+  switch (provider) {
+    case 'elevenlabs':
+      return ['elevenLabsApiKey'];
+    case 'deepgram':
+      return ['deepgramApiKey'];
+    case 'openai':
+      return ['openAIApiKey'];
+    case 'google':
+      return ['googleSpeechKey'];
+    case 'aws':
+      return []; // AWS might use different credential system
+    default:
+      return [];
   }
 }

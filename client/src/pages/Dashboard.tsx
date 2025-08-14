@@ -53,7 +53,8 @@ interface DashboardData {
   conversionRate: number;
   recentCalls: RecentCall[];
   upcomingCallbacks: UpcomingCallback[];
-  // Optional additional metrics from consolidated analytics
+  campaigns?: number;
+  // Optional additional metrics from analytics for charts
   metrics?: {
     totalCalls: number;
     completedCalls: number;
@@ -65,7 +66,7 @@ interface DashboardData {
     conversionRate: number;
     negativeRate: number;
     outcomes: Record<string, number>;
-  };
+  } | null;
   timeline?: Array<{
     date: string;
     totalCalls: number;
@@ -87,39 +88,41 @@ const Dashboard = () => {
     queryKey: ['dashboardOverview', timeframe],
     queryFn: async () => {
       try {
-        // Use the consolidated analytics endpoint for consistent data
-        const params = new URLSearchParams();
-        if (timeframe !== 'all') {
-          const startDate = new Date();
-          // Map timeframe to days
-          const timeframeDays = {
-            'week': 7,
-            'month': 30,
-            'quarter': 90,
-            'year': 365
-          };
-          const days = timeframeDays[timeframe as keyof typeof timeframeDays] || 30;
-          startDate.setDate(startDate.getDate() - days);
-          params.append('startDate', startDate.toISOString());
-        }
+        // Get both dashboard overview and analytics data for complete dashboard
+        const [overviewResponse, analyticsResponse] = await Promise.all([
+          api.get('/dashboard/overview'),
+          api.get('/analytics/unified-metrics').catch(() => ({ data: null })) // Fallback if analytics fails
+        ]);
         
-        const response = await api.get(`/analytics/unified-metrics?${params.toString()}`);
-        
-        if (response.data?.data) {
-          // Transform analytics data to dashboard format for compatibility
-          const analyticsData = response.data.data;
+        if (overviewResponse.data) {
+          const data = overviewResponse.data;
+          const analyticsData = analyticsResponse.data?.data;
+          
+          // Calculate average duration string from seconds
+          const avgDurationSeconds = data.stats?.averageDuration || 0;
+          const avgDurationFormatted = `${Math.floor(avgDurationSeconds / 60)}:${(avgDurationSeconds % 60).toString().padStart(2, '0')}`;
+          
+          // Transform dashboard response to expected format
           return {
-            totalCalls: analyticsData.summary.totalCalls,
-            connectedCalls: analyticsData.summary.completedCalls,
-            activeLeads: 0, // This would need to be fetched separately if needed
-            callsToday: analyticsData.summary.totalCalls, // Simplified for now
-            averageCallDuration: `${Math.floor(analyticsData.summary.averageDuration / 60)}:${(analyticsData.summary.averageDuration % 60).toString().padStart(2, '0')}`,
-            conversionRate: Math.round(analyticsData.summary.conversionRate),
-            recentCalls: [],
-            upcomingCallbacks: [],
-            // Add the comprehensive metrics from analytics
-            metrics: analyticsData.summary,
-            timeline: analyticsData.timeline
+            totalCalls: data.stats?.calls || 0,
+            connectedCalls: data.stats?.successfulCalls || 0,
+            activeLeads: data.stats?.leads || 0,
+            callsToday: data.stats?.callsToday || 0,
+            averageCallDuration: avgDurationFormatted,
+            conversionRate: Math.round(data.stats?.conversionRate || 0),
+            recentCalls: (data.recentActivity?.calls || []).map((call: any) => ({
+              id: call._id,
+              leadName: call.leadId?.name || call.leadId?.phoneNumber || 'Unknown',
+              time: new Date(call.createdAt).toLocaleTimeString(),
+              duration: call.duration ? `${Math.floor(call.duration / 60)}:${(call.duration % 60).toString().padStart(2, '0')}` : '0:00',
+              status: call.status || 'unknown',
+              outcome: call.outcome || 'pending'
+            })),
+            upcomingCallbacks: [], // Will be implemented
+            campaigns: data.stats?.campaigns || 0,
+            // Include analytics data for charts if available
+            metrics: analyticsData?.summary || null,
+            timeline: analyticsData?.timeline || []
           };
         }
         
@@ -132,10 +135,13 @@ const Dashboard = () => {
           connectedCalls: 0,
           activeLeads: 0,
           callsToday: 0,
-          averageCallDuration: "0",
+          averageCallDuration: "0:00",
           conversionRate: 0,
           recentCalls: [],
-          upcomingCallbacks: []
+          upcomingCallbacks: [],
+          campaigns: 0,
+          metrics: null,
+          timeline: []
         };
       }
     },

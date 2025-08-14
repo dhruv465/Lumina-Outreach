@@ -32,6 +32,8 @@ export interface DashboardOverview {
     calls: number;
     successfulCalls: number;
     conversionRate: number;
+    callsToday: number;
+    averageDuration: number;
   };
   recentActivity: {
     calls: any[];
@@ -299,10 +301,22 @@ class UnifiedAnalyticsService {
     try {
       // Get counts for various entities
       const campaignQuery = userId ? { createdBy: userId } : {};
-      const [campaignCount, leadCount, callMetrics] = await Promise.all([
+      
+      // Calculate today's date range (start and end of today)
+      const today = new Date();
+      const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const endOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+      
+      const [campaignCount, leadCount, callMetrics, callsToday] = await Promise.all([
         Campaign.countDocuments(campaignQuery),
         Lead.countDocuments({}),
-        this.getCallMetrics() // Use unified metrics
+        this.getCallMetrics(), // Use unified metrics
+        Call.countDocuments({
+          createdAt: {
+            $gte: startOfToday,
+            $lt: endOfToday
+          }
+        })
       ]);
 
       // Get recent calls with consistent population
@@ -323,7 +337,9 @@ class UnifiedAnalyticsService {
           leads: leadCount,
           calls: callMetrics.totalCalls,
           successfulCalls: callMetrics.successfulCalls,
-          conversionRate: callMetrics.conversionRate
+          conversionRate: callMetrics.conversionRate,
+          callsToday: callsToday,
+          averageDuration: callMetrics.averageDuration
         },
         recentActivity: {
           calls: recentCalls,

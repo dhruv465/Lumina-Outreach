@@ -54,7 +54,7 @@ export async function synthesizeSpeechWithProvider(
   configuration: any,
   text: string,
   voiceId?: string,
-  language: string = 'en',
+  language = 'en',
   options?: { encoding?: string; sampleRate?: number; model?: string }
 ): Promise<{ audioContent: Buffer | null; method: 'tts' | 'fallback' }> {
   try {

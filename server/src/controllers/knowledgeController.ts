@@ -56,6 +56,14 @@ export const uploadDocuments = async (req: Request, res: Response) => {
 // @access  Private
 export const getDocuments = async (req: Request, res: Response) => {
   try {
+    // Defensive guard to ensure user is authenticated
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Unauthorized' 
+      });
+    }
+
     const knowledgeService = getKnowledgeService();
     const userId = req.user.id;
     
@@ -87,6 +95,14 @@ export const getDocuments = async (req: Request, res: Response) => {
 // @access  Private
 export const getDocumentById = async (req: Request, res: Response) => {
   try {
+    // Defensive guard to ensure user is authenticated
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Unauthorized' 
+      });
+    }
+
     const knowledgeService = getKnowledgeService();
     const userId = req.user.id;
     const documentId = req.params.id;
@@ -114,6 +130,14 @@ export const getDocumentById = async (req: Request, res: Response) => {
 // @access  Private
 export const updateDocument = async (req: Request, res: Response) => {
   try {
+    // Defensive guard to ensure user is authenticated
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Unauthorized' 
+      });
+    }
+
     const knowledgeService = getKnowledgeService();
     const userId = req.user.id;
     const documentId = req.params.id;
@@ -143,6 +167,14 @@ export const updateDocument = async (req: Request, res: Response) => {
 // @access  Private
 export const deleteDocument = async (req: Request, res: Response) => {
   try {
+    // Defensive guard to ensure user is authenticated
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Unauthorized' 
+      });
+    }
+
     const knowledgeService = getKnowledgeService();
     const userId = req.user.id;
     const documentId = req.params.id;
@@ -170,6 +202,14 @@ export const deleteDocument = async (req: Request, res: Response) => {
 // @access  Private
 export const getChunks = async (req: Request, res: Response) => {
   try {
+    // Defensive guard to ensure user is authenticated
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Unauthorized' 
+      });
+    }
+
     const knowledgeService = getKnowledgeService();
     const userId = req.user.id;
     
@@ -260,6 +300,14 @@ export const updateChunk = async (req: Request, res: Response) => {
 // @access  Private
 export const getCategories = async (req: Request, res: Response) => {
   try {
+    // Defensive guard to ensure user is authenticated
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Unauthorized' 
+      });
+    }
+
     const knowledgeService = getKnowledgeService();
     const userId = req.user.id;
     
@@ -364,6 +412,14 @@ export const deleteCategory = async (req: Request, res: Response) => {
 // @access  Private
 export const getTags = async (req: Request, res: Response) => {
   try {
+    // Defensive guard to ensure user is authenticated
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Unauthorized' 
+      });
+    }
+
     const knowledgeService = getKnowledgeService();
     const userId = req.user.id;
     

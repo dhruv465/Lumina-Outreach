@@ -38,7 +38,7 @@ export function createLogger(context: string): winston.Logger {
 /**
  * Safely extract error message from unknown error type
  */
-export function getErrorMessage(error: unknown): string {
+function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
@@ -53,4 +53,4 @@ export function getErrorMessage(error: unknown): string {
 
 // Export the logger for use in other modules
 export default logger;
-export { logStream };
+export { logStream, getErrorMessage };

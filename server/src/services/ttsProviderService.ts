@@ -3,6 +3,7 @@ import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
 import { getDeepgramTTSService, DeepgramTTSService } from './deepgramTTSService';
 import { EnhancedVoiceAIService } from './enhancedVoiceAIService';
+import { ttsMetrics } from '../monitoring/ttsMetrics';
 
 export type TTSProvider = 'elevenlabs' | 'deepgram' | 'openai' | 'google' | 'aws';
 
@@ -60,6 +61,22 @@ export class TTSProviderService {
     return deepgramModels.includes(voiceId);
   }
 
+  /**
+   * Extract error code from error object for metrics tracking
+   */
+  private extractErrorCode(error: any): string {
+    if (error?.response?.status) {
+      return `HTTP_${error.response.status}`;
+    }
+    if (error?.code) {
+      return error.code;
+    }
+    if (error?.name) {
+      return error.name;
+    }
+    return 'UNKNOWN';
+  }
+
   private async loadConfiguration(): Promise<void> {
     try {
       const Configuration = mongoose.model('Configuration');
@@ -97,12 +114,15 @@ export class TTSProviderService {
   public async synthesizeSpeech(options: TTSOptions): Promise<TTSResult> {
     const config = await this.getTTSConfig();
     let primaryProvider = config.primaryProvider || config.provider || 'elevenlabs';
+    const startTime = Date.now();
+    const requestId = `tts_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     // Auto-detect provider based on voice ID if it looks like a Deepgram model
     if (options.voiceId && this.isDeepgramVoiceId(options.voiceId)) {
       primaryProvider = 'deepgram';
       logger.info('Auto-detected Deepgram provider based on voice ID', {
-        voiceId: options.voiceId
+        voiceId: options.voiceId,
+        requestId
       });
     }
 
@@ -110,20 +130,50 @@ export class TTSProviderService {
       textLength: options.text.length,
       primaryProvider,
       voiceId: options.voiceId,
-      model: options.model
+      model: options.model,
+      requestId
     });
 
     // Try primary provider first
     try {
       const result = await this.synthesizeWithProvider(primaryProvider, options);
+      const latency = Date.now() - startTime;
+      
+      // Record successful metric
+      ttsMetrics.recordRequest({
+        provider: primaryProvider,
+        success: true,
+        latency,
+        audioSize: result.audioContent.length,
+        fallbackUsed: false,
+        requestId
+      });
+
       logger.info('TTS synthesis successful with primary provider', {
         provider: primaryProvider,
-        audioSize: result.audioContent.length
+        audioSize: result.audioContent.length,
+        latency,
+        requestId
       });
       return result;
     } catch (primaryError) {
+      const primaryLatency = Date.now() - startTime;
+      const primaryErrorMessage = getErrorMessage(primaryError);
+      
+      // Record primary provider failure
+      ttsMetrics.recordRequest({
+        provider: primaryProvider,
+        success: false,
+        latency: primaryLatency,
+        fallbackUsed: false,
+        errorCode: this.extractErrorCode(primaryError),
+        requestId
+      });
+
       logger.warn(`Primary TTS provider ${primaryProvider} failed`, {
-        error: getErrorMessage(primaryError)
+        error: primaryErrorMessage,
+        latency: primaryLatency,
+        requestId
       });
 
       // Try fallback providers if auto-fallback is enabled
@@ -132,26 +182,68 @@ export class TTSProviderService {
           if (fallbackProvider === primaryProvider) continue; // Skip if same as primary
 
           try {
-            logger.info(`Attempting TTS fallback to ${fallbackProvider}`);
+            const fallbackStartTime = Date.now();
+            logger.info(`Attempting TTS fallback to ${fallbackProvider}`, { requestId });
+            
             const result = await this.synthesizeWithProvider(fallbackProvider, options);
+            const fallbackLatency = Date.now() - fallbackStartTime;
+            const totalLatency = Date.now() - startTime;
+            
             result.metadata.fallbackUsed = true;
-            result.metadata.error = `Primary provider ${primaryProvider} failed: ${getErrorMessage(primaryError)}`;
+            result.metadata.error = `Primary provider ${primaryProvider} failed: ${primaryErrorMessage}`;
+            
+            // Record successful fallback
+            ttsMetrics.recordRequest({
+              provider: fallbackProvider,
+              success: true,
+              latency: fallbackLatency,
+              audioSize: result.audioContent.length,
+              fallbackUsed: true,
+              fallbackReason: primaryErrorMessage,
+              requestId
+            });
             
             logger.info('TTS synthesis successful with fallback provider', {
               provider: fallbackProvider,
-              audioSize: result.audioContent.length
+              audioSize: result.audioContent.length,
+              fallbackLatency,
+              totalLatency,
+              requestId
             });
             return result;
           } catch (fallbackError) {
+            const fallbackLatency = Date.now() - Date.now(); // Will be very short for failed attempts
+            
+            // Record fallback failure
+            ttsMetrics.recordRequest({
+              provider: fallbackProvider,
+              success: false,
+              latency: fallbackLatency,
+              fallbackUsed: true,
+              fallbackReason: primaryErrorMessage,
+              errorCode: this.extractErrorCode(fallbackError),
+              requestId
+            });
+            
             logger.warn(`TTS fallback provider ${fallbackProvider} also failed`, {
-              error: getErrorMessage(fallbackError)
+              error: getErrorMessage(fallbackError),
+              requestId
             });
           }
         }
       }
 
       // All providers failed
-      throw new Error(`All TTS providers failed. Primary: ${getErrorMessage(primaryError)}`);
+      const totalLatency = Date.now() - startTime;
+      
+      logger.error('All TTS providers failed', {
+        primaryProvider,
+        primaryError: primaryErrorMessage,
+        totalLatency,
+        requestId
+      });
+      
+      throw new Error(`All TTS providers failed. Primary: ${primaryErrorMessage}`);
     }
   }
 

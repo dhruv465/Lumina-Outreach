@@ -21,6 +21,9 @@ import {
 import {
   verifyAndUpdateElevenLabsApiStatus
 } from '../utils/elevenLabsVerification';
+import {
+  verifyAndUpdateDeepgramTTSApiStatus
+} from '../utils/deepgramTTSVerification';
 
 // All interfaces moved to /types/configuration.ts
 
@@ -2134,6 +2137,51 @@ export const verifyElevenLabsApiKey = async (req: Request, res: Response) => {
     logger.error(`Error verifying ElevenLabs API key: ${getErrorMessage(error)}`);
     return res.status(500).json({
       message: 'Error verifying ElevenLabs API key',
+      error: getErrorMessage(error)
+    });
+  }
+};
+
+// @desc    Verify Deepgram TTS API Key
+// @route   POST /api/configuration/verify/deepgram-tts
+// @access  Private
+export const verifyDeepgramTTSApiKey = async (req: Request, res: Response) => {
+  try {
+    // Get the configuration
+    const config = await Configuration.findOne();
+    if (!config) {
+      return res.status(404).json({ message: 'Configuration not found' });
+    }
+
+    // Check if API key exists
+    if (!config.ttsConfig?.deepgramTTS?.apiKey) {
+      return res.status(400).json({ 
+        message: 'Deepgram TTS API key is not set',
+        status: 'failed'
+      });
+    }
+
+    // Verify the API key
+    logger.info('Verifying Deepgram TTS API key...');
+    const verificationResult = await verifyAndUpdateDeepgramTTSApiStatus(config.ttsConfig.deepgramTTS.apiKey);
+
+    // Get the updated configuration after verification
+    const updatedConfig = await Configuration.findOne();
+    
+    // Return the verification result with the latest configuration status
+    return res.status(200).json({
+      success: verificationResult.success,
+      status: verificationResult.status,
+      message: verificationResult.message,
+      latency: verificationResult.latency,
+      availableModels: verificationResult.availableModels || updatedConfig?.ttsConfig?.deepgramTTS?.availableModels || [],
+      lastVerified: updatedConfig?.ttsConfig?.deepgramTTS?.lastVerified || new Date(),
+      currentStatus: updatedConfig?.ttsConfig?.deepgramTTS?.status || 'unknown'
+    });
+  } catch (error) {
+    logger.error(`Error verifying Deepgram TTS API key: ${getErrorMessage(error)}`);
+    return res.status(500).json({
+      message: 'Error verifying Deepgram TTS API key',
       error: getErrorMessage(error)
     });
   }

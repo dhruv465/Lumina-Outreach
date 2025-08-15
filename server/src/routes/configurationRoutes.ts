@@ -12,6 +12,7 @@ import {
   makeTestCall,
   deleteApiKey,
   verifyElevenLabsApiKey,
+  verifyDeepgramTTSApiKey,
   autoConfigureDeepgramModel,
   validateDeepgramConfiguration,
   getDeepgramValidationStatus,
@@ -65,6 +66,7 @@ router.post('/test-deepgram-tts', testDeepgramTTSConnection);
 router.post('/test-voice', testVoiceSynthesis);
 router.post('/test-call', makeTestCall);
 router.post('/verify/elevenlabs', verifyElevenLabsApiKey);
+router.post('/verify/deepgram-tts', verifyDeepgramTTSApiKey);
 
 // Deepgram auto-configuration routes
 router.post('/deepgram/auto-configure', autoConfigureDeepgramModel);

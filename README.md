@@ -44,6 +44,23 @@ The project requires several environment variables to be set in the `server/.env
 
 Important security note: **Never commit your `.env` file to the repository.** It contains sensitive information like API keys and database credentials.
 
+### TTS Configuration
+
+The system supports multiple Text-to-Speech providers with automatic fallback:
+
+#### Multi-Provider Setup
+- **Primary Provider**: ElevenLabs (default) or Deepgram TTS
+- **Fallback Provider**: Automatic fallback to secondary provider on failure
+- **Voice Models**: Support for multiple voice personalities and models
+
+#### Quick TTS Setup
+1. Add API keys to your configuration via the admin interface
+2. Choose your primary TTS provider (ElevenLabs or Deepgram)
+3. Enable automatic fallback for improved reliability
+4. Test your configuration using the built-in verification tools
+
+For detailed TTS configuration, see [DEEPGRAM_TTS.md](./DEEPGRAM_TTS.md).
+
 ## Features
 
 ### Lead Management
@@ -63,6 +80,7 @@ Important security note: **Never commit your `.env` file to the repository.** It
 ### Voice AI System
 - Advanced emotion detection with cultural context
 - Multiple voice personalities with adaptation
+- **Multi-provider TTS system** (ElevenLabs + Deepgram TTS) with automatic fallback
 - Bilingual conversation support (English/Hindi)
 - Real-time personality adaptation based on customer emotions
 - Cultural intelligence and communication patterns
@@ -71,7 +89,7 @@ Important security note: **Never commit your `.env` file to the repository.** It
 
 ### Telephony Integration
 - Twilio API integration for outbound calling
-- ElevenLabs voice synthesis
+- **Dual TTS provider support** (ElevenLabs + Deepgram TTS) with intelligent fallback
 - Call queue management
 - Automatic retry logic
 - Call recording and storage
@@ -110,7 +128,7 @@ Important security note: **Never commit your `.env` file to the repository.** It
 
 ### APIs
 - Twilio for telephony
-- ElevenLabs for voice synthesis
+- **Multi-provider TTS**: ElevenLabs + Deepgram for voice synthesis with automatic fallback
 - Various LLM APIs (OpenAI, Anthropic, etc.)
 - Speech-to-Text services
 

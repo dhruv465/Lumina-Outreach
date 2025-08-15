@@ -458,11 +458,21 @@ export class TwilioWebSocketManager {
         return false;
       }
 
-      // Send as a single, non-fragmented frame
+      // Check WebSocket state before sending
+      if (this.ws.readyState !== WebSocket.OPEN) {
+        logger.error('Cannot send message: WebSocket not in OPEN state', {
+          readyState: this.ws.readyState,
+          messageType: message.event
+        });
+        return false;
+      }
+
+      // Send as a single, non-fragmented frame with strict protocol compliance
       this.ws.send(jsonMessage, { 
         binary: false,
         compress: false, // Disable compression to prevent fragmentation
-        fin: true // Ensure this is sent as a complete frame
+        fin: true, // Ensure this is sent as a complete frame
+        mask: false // Server-to-client messages should not be masked
       });
 
       // Log success (periodically to avoid spam)
@@ -515,26 +525,79 @@ export class TwilioWebSocketManager {
       return { valid: false, error: 'Message must have a valid event field' };
     }
 
+    // Validate known Twilio event types
+    const validEvents = ['media', 'start', 'stop', 'mark', 'clear'];
+    if (!validEvents.includes(message.event)) {
+      return { valid: false, error: `Invalid event type: ${message.event}. Must be one of: ${validEvents.join(', ')}` };
+    }
+
     // Validate media messages specifically
     if (message.event === 'media') {
-      if (!message.streamSid) {
-        return { valid: false, error: 'Media messages must include streamSid' };
+      if (!message.streamSid || typeof message.streamSid !== 'string') {
+        return { valid: false, error: 'Media messages must include streamSid as string' };
       }
       
-      if (!message.media) {
+      if (!message.media || typeof message.media !== 'object') {
         return { valid: false, error: 'Media messages must include media object' };
       }
       
       const { media } = message;
-      if (!media.track || !media.chunk || !media.timestamp || !media.payload) {
-        return { valid: false, error: 'Media messages must include track, chunk, timestamp, and payload' };
+      
+      // Validate required media fields with strict types
+      if (!media.track || typeof media.track !== 'string') {
+        return { valid: false, error: 'Media messages must include track as string' };
+      }
+      
+      if (!media.chunk || typeof media.chunk !== 'string') {
+        return { valid: false, error: 'Media messages must include chunk as string' };
+      }
+      
+      if (!media.timestamp || typeof media.timestamp !== 'string') {
+        return { valid: false, error: 'Media messages must include timestamp as string' };
+      }
+      
+      if (!media.payload || typeof media.payload !== 'string') {
+        return { valid: false, error: 'Media messages must include payload as string' };
+      }
+
+      // Validate track value
+      if (!['inbound', 'outbound'].includes(media.track)) {
+        return { valid: false, error: 'Media track must be either "inbound" or "outbound"' };
+      }
+
+      // Validate chunk is a valid sequence number
+      const chunkNum = parseInt(media.chunk, 10);
+      if (isNaN(chunkNum) || chunkNum < 0) {
+        return { valid: false, error: 'Media chunk must be a valid non-negative integer string' };
+      }
+
+      // Validate timestamp is a valid number string
+      const timestampNum = parseInt(media.timestamp, 10);
+      if (isNaN(timestampNum) || timestampNum <= 0) {
+        return { valid: false, error: 'Media timestamp must be a valid positive integer string' };
       }
 
       // Validate base64 payload
       try {
-        Buffer.from(media.payload, 'base64');
+        const decoded = Buffer.from(media.payload, 'base64');
+        if (decoded.length === 0) {
+          return { valid: false, error: 'Media payload cannot be empty after base64 decoding' };
+        }
       } catch (e) {
         return { valid: false, error: 'Media payload must be valid base64' };
+      }
+    }
+
+    // Validate mark messages
+    if (message.event === 'mark') {
+      if (!message.streamSid || typeof message.streamSid !== 'string') {
+        return { valid: false, error: 'Mark messages must include streamSid as string' };
+      }
+      if (!message.mark || typeof message.mark !== 'object') {
+        return { valid: false, error: 'Mark messages must include mark object' };
+      }
+      if (!message.mark.name || typeof message.mark.name !== 'string') {
+        return { valid: false, error: 'Mark messages must include mark.name as string' };
       }
     }
 
@@ -621,9 +684,14 @@ export class TwilioWebSocketManager {
     let errorType: ConnectionError['type'] = 'network';
     let severity: ConnectionError['severity'] = 'medium';
     
-    // Handle specific Twilio error patterns
-    if (error.message.includes('Protocol Error') || error.message.includes('fragmented')) {
-      logger.error('Detected Twilio WebSocket protocol error - likely due to message fragmentation');
+    // Handle specific Twilio error patterns and codes
+    if (error.message.includes('Protocol Error') || error.message.includes('fragmented') ||
+        error.message.includes('31924') || error.message.includes('malformed') ||
+        error.message.includes('31951') || error.message.includes('Invalid message')) {
+      logger.error('Detected Twilio WebSocket protocol error - message format or framing issue', {
+        error: error.message,
+        errorType: 'protocol_violation'
+      });
       errorType = 'protocol';
       severity = 'critical';
     } else if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {

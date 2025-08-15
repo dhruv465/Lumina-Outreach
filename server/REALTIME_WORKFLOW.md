@@ -110,6 +110,47 @@ interface AudioPipelineConfig {
 }
 ```
 
+### TTS Provider Selection and Fallback
+
+**Purpose**: Intelligent TTS provider selection with automatic fallback for maximum reliability.
+
+**Provider Selection Logic**:
+1. **Voice-Based Auto-Detection**: 
+   - Aura-series voice IDs (`aura-asteria-en`, `aura-zeus-en`, etc.) automatically route to Deepgram TTS
+   - Other voice IDs use the configured primary provider
+
+2. **Primary Provider Configuration**:
+   - ElevenLabs: High-quality voice synthesis with personality adaptation
+   - Deepgram TTS: Low-latency, reliable voice synthesis with multiple voice models
+
+3. **Fallback Decision Tree**:
+   ```
+   Request → Voice ID Check → Auto-detect Provider?
+                          ↓ No
+   Primary Provider → Success? → Return Audio
+                   ↓ No (Error)
+   Fallback Provider → Success? → Return Audio + Fallback Flag
+                    ↓ No (Error)
+   Twilio Built-in TTS (Last Resort)
+   ```
+
+**Error Classification and Handling**:
+- **Authentication Errors (401/403)**: Immediate fallback to secondary provider
+- **Rate Limiting (429)**: Temporary fallback with retry logic
+- **Network Timeouts**: Quick fallback to ensure call continuity
+- **Model Unavailable**: Fallback with alternative voice model
+
+**Latency Targets**:
+- **Primary Provider**: < 200ms synthesis time
+- **Fallback Provider**: < 300ms total including failover
+- **Emergency Fallback**: < 100ms (Twilio built-in TTS)
+
+**Metrics and Monitoring**:
+- Success/failure rates per provider
+- Average latency per provider
+- Fallback frequency and reasons
+- Request correlation tracking for debugging
+
 ### 4. Enhanced Real-Time Controller (`enhancedRealTimeController.ts`)
 
 **Purpose**: Integrates all services with Twilio Media Streams for seamless WebSocket communication.

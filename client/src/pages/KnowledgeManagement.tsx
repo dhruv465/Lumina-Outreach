@@ -73,13 +73,25 @@ const KnowledgeManagement = () => {
       setIsLoading(true);
       const response = await api.get('/api/knowledge/documents', { params: filters });
       setDocuments(response.data.documents || []);
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to fetch documents. Please try again.',
-        variant: 'destructive'
-      });
+    } catch (error: any) {
+      // Check if it's an authentication error (401) 
+      if (error.response?.status === 401) {
+        toast({
+          title: 'Authentication Required',
+          description: 'You need to be logged in to access documents.',
+          variant: 'destructive'
+        });
+      } else {
+        // Generic error for other failures (network, server errors, etc.)
+        toast({
+          title: 'Error',
+          description: 'Failed to fetch documents. Please try again.',
+          variant: 'destructive'
+        });
+      }
       console.error('Error fetching documents:', error);
+      // Set empty documents array to show empty state instead of keeping old data
+      setDocuments([]);
     } finally {
       setIsLoading(false);
     }

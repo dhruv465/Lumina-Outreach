@@ -43,7 +43,7 @@ export async function verifyDeepgramTTSApi(apiKey: string): Promise<DeepgramTTSV
     const testText = 'Hello';
     const synthesisOptions = {
       model: 'aura-asteria-en',
-      encoding: 'mp3'
+      encoding: 'mp3' as const
     };
 
     logger.debug('Testing Deepgram TTS API with test synthesis', {

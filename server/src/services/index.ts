@@ -257,18 +257,36 @@ export const initializeServicesAfterDB = async () => {
     const config = await Configuration.findOne();
     const selectedTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
     
-    // Initialize services with proper API keys from database
-    if (elevenLabsApiKey || openAIApiKey || anthropicApiKey || googleSpeechKey) {
+    // Import TTS configuration helper
+    const { isTTSProviderConfigured, hasAnyTTSProviderConfigured } = await import('../utils/ttsServiceFactory');
+    
+    // Check if the selected TTS provider is properly configured
+    const isSelectedTTSConfigured = isTTSProviderConfigured(config);
+    const hasAnyTTSConfigured = hasAnyTTSProviderConfigured(config);
+    
+    console.log('TTS Provider Configuration:', {
+      selectedProvider: selectedTTSProvider,
+      isSelectedConfigured: isSelectedTTSConfigured,
+      hasAnyConfigured: hasAnyTTSConfigured,
+      hasElevenLabsKey: !!elevenLabsApiKey,
+      hasDeepgramKey: !!deepgramApiKey
+    });
+    
+    // Initialize services - we need at least some API keys for core functionality
+    // But TTS-specific services will only be initialized if the selected TTS provider is configured
+    if (elevenLabsApiKey || openAIApiKey || anthropicApiKey || googleSpeechKey || deepgramApiKey) {
       console.log('Initializing services with API keys from database...');
       
-      // Initialize VoiceAI service only if ElevenLabs is the selected TTS provider
-      if (selectedTTSProvider === 'elevenlabs' && elevenLabsApiKey) {
+      // Initialize VoiceAI service only if ElevenLabs is the selected TTS provider AND properly configured
+      if (selectedTTSProvider === 'elevenlabs' && isSelectedTTSConfigured && elevenLabsApiKey) {
         _voiceAIService = new EnhancedVoiceAIService(elevenLabsApiKey);
         console.log('VoiceAI service initialized with ElevenLabs API key');
       } else {
         _voiceAIService = new EnhancedVoiceAIService('');
         if (selectedTTSProvider !== 'elevenlabs') {
           console.log(`Skipping ElevenLabs VoiceAI service - selected TTS provider is ${selectedTTSProvider}`);
+        } else if (!isSelectedTTSConfigured) {
+          console.log('ElevenLabs selected as TTS provider but not properly configured');
         } else {
           console.log('ElevenLabs selected but no API key available');
         }
@@ -309,7 +327,14 @@ export const initializeServicesAfterDB = async () => {
       // Log Deepgram configuration status
       console.log('Deepgram API key loaded:', deepgramApiKey ? `${deepgramApiKey.substring(0, 8)}...` : 'NOT SET');
     } else {
-      console.warn('No API keys found in database, services will remain with empty configuration');
+      console.warn('No API keys found in database for core services');
+      console.log('Services will only be initialized if the selected TTS provider is properly configured');
+      
+      // Even without core API keys, we can still initialize basic services if TTS is configured
+      if (isSelectedTTSConfigured) {
+        _voiceAIService = new EnhancedVoiceAIService('');
+        console.log(`Minimal service initialization - TTS provider ${selectedTTSProvider} is configured`);
+      }
     }
     
     // Always update existing conversation engine with latest API keys from database
@@ -325,9 +350,10 @@ export const initializeServicesAfterDB = async () => {
     const { reinitializeLLMServiceWithDbConfig } = await import('./advancedCampaignService');
     await reinitializeLLMServiceWithDbConfig();
     
-    // Initialize TTS services based on selected provider
-    const shouldInitializeElevenLabs = selectedTTSProvider === 'elevenlabs' && elevenLabsApiKey && openAIApiKey;
-    const shouldInitializeTTS = shouldInitializeElevenLabs || (selectedTTSProvider !== 'elevenlabs' && openAIApiKey);
+    // Initialize TTS services based on selected provider and its configuration
+    const shouldInitializeElevenLabs = selectedTTSProvider === 'elevenlabs' && isSelectedTTSConfigured && elevenLabsApiKey && openAIApiKey;
+    const shouldInitializeDeepgram = selectedTTSProvider === 'deepgram' && isSelectedTTSConfigured && deepgramApiKey;
+    const shouldInitializeTTS = shouldInitializeElevenLabs || shouldInitializeDeepgram || (selectedTTSProvider !== 'elevenlabs' && selectedTTSProvider !== 'deepgram' && openAIApiKey);
     
     if (shouldInitializeTTS) {
       try {
@@ -360,9 +386,17 @@ export const initializeServicesAfterDB = async () => {
           
           console.log('ElevenLabs Voice AI services initialized with database configuration');
           logger.info('ElevenLabs Voice AI services initialized with database configuration');
+        } else if (shouldInitializeDeepgram) {
+          console.log('Initializing Deepgram TTS services with API key from database...');
+          
+          // Initialize Deepgram TTS service
+          const { initializeDeepgramTTS } = await import('./deepgramTTSService');
+          initializeDeepgramTTS(deepgramApiKey);
+          console.log('Deepgram TTS service initialized');
+          logger.info('Deepgram TTS service initialized with database configuration');
         } else {
-          console.log(`TTS provider is ${selectedTTSProvider}, skipping ElevenLabs-specific services`);
-          logger.info(`TTS provider is ${selectedTTSProvider}, skipping ElevenLabs-specific services`);
+          console.log(`TTS provider is ${selectedTTSProvider}, skipping provider-specific services`);
+          logger.info(`TTS provider is ${selectedTTSProvider}, skipping provider-specific services`);
         }
       } catch (voiceAIError) {
         console.error('Failed to initialize Voice AI services:', voiceAIError);
@@ -371,10 +405,11 @@ export const initializeServicesAfterDB = async () => {
     } else {
       console.warn(`Skipping TTS services initialization for provider ${selectedTTSProvider}:`, {
         selectedTTSProvider,
+        isSelectedConfigured: isSelectedTTSConfigured,
         hasElevenLabsKey: !!elevenLabsApiKey,
+        hasDeepgramKey: !!deepgramApiKey,
         hasOpenAIKey: !!openAIApiKey,
-        needsElevenLabs: selectedTTSProvider === 'elevenlabs',
-        needsBothKeys: selectedTTSProvider === 'elevenlabs' ? 'ElevenLabs + OpenAI' : 'OpenAI only'
+        reason: !isSelectedTTSConfigured ? 'Selected TTS provider not properly configured' : 'Required API keys missing'
       });
     }
     

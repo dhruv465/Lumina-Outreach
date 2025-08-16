@@ -60,78 +60,14 @@ import { connectToDatabase } from './database/connection';
 import { healthCheckHandler, readinessCheckHandler } from './health/service';
 import { initCloudinary } from './utils/cloudinaryService';
 
+// Import centralized logger utilities
+import logger, { phaseLogger } from './utils/logger';
+
 // Load environment variables
 dotenv.config();
 
-// Create enhanced logger with production features
-const logLevel = process.env.LOG_LEVEL || 'info';
-const logFileMaxSize = parseInt(process.env.LOG_FILE_MAX_SIZE || '10485760'); // 10MB in bytes
-const logFileMaxFiles = parseInt(process.env.LOG_FILE_MAX_FILES || '5');
-
-const logger = winston.createLogger({
-  level: logLevel,
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  defaultMeta: {
-    service: 'lumina-outreach',
-    version: process.env.npm_package_version || '1.0.0',
-    environment: process.env.NODE_ENV || 'development'
-  },
-  transports: [
-    // Console transport for development
-    ...(process.env.NODE_ENV !== 'production' ? [
-      new winston.transports.Console({
-        format: winston.format.combine(
-          winston.format.colorize(),
-          winston.format.simple()
-        ),
-      })
-    ] : []),
-
-    // File transports with rotation
-    new winston.transports.File({
-      filename: path.join('logs', 'error.log'),
-      level: 'error',
-      maxsize: logFileMaxSize,
-      maxFiles: logFileMaxFiles,
-      format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.json()
-      )
-    }),
-    new winston.transports.File({
-      filename: path.join('logs', 'combined.log'),
-      maxsize: logFileMaxSize,
-      maxFiles: logFileMaxFiles,
-      format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.json()
-      )
-    }),
-    new winston.transports.File({
-      filename: path.join('logs', 'server_log_lumina.txt'),
-      maxsize: logFileMaxSize,
-      maxFiles: logFileMaxFiles,
-      format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.json()
-      )
-    }),
-
-    // Console transport for production (structured logging)
-    ...(process.env.NODE_ENV === 'production' ? [
-      new winston.transports.Console({
-        format: winston.format.combine(
-          winston.format.timestamp(),
-          winston.format.json()
-        ),
-      })
-    ] : [])
-  ],
-});
+// Use phase-based logging for bootstrap phase
+const bootstrapLogger = phaseLogger('BOOTSTRAP');
 
 // Create logs directory if it doesn't exist
 import fs from 'fs';
@@ -146,7 +82,7 @@ const server = http.createServer(app);
 
 // Initialize dedicated Twilio WebSocket server FIRST (before any other WebSocket servers)
 const twilioWSServer = initializeTwilioWebSocketServer(server);
-logger.info('Dedicated Twilio WebSocket server initialized for robust framing');
+bootstrapLogger.info('Dedicated Twilio WebSocket server initialized for robust framing');
 
 // WebSocket upgrade handling is now managed by TwilioWebSocketServer
 // to prevent Express interference with Twilio Media Stream connections
@@ -168,7 +104,7 @@ const io = new SocketIOServer(server, {
 
 // Initialize Deepgram WebSocket server (after Twilio WebSocket server)
 setupDeepgramWebSocketServer(server);
-logger.info('Deepgram WebSocket server initialized');
+bootstrapLogger.info('Deepgram WebSocket server initialized');
 
 // Enhanced middleware setup for production
 const corsOrigin = process.env.CORS_ORIGIN || process.env.CLIENT_URL || 'http://localhost:3000';
@@ -727,76 +663,112 @@ const startServer = async () => {
     logger.info('Starting Lumina Outreach server...');
 
     // Step 1: Validate startup configuration (environment variables only)
-    logger.info('Validating startup configuration...');
+    bootstrapLogger.info('Validating startup configuration...');
     const configValidation = validateStartupConfig();
     if (!configValidation.isValid) {
-      logger.error('Startup configuration validation failed:', configValidation);
+      bootstrapLogger.error('Startup configuration validation failed:', configValidation);
       throw new Error(`Invalid startup configuration: ${configValidation.error}`);
     }
-    logger.info('Startup configuration validation passed');
+    bootstrapLogger.info('Startup configuration validation passed');
 
     // Step 2: Connect to database
-    logger.info('Establishing database connection...');
+    bootstrapLogger.info('Establishing database connection...');
     await connectToDatabase();
 
     // Step 2.1: Wait for database to be ready
-    logger.info('Waiting for database to be ready...');
+    bootstrapLogger.info('Waiting for database to be ready...');
     const { waitForDatabaseConnection } = await import('./database/connection');
     await waitForDatabaseConnection();
-    logger.info('Database connection confirmed ready');
 
     // Step 2.5: Validate database-loaded configuration (optional)
-    logger.info('Validating database configuration...');
+    bootstrapLogger.info('Validating database configuration...');
+    let config = null;
+    let activeProviders = { tts: 'unknown', llm: [], optionalMissing: [] };
+    
     try {
       const { validateDatabaseLoadedConfig, validateDeepgramStartupConfig } = await import('./config/database-validation');
       const Configuration = require('./models/Configuration').default;
-      const config = await Configuration.findOne();
+      config = await Configuration.findOne();
 
       const dbConfigValidation = validateDatabaseLoadedConfig(config);
       if (!dbConfigValidation.isValid) {
-        logger.warn('Database configuration has issues:', dbConfigValidation.error);
-        logger.warn('Services will start with limited functionality. Configure API keys in the Configuration page.');
+        bootstrapLogger.warn('Database configuration has issues:', dbConfigValidation.error);
+        bootstrapLogger.warn('Services will start with limited functionality. Configure API keys in the Configuration page.');
 
         // Log warnings if they exist
         if (dbConfigValidation.details?.warnings) {
           dbConfigValidation.details.warnings.forEach((warning: string) => {
-            logger.warn(`Configuration warning: ${warning}`);
+            bootstrapLogger.warn(`Configuration warning: ${warning}`);
           });
         }
       } else {
-        logger.info('Database configuration is valid');
+        bootstrapLogger.info('Database configuration is valid');
 
         // Log warnings even for valid configurations
         if (dbConfigValidation.details?.warnings) {
           dbConfigValidation.details.warnings.forEach((warning: string) => {
-            logger.warn(`Configuration warning: ${warning}`);
+            bootstrapLogger.warn(`Configuration warning: ${warning}`);
           });
         }
       }
 
       // Perform specific Deepgram startup validation
       if (config?.deepgramConfig) {
-        logger.info('Performing Deepgram-specific startup validation...');
+        bootstrapLogger.info('Performing Deepgram-specific startup validation...');
         const deepgramValidation = validateDeepgramStartupConfig(config.deepgramConfig);
 
         if (!deepgramValidation.isValid) {
-          logger.warn(`Deepgram startup validation failed: ${deepgramValidation.error}`);
-          logger.info('Auto-configuration will attempt to resolve these issues during service initialization');
+          bootstrapLogger.warn(`Deepgram startup validation failed: ${deepgramValidation.error}`);
+          bootstrapLogger.info('Auto-configuration will attempt to resolve these issues during service initialization');
         } else {
-          logger.info('Deepgram startup validation passed');
+          bootstrapLogger.info('Deepgram startup validation passed');
           if (deepgramValidation.details) {
-            logger.info('Deepgram validation details:', deepgramValidation.details);
+            bootstrapLogger.info('Deepgram validation details:', deepgramValidation.details);
           }
         }
       }
 
+      // Determine active providers for summary
+      if (config) {
+        // Determine TTS provider
+        if (config.deepgramConfig?.ttsApiKey) {
+          activeProviders.tts = 'deepgram';
+        } else if (config.elevenLabsApiKey) {
+          activeProviders.tts = 'elevenlabs';
+        } else {
+          activeProviders.tts = 'fallback';
+        }
+
+        // Determine LLM providers
+        if (config.openaiApiKey) activeProviders.llm.push('openai');
+        if (config.anthropicApiKey) activeProviders.llm.push('anthropic');
+        if (config.googleApiKey) activeProviders.llm.push('google');
+
+        // Determine missing optional providers
+        if (!config.elevenLabsApiKey) activeProviders.optionalMissing.push('elevenlabs');
+        if (!config.openaiApiKey) activeProviders.optionalMissing.push('openai');
+        if (!config.anthropicApiKey) activeProviders.optionalMissing.push('anthropic');
+        if (!config.googleApiKey) activeProviders.optionalMissing.push('google');
+      }
+
     } catch (error) {
-      logger.warn('Could not validate database configuration:', error);
-      logger.warn('Services will start with empty credentials - configure via Configuration page');
+      bootstrapLogger.warn('Could not validate database configuration:', error);
+      bootstrapLogger.warn('Services will start with empty credentials - configure via Configuration page');
     }
 
+    // Switch to runtime phase logging after DB and config load
+    const runtimeLogger = phaseLogger('RUNTIME');
+    
+    // Emit provider summary
+    runtimeLogger.info('Provider configuration summary', {
+      event: 'providers.summary',
+      tts: activeProviders.tts,
+      llm: activeProviders.llm,
+      optionalMissing: activeProviders.optionalMissing
+    });
+
     // Step 3: Initialize services with database-driven configuration
-    logger.info('Initializing application services...');
+    runtimeLogger.info('Initializing application services...');
 
     // Initialize Cloudinary service
     initCloudinary();
@@ -804,7 +776,7 @@ const startServer = async () => {
     // Test Cloudinary connection
     const cloudinaryService = await import('./utils/cloudinaryService').then(m => m.default);
     const cloudinaryWorks = await cloudinaryService.testCloudinaryConnection();
-    logger.info(`Cloudinary connection test result: ${cloudinaryWorks ? 'SUCCESS' : 'FAILED'}`);
+    runtimeLogger.info(`Cloudinary connection test result: ${cloudinaryWorks ? 'SUCCESS' : 'FAILED'}`);
 
     // Initialize services that load configuration from database
     await initializeServices();

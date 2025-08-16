@@ -54,6 +54,8 @@ const KnowledgeManagement = () => {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
+  const [tagsLoaded, setTagsLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -102,6 +104,7 @@ const KnowledgeManagement = () => {
     try {
       const response = await api.get('/api/knowledge/categories');
       setCategories(response.data.categories || []);
+      setCategoriesLoaded(true);
     } catch (error) {
       toast({
         title: 'Error',
@@ -117,6 +120,7 @@ const KnowledgeManagement = () => {
     try {
       const response = await api.get('/api/knowledge/tags');
       setTags(response.data.tags || []);
+      setTagsLoaded(true);
     } catch (error) {
       toast({
         title: 'Error',
@@ -130,9 +134,41 @@ const KnowledgeManagement = () => {
   // Fetch initial data
   useEffect(() => {
     fetchDocuments();
-    fetchCategories();
-    fetchTags();
-  }, [fetchDocuments, fetchCategories, fetchTags]);
+    // Don't fetch categories and tags immediately - only when needed
+  }, [fetchDocuments]);
+
+  // Handle opening upload dialog and lazy load categories/tags
+  const handleOpenUploadDialog = async () => {
+    setUploadDialogOpen(true);
+    
+    // Lazy load categories and tags only when upload dialog is opened
+    if (!categoriesLoaded) {
+      fetchCategories();
+    }
+    if (!tagsLoaded) {
+      fetchTags();
+    }
+  };
+
+  // Handle opening category dialog and lazy load categories if needed
+  const handleOpenCategoryDialog = async () => {
+    setCategoryDialogOpen(true);
+    
+    // Lazy load categories only when category dialog is opened
+    if (!categoriesLoaded) {
+      fetchCategories();
+    }
+  };
+
+  // Handle opening tag dialog and lazy load tags if needed
+  const handleOpenTagDialog = async () => {
+    setTagDialogOpen(true);
+    
+    // Lazy load tags only when tag dialog is opened
+    if (!tagsLoaded) {
+      fetchTags();
+    }
+  };
 
   // Handle file selection
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -391,7 +427,7 @@ const KnowledgeManagement = () => {
                 Search
               </Button>
             </div>
-            <Button onClick={() => setUploadDialogOpen(true)} className="flex items-center">
+            <Button onClick={handleOpenUploadDialog} className="flex items-center">
               <UploadCloud className="mr-2 h-4 w-4" />
               Upload
             </Button>
@@ -470,7 +506,7 @@ const KnowledgeManagement = () => {
                 <FileText className="h-16 w-16 text-gray-400 mb-4" />
                 <h3 className="text-xl font-semibold mb-2">No documents found</h3>
                 <p className="text-gray-500 mb-6">Upload documents to start building your knowledge base</p>
-                <Button onClick={() => setUploadDialogOpen(true)}>
+                <Button onClick={handleOpenUploadDialog}>
                   <UploadCloud className="mr-2 h-4 w-4" />
                   Upload Documents
                 </Button>
@@ -483,7 +519,7 @@ const KnowledgeManagement = () => {
         <TabsContent value="categories">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-semibold">Document Categories</h2>
-            <Button onClick={() => setCategoryDialogOpen(true)} className="flex items-center">
+            <Button onClick={handleOpenCategoryDialog} className="flex items-center">
               <Plus className="mr-2 h-4 w-4" />
               New Category
             </Button>
@@ -530,7 +566,7 @@ const KnowledgeManagement = () => {
                 <FolderTree className="h-16 w-16 text-gray-400 mb-4" />
                 <h3 className="text-xl font-semibold mb-2">No categories found</h3>
                 <p className="text-gray-500 mb-6">Create categories to organize your documents</p>
-                <Button onClick={() => setCategoryDialogOpen(true)}>
+                <Button onClick={handleOpenCategoryDialog}>
                   <Plus className="mr-2 h-4 w-4" />
                   Create Category
                 </Button>
@@ -543,7 +579,7 @@ const KnowledgeManagement = () => {
         <TabsContent value="tags">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-semibold">Document Tags</h2>
-            <Button onClick={() => setTagDialogOpen(true)} className="flex items-center">
+            <Button onClick={handleOpenTagDialog} className="flex items-center">
               <Plus className="mr-2 h-4 w-4" />
               New Tag
             </Button>
@@ -592,7 +628,7 @@ const KnowledgeManagement = () => {
                 <Tag className="h-16 w-16 text-gray-400 mb-4" />
                 <h3 className="text-xl font-semibold mb-2">No tags found</h3>
                 <p className="text-gray-500 mb-6">Create tags to organize your documents</p>
-                <Button onClick={() => setTagDialogOpen(true)}>
+                <Button onClick={handleOpenTagDialog}>
                   <Plus className="mr-2 h-4 w-4" />
                   Create Tag
                 </Button>

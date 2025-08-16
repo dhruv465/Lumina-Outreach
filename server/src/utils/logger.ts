@@ -5,14 +5,17 @@ const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: winston.format.combine(
     winston.format.timestamp(),
-    winston.format.json()
+    process.env.NODE_ENV === 'production' ? winston.format.json() : winston.format.simple()
   ),
   defaultMeta: { service: 'lumina-outreach' },
   transports: [
+    // Console transport for development (colorized) and production (JSON)
     new winston.transports.Console({
       format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
+        ...(process.env.NODE_ENV === 'production' 
+          ? [winston.format.timestamp(), winston.format.json()]
+          : [winston.format.colorize(), winston.format.simple()]
+        )
       ),
     }),
     new winston.transports.File({ filename: 'error.log', level: 'error' }),
@@ -33,6 +36,33 @@ const logStream = {
  */
 export function createLogger(context: string): winston.Logger {
   return logger.child({ context });
+}
+
+/**
+ * Get a logger for a specific component
+ */
+export function getLogger(component: string): winston.Logger {
+  return logger.child({ component });
+}
+
+/**
+ * Get a logger for a specific phase (e.g., 'BOOTSTRAP', 'RUNTIME')
+ */
+export function phaseLogger(phase: string): winston.Logger {
+  return logger.child({ phase });
+}
+
+// Store for tracking logged messages to prevent duplicates
+const loggedMessages = new Set<string>();
+
+/**
+ * Log a message only once per key to prevent spam
+ */
+export function logOnce(key: string, logFn: () => void): void {
+  if (!loggedMessages.has(key)) {
+    loggedMessages.add(key);
+    logFn();
+  }
 }
 
 /**

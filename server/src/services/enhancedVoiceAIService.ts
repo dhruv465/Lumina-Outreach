@@ -1,6 +1,6 @@
 // Enhanced Voice AI Service - API-only, no local training or emotion detection
 import axios from 'axios';
-import logger from '../utils/logger';
+import logger, { logOnce } from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
 import mongoose from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
@@ -65,7 +65,9 @@ export class EnhancedVoiceAIService {
       this.initializeSDKService();
     } else {
       console.log('ElevenLabs API key not provided, skipping ElevenLabs service initialization');
-      logger.warn('ElevenLabs API key not provided, voice synthesis will use fallback providers only');
+      logOnce('missing.elevenlabs', () => {
+        logger.debug('ElevenLabs API key not provided, voice synthesis will use fallback providers only');
+      });
     }
 
     // Initialize LLM service asynchronously - it will fetch from the database

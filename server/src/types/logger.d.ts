@@ -11,7 +11,11 @@ declare module '../utils/logger' {
     write: (message: string) => void;
   };
   
-  // Adding a createLogger function that doesn't exist in the original implementation
-  // but is needed for the fixed controller
+  // Existing createLogger function
   export function createLogger(context: string): winston.Logger;
+  
+  // New logger utilities
+  export function getLogger(component: string): winston.Logger;
+  export function phaseLogger(phase: string): winston.Logger;
+  export function logOnce(key: string, logFn: () => void): void;
 }

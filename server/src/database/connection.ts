@@ -4,25 +4,14 @@
  * Handles MongoDB connection with proper error handling and health checks
  */
 import mongoose from 'mongoose';
-import winston from 'winston';
+import { getLogger } from '../utils/logger';
 import { validateDatabaseConfig } from '../config/database-validation';
 
-// Create a simple logger for database operations
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    })
-  ]
-});
+// Use centralized logger for database operations
+const logger = getLogger('Database');
+
+// Flag to track if we've already logged database readiness
+let databaseReadinessLogged = false;
 
 export interface DatabaseConnectionOptions {
   timeoutMs?: number;
@@ -93,7 +82,10 @@ export async function waitForDatabaseConnection(timeoutMs = 30000): Promise<void
   
   while (Date.now() - startTime < timeoutMs) {
     if (mongoose.connection.readyState === 1) {
-      logger.info('Database connection confirmed ready');
+      if (!databaseReadinessLogged) {
+        logger.info('Database connection confirmed ready');
+        databaseReadinessLogged = true;
+      }
       return;
     }
     

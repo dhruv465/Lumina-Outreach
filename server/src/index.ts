@@ -34,6 +34,7 @@ import telephonyRoutes from "./routes/telephonyRoutes";
 import transcriptionRoutes from "./routes/transcriptionRoutes";
 import userRoutes from "./routes/userRoutes";
 import voiceAIRoutes from "./routes/voiceAIRoutes";
+import healthRoutes from "./routes/healthRoutes";
 
 // Optimized stream controller
 import { optimizedStreamRoute } from "./controllers/optimizedStreamController";
@@ -347,6 +348,7 @@ app.use("/api/deepgram", deepgramTestRoutes); // Deepgram testing routes
 app.use("/api/deepgram-tts", deepgramTTSRoutes); // Deepgram TTS routes
 app.use("/api/tts-provider", ttsProviderRoutes); // TTS Provider management routes
 app.use("/api/realtime", enhancedRealTimeRoutes); // Enhanced real-time call functionality
+app.use("/api", healthRoutes); // Health monitoring and resilience routes
 
 // Debug routes only in development
 if (process.env.NODE_ENV !== "production") {

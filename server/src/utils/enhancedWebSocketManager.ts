@@ -8,7 +8,7 @@
 import * as WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import logger from '../utils/logger';
-import { getCallResilienceService } from './callResilienceService';
+import { getCallResilienceService } from '../services/callResilienceService';
 
 export interface ConnectionConfig {
   maxReconnectAttempts: number;
@@ -127,7 +127,7 @@ export class EnhancedWebSocketManager extends EventEmitter {
       logger.info(`Connecting to WebSocket for call ${this.callId}: ${this.url}`);
       
       // Create WebSocket connection
-      this.ws = new WebSocket(this.url, {
+      this.ws = new (WebSocket as any)(this.url, {
         perMessageDeflate: false,
         handshakeTimeout: this.config.connectionTimeout
       });

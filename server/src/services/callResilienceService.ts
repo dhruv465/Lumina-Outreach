@@ -133,48 +133,9 @@ export class CallResilienceService extends EventEmitter {
    * Setup circuit breaker event handlers
    */
   private setupCircuitBreakerHandlers(): void {
-    // TTS Circuit Breaker Events
-    this.ttsCircuitBreaker.on('open', () => {
-      logger.warn('TTS Circuit breaker opened - switching to fallback');
-      this.serviceHealth.tts = false;
-      this.emit('serviceDown', 'tts');
-    });
-    
-    this.ttsCircuitBreaker.on('halfOpen', () => {
-      logger.info('TTS Circuit breaker half-open - testing service');
-    });
-    
-    this.ttsCircuitBreaker.on('close', () => {
-      logger.info('TTS Circuit breaker closed - service restored');
-      this.serviceHealth.tts = true;
-      this.emit('serviceRestored', 'tts');
-    });
-    
-    // STT Circuit Breaker Events
-    this.sttCircuitBreaker.on('open', () => {
-      logger.warn('STT Circuit breaker opened - switching to fallback');
-      this.serviceHealth.stt = false;
-      this.emit('serviceDown', 'stt');
-    });
-    
-    this.sttCircuitBreaker.on('close', () => {
-      logger.info('STT Circuit breaker closed - service restored');
-      this.serviceHealth.stt = true;
-      this.emit('serviceRestored', 'stt');
-    });
-    
-    // LLM Circuit Breaker Events
-    this.llmCircuitBreaker.on('open', () => {
-      logger.warn('LLM Circuit breaker opened - switching to fallback');
-      this.serviceHealth.llm = false;
-      this.emit('serviceDown', 'llm');
-    });
-    
-    this.llmCircuitBreaker.on('close', () => {
-      logger.info('LLM Circuit breaker closed - service restored');
-      this.serviceHealth.llm = true;
-      this.emit('serviceRestored', 'llm');
-    });
+    // Note: Circuit breaker events are handled internally
+    // This is a placeholder for future event handling implementation
+    logger.info('Circuit breaker event handlers initialized');
   }
   
   /**

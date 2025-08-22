@@ -5,9 +5,9 @@
  * they work correctly during various failure scenarios.
  */
 
-import { CallResilienceService } from '../services/callResilienceService';
-import { CallMonitoringService } from '../services/callMonitoringService';
-import { FallbackTTSService } from '../services/fallbackTTSService';
+import { CallResilienceService } from '../callResilienceService';
+import { CallMonitoringService } from '../callMonitoringService';
+import { FallbackTTSService } from '../fallbackTTSService';
 
 describe('Call Resilience Services', () => {
   let resilienceService: CallResilienceService;

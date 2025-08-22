@@ -10,6 +10,9 @@ import { handleVoiceStream } from './streamController';
 import responseCache from '../utils/responseCache';
 import { TwilioWebSocketManager } from '../utils/TwilioWebSocketManager';
 import { SessionConfig, globalSessionManager } from '../utils/SessionManager';
+import { getCallResilienceService } from '../services/callResilienceService';
+import { getCallMonitoringService } from '../services/callMonitoringService';
+import { getFallbackTTSService } from '../services/fallbackTTSService';
 import { v4 as uuidv4 } from 'uuid';
 import express from 'express';
 // Common greeting phrases for pre-caching
@@ -207,6 +210,17 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
     const sessionInstance = globalSessionManager.createSession(ws, sessionConfig);
     twilioManager = sessionInstance.getTwilioManager();
 
+    // Initialize resilience services
+    const resilienceService = getCallResilienceService();
+    const monitoringService = getCallMonitoringService();
+    const fallbackTTS = getFallbackTTSService();
+    
+    // Register call for resilience monitoring
+    resilienceService.registerCall(callId);
+    monitoringService.registerCall(callId);
+    
+    logger.info(`Resilience services initialized for call ${callId}`);
+
     /**
      * Enhanced function to send audio data to Twilio with proper chunking and validation
      */
@@ -271,12 +285,21 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
       logger.error(`Failed to send connection acknowledgment for call ${callId}:`, initError);
     }
 
-    // Set up session event handlers
+    // Set up session event handlers with resilience service integration
     sessionInstance.on('sessionIdle', (data) => {
       logger.warn(`Session idle timeout for call ${callId}`, {
         sessionId: data.sessionId,
         callId,
         conversationId
+      });
+      
+      // Report to monitoring service
+      monitoringService.reportIssue(callId, {
+        type: 'warning',
+        category: 'connection',
+        message: 'Session idle timeout detected',
+        impact: 'medium',
+        suggestion: 'Check if user is still active or consider ending call'
       });
     });
 
@@ -286,6 +309,16 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         callId,
         conversationId
       });
+      
+      // Report to resilience and monitoring services
+      resilienceService.reportError(callId, new Error('Session health degraded'), 'connection');
+      monitoringService.reportIssue(callId, {
+        type: 'warning',
+        category: 'connection',
+        message: 'Session health degraded',
+        impact: 'medium',
+        suggestion: 'Monitor connection quality and consider reconnection'
+      });
     });
 
     sessionInstance.on('healthRecovered', (data) => {
@@ -293,6 +326,11 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         sessionId: data.sessionId,
         callId,
         conversationId
+      });
+      
+      // Update monitoring service - health recovered
+      monitoringService.updateCallMetrics(callId, {
+        connectionStability: 1.0
       });
     });
 
@@ -302,6 +340,16 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         callId,
         conversationId,
         healthReport: data.healthReport
+      });
+      
+      // Report critical issue
+      resilienceService.reportError(callId, new Error('Critical session health'), 'connection');
+      monitoringService.reportIssue(callId, {
+        type: 'error',
+        category: 'connection',
+        message: 'Critical session health detected',
+        impact: 'critical',
+        suggestion: 'Immediate reconnection or call termination required'
       });
     });
 
@@ -878,6 +926,21 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         }
       } catch (error) {
         logger.error(`Error processing voice stream data for call ${callId}:`, error);
+        
+        // Report error to resilience services
+        resilienceService.reportError(callId, error as Error, 'voice_processing');
+        monitoringService.reportIssue(callId, {
+          type: 'error',
+          category: 'audio',
+          message: `Voice stream processing error: ${error}`,
+          impact: 'high',
+          suggestion: 'Check audio processing pipeline and network connection'
+        });
+        
+        // Update error metrics
+        monitoringService.updateCallMetrics(callId, {
+          errorRate: monitoringService.getCallHealth(callId)?.metrics.errorRate || 0 + 0.1
+        });
       }
     });
 
@@ -933,6 +996,10 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
 
         sessionInstance.end(`WebSocket closed: ${code} - ${reason || 'No reason provided'}`);
 
+        // Clean up resilience services
+        resilienceService.unregisterCall(callId);
+        monitoringService.unregisterCall(callId);
+        
         logger.debug(`Cleaned up session and WebSocket manager for call ${callId}`);
 
         // Log additional information about the disconnection
@@ -1129,6 +1196,30 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
 
   } catch (error) {
     logger.error(`Error in optimized voice stream for call ${callId}:`, error);
+    
+    // Report to resilience services if they were initialized
+    if (callId) {
+      try {
+        const resilienceService = getCallResilienceService();
+        const monitoringService = getCallMonitoringService();
+        
+        resilienceService.reportError(callId, error as Error, 'stream_initialization');
+        monitoringService.reportIssue(callId, {
+          type: 'error',
+          category: 'connection',
+          message: `Stream initialization failed: ${error}`,
+          impact: 'critical',
+          suggestion: 'Check service configuration and network connectivity'
+        });
+        
+        // Clean up services
+        resilienceService.unregisterCall(callId);
+        monitoringService.unregisterCall(callId);
+      } catch (serviceError) {
+        logger.error(`Error reporting to resilience services: ${serviceError}`);
+      }
+    }
+    
     ws.close(1011, 'Internal server error');
   }
 };

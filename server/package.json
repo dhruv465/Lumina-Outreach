@@ -99,7 +99,7 @@
     "@types/mongoose": "^5.11.96",
     "@types/morgan": "^1.9.10",
     "@types/multer": "^2.0.0",
-    "@types/node": "^20.19.10",
+    "@types/node": "^20.19.11",
     "@types/socket.io": "^3.0.1",
     "@types/validator": "^13.11.8",
     "@types/winston": "^2.4.4",

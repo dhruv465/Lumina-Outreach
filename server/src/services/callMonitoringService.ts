@@ -82,12 +82,12 @@ export class CallMonitoringService extends EventEmitter {
     super();
     
     this.config = {
-      healthCheckInterval: 5000, // 5 seconds
+      healthCheckInterval: 3000, // Reduced from 5000 (3 seconds for faster detection)
       alertThresholds: {
-        errorRate: 0.1, // 10% error rate
-        responseTime: 3000, // 3 seconds
-        connectionStability: 0.8, // 80% stability
-        audioLatency: 500 // 500ms latency
+        errorRate: 0.08, // Reduced from 0.1 (8% error rate threshold)
+        responseTime: 2000, // Reduced from 3000 (2 seconds response time)
+        connectionStability: 0.85, // Increased from 0.8 (85% stability required)
+        audioLatency: 300 // Reduced from 500 (300ms latency threshold)
       },
       retentionPeriod: 24 * 60 * 60 * 1000, // 24 hours
       enableRealTimeAlerts: true,
@@ -110,7 +110,7 @@ export class CallMonitoringService extends EventEmitter {
         name: 'High Error Rate',
         condition: (health) => health.metrics.errorRate > this.config.alertThresholds.errorRate,
         severity: 'high',
-        cooldown: 60000, // 1 minute
+        cooldown: 30000, // Reduced from 60000 (30 seconds)
         enabled: true
       },
       {
@@ -118,7 +118,7 @@ export class CallMonitoringService extends EventEmitter {
         name: 'Slow Response Time',
         condition: (health) => health.metrics.responseTime > this.config.alertThresholds.responseTime,
         severity: 'medium',
-        cooldown: 30000, // 30 seconds
+        cooldown: 15000, // Reduced from 30000 (15 seconds)
         enabled: true
       },
       {
@@ -126,7 +126,7 @@ export class CallMonitoringService extends EventEmitter {
         name: 'Connection Instability',
         condition: (health) => health.metrics.connectionStability < this.config.alertThresholds.connectionStability,
         severity: 'high',
-        cooldown: 45000, // 45 seconds
+        cooldown: 20000, // Reduced from 45000 (20 seconds)
         enabled: true
       },
       {
@@ -134,7 +134,7 @@ export class CallMonitoringService extends EventEmitter {
         name: 'High Audio Latency',
         condition: (health) => health.metrics.audioLatency > this.config.alertThresholds.audioLatency,
         severity: 'medium',
-        cooldown: 30000, // 30 seconds
+        cooldown: 15000, // Reduced from 30000 (15 seconds)
         enabled: true
       },
       {
@@ -142,23 +142,23 @@ export class CallMonitoringService extends EventEmitter {
         name: 'Service Component Failure',
         condition: (health) => Object.values(health.components).some(status => status === 'failed'),
         severity: 'critical',
-        cooldown: 120000, // 2 minutes
+        cooldown: 60000, // Reduced from 120000 (1 minute)
         enabled: true
       },
       {
         id: 'excessive_fallbacks',
         name: 'Excessive Fallback Usage',
-        condition: (health) => health.metrics.fallbacksUsed > 5,
+        condition: (health) => health.metrics.fallbacksUsed > 3, // Reduced from 5
         severity: 'medium',
-        cooldown: 60000, // 1 minute
+        cooldown: 30000, // Reduced from 60000 (30 seconds)
         enabled: true
       },
       {
         id: 'audio_quality_degradation',
         name: 'Audio Quality Degradation',
-        condition: (health) => health.metrics.audioQuality < 0.7,
+        condition: (health) => health.metrics.audioQuality < 0.75, // Increased from 0.7
         severity: 'medium',
-        cooldown: 30000, // 30 seconds
+        cooldown: 15000, // Reduced from 30000 (15 seconds)
         enabled: true
       }
     ];
@@ -281,8 +281,8 @@ export class CallMonitoringService extends EventEmitter {
     
     this.emit('issueReported', callId, callIssue);
     
-    // Trigger auto-recovery if enabled
-    if (this.config.enableAutoRecovery && issue.impact === 'critical') {
+    // Trigger auto-recovery if enabled for critical and high impact issues
+    if (this.config.enableAutoRecovery && (issue.impact === 'critical' || issue.impact === 'high')) {
       this.triggerAutoRecovery(callId, callIssue);
     }
   }
@@ -461,6 +461,28 @@ export class CallMonitoringService extends EventEmitter {
         this.emit('autoRecovery', {
           callId,
           type: 'reconnect',
+          reason: issue.message
+        });
+        break;
+        
+      case 'audio':
+        // Enhanced audio recovery - immediate buffer cleanup and quality optimization
+        this.emit('autoRecovery', {
+          callId,
+          type: 'audio_recovery',
+          reason: issue.message
+        });
+        // Also activate audio fallback if needed
+        if (issue.impact === 'critical' || issue.impact === 'high') {
+          resilienceService.activateFallback(callId, 'Audio processing failure');
+        }
+        break;
+        
+      case 'performance':
+        // Performance recovery - optimize processing and reduce quality if needed
+        this.emit('autoRecovery', {
+          callId,
+          type: 'performance_optimization',
           reason: issue.message
         });
         break;

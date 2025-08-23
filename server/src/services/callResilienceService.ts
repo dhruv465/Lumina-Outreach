@@ -58,12 +58,12 @@ export class CallResilienceService extends EventEmitter {
     this.config = {
       maxRetries: 3,
       retryDelay: 1000,
-      circuitBreakerThreshold: 5,
-      fallbackTimeout: 5000,
-      heartbeatInterval: 10000,
-      connectionTimeout: 30000,
+      circuitBreakerThreshold: 3, // Reduced from 5 for faster failover
+      fallbackTimeout: 3000, // Reduced from 5000 for faster fallback activation
+      heartbeatInterval: 5000, // Reduced from 10000 for more frequent health checks
+      connectionTimeout: 15000, // Reduced from 30000 for faster timeout detection
       audioBufferMaxSize: 10 * 1024 * 1024, // 10MB
-      cleanupInterval: 60000, // 1 minute
+      cleanupInterval: 30000, // Reduced from 60000 for more frequent cleanup
       ...config
     };
     
@@ -86,12 +86,12 @@ export class CallResilienceService extends EventEmitter {
   private initializeCircuitBreakers(): void {
     const circuitBreakerConfig = {
       timeout: this.config.fallbackTimeout,
-      errorThresholdPercentage: 50,
-      resetTimeout: 30000,
+      errorThresholdPercentage: 40, // Reduced from 50 for faster circuit breaking
+      resetTimeout: 15000, // Reduced from 30000 for faster recovery attempts
       volumeThreshold: this.config.circuitBreakerThreshold,
       maxRetries: this.config.maxRetries,
       baseDelay: this.config.retryDelay,
-      maxDelay: 10000,
+      maxDelay: 5000, // Reduced from 10000 for faster retries
       jitter: true
     };
     

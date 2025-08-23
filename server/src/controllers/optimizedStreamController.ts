@@ -203,7 +203,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
       priority: 'high',
       maxDuration: 1800000, // 30 minutes max
       idleTimeout: 300000,  // 5 minutes idle timeout
-      healthCheckInterval: 30000 // 30 seconds health check
+      healthCheckInterval: 10000 // 10 seconds health check for faster issue detection
     };
 
     // Create session with integrated WebSocket management
@@ -455,7 +455,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
           sessionErrors: sessionMetrics.errorCount
         });
       }
-    }, 30000); // Check every 30 seconds
+    }, 10000); // Check every 10 seconds for faster issue detection
 
     // Get the call from database - in parallel with other initialization
     const callPromise = Call.findById(callId);

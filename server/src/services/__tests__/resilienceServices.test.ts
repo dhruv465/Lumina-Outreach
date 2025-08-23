@@ -333,4 +333,139 @@ describe('Call Resilience Services', () => {
       newMonitoring.shutdown();
     });
   });
+
+  describe('Call Resilience Improvements', () => {
+    it('should have optimized configuration for faster detection', () => {
+      // Test that the optimized configurations are in place
+      const resilienceConfig = (resilienceService as any).config;
+      
+      // Check that intervals are reduced for faster detection
+      expect(resilienceConfig.heartbeatInterval).toBe(5000); // 5 seconds instead of 10
+      expect(resilienceConfig.connectionTimeout).toBe(15000); // 15 seconds instead of 30
+      expect(resilienceConfig.cleanupInterval).toBe(30000); // 30 seconds instead of 60
+      expect(resilienceConfig.circuitBreakerThreshold).toBe(3); // 3 instead of 5
+      expect(resilienceConfig.fallbackTimeout).toBe(3000); // 3 seconds instead of 5
+    });
+
+    it('should have optimized monitoring configuration', () => {
+      const monitoringConfig = (monitoringService as any).config;
+      
+      // Check optimized monitoring intervals and thresholds
+      expect(monitoringConfig.healthCheckInterval).toBe(3000); // 3 seconds instead of 5
+      expect(monitoringConfig.alertThresholds.errorRate).toBe(0.08); // 8% instead of 10%
+      expect(monitoringConfig.alertThresholds.responseTime).toBe(2000); // 2 seconds instead of 3
+      expect(monitoringConfig.alertThresholds.connectionStability).toBe(0.85); // 85% instead of 80%
+      expect(monitoringConfig.alertThresholds.audioLatency).toBe(300); // 300ms instead of 500ms
+    });
+
+    it('should trigger auto-recovery for high impact issues', (done) => {
+      const callId = 'high-impact-test';
+      monitoringService.registerCall(callId);
+
+      // Listen for auto-recovery events
+      monitoringService.once('autoRecovery', (event) => {
+        expect(event.callId).toBe(callId);
+        expect(event.type).toBe('audio_recovery');
+        expect(event.reason).toContain('high impact audio issue');
+        done();
+      });
+
+      // Report a high impact audio issue
+      monitoringService.reportIssue(callId, {
+        type: 'error',
+        category: 'audio',
+        message: 'high impact audio issue',
+        impact: 'high'
+      });
+    });
+
+    it('should emit cleanup events for coordinated resource management', (done) => {
+      const callId = 'coordination-test';
+      resilienceService.registerCall(callId);
+
+      // Listen for cleanup events
+      resilienceService.once('sessionCleaned', (cleanedCallId) => {
+        expect(cleanedCallId).toBe(callId);
+        done();
+      });
+
+      // Trigger cleanup by unregistering
+      resilienceService.unregisterCall(callId);
+    });
+
+    it('should handle aggressive session cleanup for failed connections', () => {
+      jest.useFakeTimers();
+      const callId = 'failed-connection-test';
+      
+      resilienceService.registerCall(callId);
+      
+      // Simulate a failed connection by updating the session state
+      const session = (resilienceService as any).sessions.get(callId);
+      session.connectionHealth = 'failed';
+      session.lastHeartbeat = new Date(Date.now() - 130000); // 2 minutes and 10 seconds ago
+      
+      // Trigger cleanup manually to test the logic
+      (resilienceService as any).performCleanup();
+      
+      // Should be cleaned up because it's failed and older than 2 minutes
+      expect(resilienceService.getCallStatus(callId)).toBeNull();
+      
+      jest.useRealTimers();
+    });
+
+    it('should clean up healthy sessions after 5 minutes of no heartbeat', () => {
+      jest.useFakeTimers();
+      const callId = 'stale-session-test';
+      
+      resilienceService.registerCall(callId);
+      
+      // Simulate an old session (6 minutes)
+      const session = (resilienceService as any).sessions.get(callId);
+      session.lastHeartbeat = new Date(Date.now() - 360000); // 6 minutes ago
+      
+      // Trigger cleanup
+      (resilienceService as any).performCleanup();
+      
+      // Should be cleaned up
+      expect(resilienceService.getCallStatus(callId)).toBeNull();
+      
+      jest.useRealTimers();
+    });
+
+    it('should not clean up healthy recent sessions', () => {
+      const callId = 'recent-session-test';
+      
+      resilienceService.registerCall(callId);
+      
+      // Update heartbeat to recent time
+      resilienceService.updateHeartbeat(callId);
+      
+      // Trigger cleanup
+      (resilienceService as any).performCleanup();
+      
+      // Should NOT be cleaned up
+      expect(resilienceService.getCallStatus(callId)).toBeTruthy();
+    });
+
+    it('should coordinate cleanup between services', () => {
+      const callId = 'service-coordination-test';
+      
+      // Register with both services
+      resilienceService.registerCall(callId);
+      monitoringService.registerCall(callId);
+      
+      // Verify both have the call
+      expect(resilienceService.getCallStatus(callId)).toBeTruthy();
+      expect(monitoringService.getCallHealth(callId)).toBeTruthy();
+      
+      // Unregister from resilience service (should emit cleanup event)
+      resilienceService.unregisterCall(callId);
+      
+      // Give a moment for the event to propagate
+      setTimeout(() => {
+        // Monitoring service should automatically clean up too
+        expect(monitoringService.getCallHealth(callId)).toBeNull();
+      }, 10);
+    });
+  });
 });

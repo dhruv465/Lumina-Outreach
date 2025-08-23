@@ -302,8 +302,10 @@ export class CallResilienceService extends EventEmitter {
     for (const [callId, session] of this.sessions) {
       const age = now.getTime() - session.lastHeartbeat.getTime();
       
-      // Remove sessions older than 1 hour with no heartbeat
-      if (age > 3600000) {
+      // More aggressive cleanup for better memory management:
+      // Remove sessions older than 5 minutes with no heartbeat (for live calls)
+      // or sessions in failed state older than 2 minutes
+      if (age > 300000 || (session.connectionHealth === 'failed' && age > 120000)) {
         expiredSessions.push(callId);
       }
     }
@@ -311,15 +313,29 @@ export class CallResilienceService extends EventEmitter {
     expiredSessions.forEach(callId => {
       this.sessions.delete(callId);
       logger.info(`Cleaned up expired call session ${callId}`);
+      
+      // Emit cleanup event for other services to clean their resources
+      this.emit('sessionCleaned', callId);
     });
+    
+    // Log cleanup statistics
+    if (expiredSessions.length > 0) {
+      logger.info(`Cleanup completed: removed ${expiredSessions.length} expired sessions, ${this.sessions.size} active sessions remaining`);
+    }
   }
   
   /**
    * Unregister a call session
    */
   public unregisterCall(callId: string): void {
-    this.sessions.delete(callId);
-    logger.info(`Call ${callId} unregistered from resilience monitoring`);
+    const session = this.sessions.get(callId);
+    if (session) {
+      this.sessions.delete(callId);
+      logger.info(`Call ${callId} unregistered from resilience monitoring`);
+      
+      // Emit cleanup event for coordinated resource cleanup
+      this.emit('sessionCleaned', callId);
+    }
   }
   
   /**

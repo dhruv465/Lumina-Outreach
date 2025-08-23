@@ -98,6 +98,7 @@ export class CallMonitoringService extends EventEmitter {
     this.initializeAlertRules();
     this.startMonitoring();
     this.startHistoryCleanup();
+    this.setupServiceCoordination();
   }
   
   /**
@@ -188,6 +189,27 @@ export class CallMonitoringService extends EventEmitter {
     this.historyRetentionTimer = setInterval(() => {
       this.cleanupHistory();
     }, 60 * 60 * 1000); // Run every hour
+  }
+
+  /**
+   * Setup coordination with other services
+   */
+  private setupServiceCoordination(): void {
+    try {
+      const resilienceService = getCallResilienceService();
+      
+      // Listen for resilience service cleanup events and coordinate
+      resilienceService.on('sessionCleaned', (callId: string) => {
+        if (this.activeCallsHealth.has(callId)) {
+          this.activeCallsHealth.delete(callId);
+          logger.debug(`Monitoring service cleaned up call ${callId} after resilience service cleanup`);
+        }
+      });
+      
+      logger.debug('Service coordination setup completed');
+    } catch (error) {
+      logger.warn('Failed to setup service coordination:', error);
+    }
   }
   
   /**

@@ -61,8 +61,9 @@ export class EnhancedWebSocketManager extends EventEmitter {
   
   // Audio buffer management
   private audioBuffer: Buffer[] = [];
-  private readonly MAX_BUFFER_SIZE = 50 * 1024 * 1024; // 50MB
-  private readonly BUFFER_CLEANUP_THRESHOLD = 40 * 1024 * 1024; // 40MB
+  private readonly MAX_BUFFER_SIZE = 30 * 1024 * 1024; // Reduced from 50MB to 30MB
+  private readonly BUFFER_CLEANUP_THRESHOLD = 20 * 1024 * 1024; // Reduced from 40MB to 20MB
+  private readonly AGGRESSIVE_CLEANUP_THRESHOLD = 25 * 1024 * 1024; // New: 25MB for more aggressive cleanup
   
   constructor(callId: string, url: string, config: Partial<ConnectionConfig> = {}) {
     super();
@@ -72,12 +73,12 @@ export class EnhancedWebSocketManager extends EventEmitter {
     
     this.config = {
       maxReconnectAttempts: 5,
-      reconnectDelay: 1000,
-      heartbeatInterval: 10000,
-      connectionTimeout: 30000,
-      maxHeartbeatMisses: 3,
-      pingInterval: 15000,
-      pongTimeout: 5000,
+      reconnectDelay: 500, // Reduced from 1000 for faster reconnection
+      heartbeatInterval: 5000, // Reduced from 10000 for more frequent heartbeats
+      connectionTimeout: 15000, // Reduced from 30000 for faster timeout detection
+      maxHeartbeatMisses: 2, // Reduced from 3 for faster failure detection
+      pingInterval: 10000, // Reduced from 15000 for more frequent pings
+      pongTimeout: 3000, // Reduced from 5000 for faster pong timeout
       ...config
     };
     
@@ -268,9 +269,17 @@ export class EnhancedWebSocketManager extends EventEmitter {
     this.audioBuffer.push(data);
     this.updateBufferStats();
     
-    // Check for buffer overflow
-    if (this.bufferStats.size > this.BUFFER_CLEANUP_THRESHOLD) {
+    // Progressive cleanup strategy for better buffer management
+    if (this.bufferStats.size > this.AGGRESSIVE_CLEANUP_THRESHOLD) {
+      this.aggressiveCleanupAudioBuffer();
+    } else if (this.bufferStats.size > this.BUFFER_CLEANUP_THRESHOLD) {
       this.cleanupAudioBuffer();
+    }
+    
+    // Emit buffer overflow warning if we're near the limit
+    if (this.bufferStats.size > this.MAX_BUFFER_SIZE * 0.9) {
+      const resilienceService = getCallResilienceService();
+      resilienceService.emit('bufferOverflow', this.callId, this.bufferStats.size);
     }
   }
   
@@ -498,6 +507,29 @@ export class EnhancedWebSocketManager extends EventEmitter {
     this.bufferStats.lastCleared = new Date();
     
     logger.info(`Audio buffer cleaned for call ${this.callId}, size: ${this.bufferStats.size}`);
+  }
+
+  /**
+   * Aggressive cleanup for severe buffer overflow
+   */
+  private aggressiveCleanupAudioBuffer(): void {
+    // Keep only the last 10% of the buffer in aggressive mode
+    const keepCount = Math.floor(this.audioBuffer.length * 0.1);
+    this.audioBuffer = this.audioBuffer.slice(-keepCount);
+    
+    this.updateBufferStats();
+    this.bufferStats.lastCleared = new Date();
+    this.bufferStats.overflowCount++;
+    
+    logger.warn(`Aggressive audio buffer cleanup performed for call ${this.callId}, size: ${this.bufferStats.size}, overflow count: ${this.bufferStats.overflowCount}`);
+    
+    // Report to resilience service
+    const resilienceService = getCallResilienceService();
+    resilienceService.reportError(
+      this.callId,
+      new Error(`Audio buffer overflow requiring aggressive cleanup`),
+      'buffer_management'
+    );
   }
   
   /**

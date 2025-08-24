@@ -104,20 +104,20 @@ export class AdaptiveHeartbeatManager extends EventEmitter {
   
   // Default configuration
   private static readonly DEFAULT_CONFIG: AdaptiveConfig = {
-    excellentInterval: 45000,     // 45 seconds for excellent networks
-    goodInterval: 30000,          // 30 seconds for good networks
-    fairInterval: 20000,          // 20 seconds for fair networks
-    poorInterval: 15000,          // 15 seconds for poor networks
-    criticalInterval: 10000,      // 10 seconds for critical networks
-    adaptationSensitivity: 0.7,   // Moderate adaptation speed
-    stabilityWindow: 300000,      // 5 minute stability window
-    jitterThreshold: 50,          // 50ms jitter threshold
+    excellentInterval: 20000,         // 20 seconds for excellent networks (reduced from 45)
+    goodInterval: 15000,             // 15 seconds for good networks (reduced from 30)
+    fairInterval: 10000,             // 10 seconds for fair networks (reduced from 20)
+    poorInterval: 7000,              // 7 seconds for poor networks (reduced from 15)
+    criticalInterval: 5000,          // 5 seconds for critical networks (reduced from 10)
+    adaptationSensitivity: 0.8,      // Increased from 0.7 for faster adaptation
+    stabilityWindow: 180000,         // 3 minute stability window (reduced from 5)
+    jitterThreshold: 30,             // 30ms jitter threshold (reduced from 50)
     pauseDuringIntensiveOps: true,
-    intensiveOpThreshold: 80,     // 80% CPU/memory threshold
-    resumeDelay: 5000,            // 5 second resume delay
+    intensiveOpThreshold: 80,        // 80% CPU/memory threshold
+    resumeDelay: 3000,               // 3 second resume delay (reduced from 5)
     predictiveAdaptation: true,
     learningEnabled: true,
-    timeOfDayOptimization: false  // Disabled by default
+    timeOfDayOptimization: false     // Disabled by default
   };
 
   constructor(

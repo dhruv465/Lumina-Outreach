@@ -393,7 +393,7 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                   // const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ||
                   //       host?.includes('ngrok') || process.env.NODE_ENV === 'production' ?
                   //       'wss' : 'ws';
-                  const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || `http@{req.secure ? 's' : ''}//${host}`;
+                  const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || `http${req.secure ? 's' : ''}://${host}`;
 
                   const baseUrl = webhookBaseUrl.replace(/^http/, 'ws');
                   const streamPath = `/voice/optimized-stream/${callId}/${conversationId}`;

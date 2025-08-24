@@ -82,16 +82,14 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
       : config?.ttsConfig?.deepgramTTS?.isEnabled || false;
     
     if (!config || !isTTSConfigured) {
-      logger.error(`TTS provider ${selectedTTSProvider} not configured for streaming`);
-      ws.close(1008, 'Voice synthesis not configured');
-      return;
-    }
-    
-    // Both ElevenLabs and Deepgram support streaming
-    if (selectedTTSProvider !== 'elevenlabs' && selectedTTSProvider !== 'deepgram') {
-      logger.error(`Streaming not yet supported for TTS provider: ${selectedTTSProvider}`);
-      ws.close(1008, 'Streaming not supported for selected TTS provider');
-      return;
+      logger.warn(`TTS provider ${selectedTTSProvider} not configured for streaming, will attempt fallback`);
+      // Don't terminate the call - we'll try fallbacks during actual synthesis
+    } else {
+      // Both ElevenLabs and Deepgram support streaming
+      if (selectedTTSProvider !== 'elevenlabs' && selectedTTSProvider !== 'deepgram') {
+        logger.warn(`Streaming not yet supported for TTS provider: ${selectedTTSProvider}, will use fallbacks`);
+        // Don't terminate the call - we'll try fallbacks during actual synthesis
+      }
     }
 
     logger.info(`Using ${selectedTTSProvider} for streaming TTS`, {
@@ -99,11 +97,10 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
     });
     
     // Initialize voice synthesis service
-    const openAIProvider = config.llmConfig.providers.find(p => p.name === 'openai');
+    const openAIProvider = config?.llmConfig?.providers?.find(p => p.name === 'openai');
     if (!openAIProvider || !openAIProvider.isEnabled) {
-      logger.error('OpenAI LLM not configured for streaming');
-      ws.close(1008, 'LLM not configured');
-      return;
+      logger.warn('OpenAI LLM not configured for streaming, call may have limited functionality but will continue');
+      // Don't terminate the call - the conversation engine may have other LLM providers or fallbacks
     }
     
     // Get or create conversation session
@@ -157,9 +154,14 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
               if (pendingOpeningMessage) {
                 const { text, voiceId } = pendingOpeningMessage;
                 try {
+                  let audioSent = false;
+                  
                   if (selectedTTSProvider === 'elevenlabs' && voiceAI) {
                     const audio = await voiceAI.synthesizeSimpleSpeech(text, voiceId);
-                    if (audio) sendAudioToTwilio(audio);
+                    if (audio) {
+                      sendAudioToTwilio(audio);
+                      audioSent = true;
+                    }
                   } else if (selectedTTSProvider === 'deepgram') {
                     // Use Deepgram TTS for opening message
                     const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
@@ -172,9 +174,36 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
                     );
                     if (speechResponse?.audioContent) {
                       sendAudioToTwilio(speechResponse.audioContent);
+                      audioSent = true;
+                    } else {
+                      logger.warn(`Deepgram TTS failed for opening message, attempting fallback for call ${callId}`);
                     }
                   }
-                } catch (e) { logger.error(e); }
+                  
+                  // Fallback to ElevenLabs if Deepgram failed and ElevenLabs is available
+                  if (!audioSent && config?.elevenLabsConfig?.apiKey) {
+                    logger.info(`Using ElevenLabs fallback for opening message in call ${callId}`);
+                    try {
+                      if (!voiceAI) {
+                        voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
+                      }
+                      const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId || voiceId;
+                      const fallbackAudio = await voiceAI.synthesizeSimpleSpeech(text, fallbackVoice);
+                      if (fallbackAudio) {
+                        sendAudioToTwilio(fallbackAudio);
+                        audioSent = true;
+                      }
+                    } catch (fallbackError) {
+                      logger.error(`ElevenLabs fallback also failed for opening message in call ${callId}:`, fallbackError);
+                    }
+                  }
+                  
+                  if (!audioSent) {
+                    logger.warn(`All TTS providers failed for opening message in call ${callId}, continuing without audio`);
+                  }
+                } catch (e) { 
+                  logger.error(`Error in opening message synthesis for call ${callId}:`, e);
+                }
                 pendingOpeningMessage = null;
               }
               return;
@@ -298,6 +327,8 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
                             (config.elevenLabsConfig?.availableVoices?.[0]?.voiceId);
             
             try {
+              let audioSent = false;
+              
               if (selectedTTSProvider === 'elevenlabs' && voiceAI) {
                 // Synthesize speech using ElevenLabs
                 const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
@@ -309,8 +340,9 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
                 // Send synthesized audio back through WebSocket
                 if (speechResponse && speechResponse.audioContent) {
                   sendAudioToTwilio(speechResponse.audioContent);
+                  audioSent = true;
                 } else {
-                  throw new Error('No audio content returned for response');
+                  logger.warn(`ElevenLabs TTS returned no audio content for call ${callId}`);
                 }
               } else if (selectedTTSProvider === 'deepgram') {
                 // Use Deepgram TTS for response
@@ -325,18 +357,46 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
                 
                 if (speechResponse?.audioContent) {
                   sendAudioToTwilio(speechResponse.audioContent);
+                  audioSent = true;
                 } else {
-                  throw new Error('No audio content returned from Deepgram');
+                  logger.warn(`Deepgram TTS failed for response, attempting fallback for call ${callId}`);
                 }
               } else {
-                throw new Error(`TTS provider ${selectedTTSProvider} not properly configured`);
+                logger.warn(`TTS provider ${selectedTTSProvider} not properly configured for call ${callId}`);
+              }
+              
+              // Universal fallback to ElevenLabs if the primary provider failed
+              if (!audioSent && config?.elevenLabsConfig?.apiKey) {
+                logger.info(`Using ElevenLabs fallback for response in call ${callId}`);
+                try {
+                  if (!voiceAI) {
+                    voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
+                  }
+                  const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId || voiceId;
+                  const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(aiResponse.text, fallbackVoice);
+                  
+                  if (fallbackResponse) {
+                    sendAudioToTwilio(fallbackResponse);
+                    audioSent = true;
+                  }
+                } catch (fallbackError) {
+                  logger.error(`ElevenLabs fallback synthesis failed for response in call ${callId}:`, fallbackError);
+                }
+              }
+              
+              if (!audioSent) {
+                logger.warn(`All TTS providers failed for response in call ${callId}, continuing without audio`);
               }
             } catch (voiceError) {
               logger.error(`Error in response voice synthesis for call ${callId}:`, voiceError);
               
-              // Fallback to simpler method only for ElevenLabs
-              if (selectedTTSProvider === 'elevenlabs' && voiceAI) {
+              // Final fallback attempt with ElevenLabs if available
+              if (config?.elevenLabsConfig?.apiKey) {
                 try {
+                  logger.info(`Final ElevenLabs fallback attempt for call ${callId}`);
+                  if (!voiceAI) {
+                    voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
+                  }
                   const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId;
                   if (fallbackVoice) {
                     const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(aiResponse.text, fallbackVoice);
@@ -345,8 +405,8 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
                       sendAudioToTwilio(fallbackResponse);
                     }
                   }
-                } catch (fallbackError) {
-                  logger.error(`Fallback synthesis failed for response in call ${callId}:`, fallbackError);
+                } catch (finalFallbackError) {
+                  logger.error(`Final fallback synthesis failed for response in call ${callId}:`, finalFallbackError);
                 }
               }
             }
@@ -414,17 +474,15 @@ export const handleConversationalAIStream = async (ws: WebSocket, req: Request):
     
     // Note: Conversational AI streaming is primarily an ElevenLabs feature
     if (!config || (selectedTTSProvider === 'elevenlabs' && !config.elevenLabsConfig.isEnabled)) {
-      logger.error('ElevenLabs not configured for conversational AI');
-      ws.close(1008, 'Voice synthesis not configured');
-      return;
+      logger.warn('ElevenLabs not configured for conversational AI, will use basic streaming');
+      // Don't terminate - we'll fallback to basic streaming instead of conversational AI
     }
     
     // Initialize voice synthesis service
-    const openAIProvider = config.llmConfig.providers.find(p => p.name === 'openai');
-    if (!config.elevenLabsConfig.apiKey || !openAIProvider?.apiKey) {
-      logger.error('Missing API keys for conversational AI');
-      ws.close(1008, 'Service not configured properly');
-      return;
+    const openAIProvider = config?.llmConfig?.providers?.find(p => p.name === 'openai');
+    if (!config?.elevenLabsConfig?.apiKey || !openAIProvider?.apiKey) {
+      logger.warn('Missing API keys for conversational AI, will use basic functionality');
+      // Don't terminate - we'll use basic streaming capabilities instead
     }
     
     // Create voice AI service instance

@@ -39,15 +39,15 @@ export class TwilioWebSocketServer {
     server.on('upgrade', (request, socket, head) => {
       const pathname = url.parse(request.url || "").pathname || "";
 
-      // Handle both with and without .websocket suffix
+      // Normalize pathname by removing any .websocket suffix
       const normalizedPathname = pathname.replace(/\/\.websocket$/, "");
 
+      // Simplify path validation to avoid duplication issues and Twilio error 31924
       const isValidPath =
         normalizedPathname.startsWith("/voice/optimized-stream") ||
         normalizedPathname.startsWith("/voice/low-latency") ||
-        normalizedPathname.startsWith("/stream") ||
-        pathname.includes(".websocket") ||
-        pathname.includes("project-call-stream");
+        normalizedPathname === "/stream" || // Exact match to avoid conflicts
+        pathname.includes("project-call-stream"); // Only check for our specific stream name
 
       // Verify WebSocket upgrade headers
       const hasValidHeaders =

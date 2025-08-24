@@ -314,8 +314,12 @@ export class TTSProviderService {
    * Synthesize speech using Deepgram TTS
    */
   private async synthesizeWithDeepgram(options: TTSOptions): Promise<TTSResult> {
-    const config = await this.getTTSConfig();
-    const deepgramConfig = config.deepgramTTS || {};
+    // Get the full configuration, not just ttsConfig
+    if (!this.configuration) {
+      await this.loadConfiguration();
+    }
+    
+    const deepgramConfig = this.configuration?.ttsConfig?.deepgramTTS || {};
 
     if (!deepgramConfig.apiKey) {
       throw new Error('Deepgram TTS API key not configured');
@@ -375,7 +379,11 @@ export class TTSProviderService {
         return [];
 
       case 'deepgram':
-        const deepgramConfig = config.deepgramTTS;
+        // Get the full configuration, not just ttsConfig 
+        if (!this.configuration) {
+          await this.loadConfiguration();
+        }
+        const deepgramConfig = this.configuration?.ttsConfig?.deepgramTTS;
         
         // Always return available Deepgram models, even without API key
         // Users need to see available voices to make a selection

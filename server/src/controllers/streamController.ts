@@ -82,16 +82,14 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
       : config?.ttsConfig?.deepgramTTS?.isEnabled || false;
     
     if (!config || !isTTSConfigured) {
-      logger.error(`TTS provider ${selectedTTSProvider} not configured for streaming`);
-      ws.close(1008, 'Voice synthesis not configured');
-      return;
-    }
-    
-    // Both ElevenLabs and Deepgram support streaming
-    if (selectedTTSProvider !== 'elevenlabs' && selectedTTSProvider !== 'deepgram') {
-      logger.error(`Streaming not yet supported for TTS provider: ${selectedTTSProvider}`);
-      ws.close(1008, 'Streaming not supported for selected TTS provider');
-      return;
+      logger.warn(`TTS provider ${selectedTTSProvider} not configured for streaming, will attempt fallback`);
+      // Don't terminate the call - we'll try fallbacks during actual synthesis
+    } else {
+      // Both ElevenLabs and Deepgram support streaming
+      if (selectedTTSProvider !== 'elevenlabs' && selectedTTSProvider !== 'deepgram') {
+        logger.warn(`Streaming not yet supported for TTS provider: ${selectedTTSProvider}, will use fallbacks`);
+        // Don't terminate the call - we'll try fallbacks during actual synthesis
+      }
     }
 
     logger.info(`Using ${selectedTTSProvider} for streaming TTS`, {
@@ -99,11 +97,10 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
     });
     
     // Initialize voice synthesis service
-    const openAIProvider = config.llmConfig.providers.find(p => p.name === 'openai');
+    const openAIProvider = config?.llmConfig?.providers?.find(p => p.name === 'openai');
     if (!openAIProvider || !openAIProvider.isEnabled) {
-      logger.error('OpenAI LLM not configured for streaming');
-      ws.close(1008, 'LLM not configured');
-      return;
+      logger.warn('OpenAI LLM not configured for streaming, call may have limited functionality but will continue');
+      // Don't terminate the call - the conversation engine may have other LLM providers or fallbacks
     }
     
     // Get or create conversation session

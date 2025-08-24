@@ -109,6 +109,32 @@ export class TTSProviderService {
   }
 
   /**
+   * Get available fallback providers excluding disabled ones
+   */
+  private getAvailableFallbackProviders(config: any, primaryProvider: string): string[] {
+    const allProviders = ['elevenlabs', 'deepgram'];
+    const availableProviders: string[] = [];
+
+    for (const provider of allProviders) {
+      if (provider === primaryProvider) continue; // Skip primary provider
+
+      // Check if provider is enabled
+      if (provider === 'elevenlabs') {
+        if (this.configuration?.elevenLabsConfig?.isEnabled && this.configuration?.elevenLabsConfig?.apiKey) {
+          availableProviders.push(provider);
+        }
+      } else if (provider === 'deepgram') {
+        if (this.configuration?.ttsConfig?.deepgramTTS?.isEnabled && this.configuration?.ttsConfig?.deepgramTTS?.apiKey) {
+          availableProviders.push(provider);
+        }
+      }
+    }
+
+    logger.info(`Available fallback providers for primary ${primaryProvider}:`, availableProviders);
+    return availableProviders;
+  }
+
+  /**
    * Synthesize speech using the configured TTS provider
    */
   public async synthesizeSpeech(options: TTSOptions): Promise<TTSResult> {
@@ -177,11 +203,17 @@ export class TTSProviderService {
       });
 
       // Try fallback providers if auto-fallback is enabled
-      if (config.autoFallback && config.fallbackProviders?.length > 0) {
-        for (const fallbackProvider of config.fallbackProviders) {
-          if (fallbackProvider === primaryProvider) continue; // Skip if same as primary
-
-          try {
+      if (config.autoFallback) {
+        const availableFallbackProviders = this.getAvailableFallbackProviders(config, primaryProvider);
+        
+        if (availableFallbackProviders.length === 0) {
+          logger.warn(`No available fallback providers for primary ${primaryProvider} - skipping fallback attempt`, {
+            requestId,
+            primaryError: primaryErrorMessage
+          });
+        } else {
+          for (const fallbackProvider of availableFallbackProviders) {
+            try {
             const fallbackStartTime = Date.now();
             logger.info(`Attempting TTS fallback to ${fallbackProvider}`, { requestId });
             
@@ -231,6 +263,7 @@ export class TTSProviderService {
             });
           }
         }
+        } // Close the else block for available fallback providers
       }
 
       // All providers failed

@@ -111,9 +111,9 @@ export class TTSProviderService {
   /**
    * Get available fallback providers excluding disabled ones
    */
-  private getAvailableFallbackProviders(config: any, primaryProvider: string): string[] {
-    const allProviders = ['elevenlabs', 'deepgram'];
-    const availableProviders: string[] = [];
+  private getAvailableFallbackProviders(config: any, primaryProvider: string): TTSProvider[] {
+    const allProviders: TTSProvider[] = ['elevenlabs', 'deepgram'];
+    const availableProviders: TTSProvider[] = [];
 
     for (const provider of allProviders) {
       if (provider === primaryProvider) continue; // Skip primary provider

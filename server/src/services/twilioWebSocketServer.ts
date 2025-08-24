@@ -66,20 +66,23 @@ export class TwilioWebSocketServer {
         connectionHeader: request.headers.connection
       });
 
+      // Only handle Twilio-specific paths, let other WebSocket connections (like Socket.IO) pass through
       if (isValidPath && hasValidHeaders) {
         // Handle the upgrade for Twilio WebSocket connections
         this.wss.handleUpgrade(request, socket, head, (ws) => {
           this.wss.emit('connection', ws, request);
         });
-      } else {
-        // Reject non-Twilio WebSocket connections
-        logger.warn("Rejecting WebSocket upgrade for invalid path", {
+      } else if (isValidPath) {
+        // Reject only if it's a Twilio path but with invalid headers
+        logger.warn("Rejecting WebSocket upgrade for invalid headers on Twilio path", {
           pathname,
           isValidPath,
           hasValidHeaders
         });
         socket.destroy();
       }
+      // For non-Twilio paths (like Socket.IO), let them be handled by other servers
+      // No action needed - the request will continue to other handlers
     });
 
     this.setupEventHandlers();

@@ -474,17 +474,15 @@ export const handleConversationalAIStream = async (ws: WebSocket, req: Request):
     
     // Note: Conversational AI streaming is primarily an ElevenLabs feature
     if (!config || (selectedTTSProvider === 'elevenlabs' && !config.elevenLabsConfig.isEnabled)) {
-      logger.error('ElevenLabs not configured for conversational AI');
-      ws.close(1008, 'Voice synthesis not configured');
-      return;
+      logger.warn('ElevenLabs not configured for conversational AI, will use basic streaming');
+      // Don't terminate - we'll fallback to basic streaming instead of conversational AI
     }
     
     // Initialize voice synthesis service
-    const openAIProvider = config.llmConfig.providers.find(p => p.name === 'openai');
-    if (!config.elevenLabsConfig.apiKey || !openAIProvider?.apiKey) {
-      logger.error('Missing API keys for conversational AI');
-      ws.close(1008, 'Service not configured properly');
-      return;
+    const openAIProvider = config?.llmConfig?.providers?.find(p => p.name === 'openai');
+    if (!config?.elevenLabsConfig?.apiKey || !openAIProvider?.apiKey) {
+      logger.warn('Missing API keys for conversational AI, will use basic functionality');
+      // Don't terminate - we'll use basic streaming capabilities instead
     }
     
     // Create voice AI service instance

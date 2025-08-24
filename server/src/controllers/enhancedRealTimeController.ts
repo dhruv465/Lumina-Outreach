@@ -91,9 +91,19 @@ export const handleRealTimeMediaStream = async (ws: WebSocket, req: Request): Pr
 
     // Get configuration to determine TTS provider
     const config = await Configuration.findOne();
-    const selectedTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
+    const configuredTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
     
-    logger.info(`Using TTS provider: ${selectedTTSProvider} for call ${callId}`);
+    // Ensure the TTS provider is compatible with optimized audio pipeline
+    const selectedTTSProvider: 'elevenlabs' | 'deepgram' = 
+      (configuredTTSProvider === 'elevenlabs' || configuredTTSProvider === 'deepgram') 
+        ? configuredTTSProvider 
+        : 'elevenlabs';
+    
+    if (configuredTTSProvider !== selectedTTSProvider) {
+      logger.warn(`TTS provider ${configuredTTSProvider} not supported by optimized audio pipeline, falling back to ${selectedTTSProvider} for call ${callId}`);
+    } else {
+      logger.info(`Using TTS provider: ${selectedTTSProvider} for call ${callId}`);
+    }
 
     // Initialize real-time call state machine
     const session = realTimeCallStateMachine.createSession(

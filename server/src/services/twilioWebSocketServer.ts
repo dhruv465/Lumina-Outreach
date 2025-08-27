@@ -18,6 +18,7 @@ export class TwilioWebSocketServer {
   private readonly KEEP_ALIVE_INTERVAL = 15000; // 15 seconds (like Deepgram Voice Agent)
   private readonly CONNECTION_HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
   private readonly AUDIO_CHUNK_SIZE = 8192; // 8KB chunks
+  private static readonly OUTBOUND_AUDIO_CHUNK_SIZE = 32 * 1024; // 32KB raw per chunk
 
   constructor(server: http.Server) {
     logger.info("Initializing TwilioWebSocketServer with HTTP server");
@@ -475,43 +476,24 @@ export class TwilioWebSocketServer {
     // Clear any existing timer
     this.clearConnectionKeepAlive(connectionKey);
 
-    // Set up keep-alive timer
+    // Set up keep-alive timer using ws.ping() instead of JSON messages
     const timer = setInterval(() => {
-      this.sendConnectionKeepAlive(connectionKey, ws);
+      if (ws.readyState === WebSocket.OPEN) {
+        try { 
+          ws.ping(); 
+          logger.debug(`Keep-alive ping sent for ${connectionKey}`); 
+        } 
+        catch (error) { 
+          logger.error(`Failed keep-alive ping for ${connectionKey}`, error); 
+          this.clearConnectionKeepAlive(connectionKey); 
+        }
+      } else {
+        this.clearConnectionKeepAlive(connectionKey);
+      }
     }, this.KEEP_ALIVE_INTERVAL);
 
     this.keepAliveTimers.set(connectionKey, timer);
     logger.debug(`Keep-alive setup for connection ${connectionKey}`);
-  }
-
-  /**
-   * Send keep-alive signal for a connection
-   * @param connectionKey Connection key
-   * @param ws WebSocket connection
-   */
-  private sendConnectionKeepAlive(connectionKey: string, ws: WebSocket): void {
-    if (ws.readyState !== WebSocket.OPEN) {
-      this.clearConnectionKeepAlive(connectionKey);
-      return;
-    }
-
-    // Send keep-alive message (Twilio-compatible format)
-    const keepAliveMessage = {
-      event: "keepAlive",
-      timestamp: Date.now(),
-      connectionKey,
-    };
-
-    try {
-      ws.send(JSON.stringify(keepAliveMessage));
-      logger.debug(`Keep-alive sent for connection ${connectionKey}`);
-    } catch (error) {
-      logger.error(
-        `Failed to send keep-alive for connection ${connectionKey}:`,
-        error
-      );
-      this.clearConnectionKeepAlive(connectionKey);
-    }
   }
 
   /**
@@ -912,32 +894,46 @@ export class TwilioWebSocketServer {
    * Send audio data to a specific call via WebSocket
    */
   private sendAudioToCall(callId: string, audioData: Buffer): void {
-    // Find the WebSocket connection for this call
     const connection = this.findConnectionByCallId(callId);
-    if (connection) {
+    if (!connection) {
+      logger.warn(`No WebSocket connection found for call ${callId}`);
+      return;
+    }
+    const { ws, streamSid } = connection as any;
+    if (!streamSid) {
+      logger.warn(`Cannot send audio to call ${callId}: streamSid not available`);
+      return;
+    }
+    this.sendMediaChunks(ws, streamSid, audioData);
+    logger.debug(`Queued audio to call ${callId}, size: ${audioData.length} bytes`);
+  }
+
+  /**
+   * Send media in safe chunks to avoid fragmentation
+   */
+  private sendMediaChunks(ws: WebSocket, streamSid: string, audioData: Buffer): void {
+    const sock: any = ws as any;
+    if (typeof sock.sequenceNumber !== 'number') sock.sequenceNumber = 0;
+    let offset = 0;
+    while (offset < audioData.length) {
+      const end = Math.min(offset + TwilioWebSocketServer.OUTBOUND_AUDIO_CHUNK_SIZE, audioData.length);
+      const slice = audioData.slice(offset, end);
       const message = {
-        event: "media",
-        streamSid: connection.streamSid,
+        event: 'media',
+        streamSid,
         media: {
-          track: "outbound",
-          chunk: (++connection.sequenceNumber).toString(),
+          track: 'outbound',
+          chunk: (++sock.sequenceNumber).toString(),
           timestamp: Date.now().toString(),
-          payload: audioData.toString("base64"),
+          payload: slice.toString('base64'),
         },
       };
-
-      if (connection.ws.readyState === WebSocket.OPEN) {
-        connection.ws.send(JSON.stringify(message));
-        logger.debug(
-          `Sent audio to call ${callId}, size: ${audioData.length} bytes`
-        );
-      } else {
-        logger.warn(
-          `WebSocket not open for call ${callId}, state: ${connection.ws.readyState}`
-        );
+      if (ws.readyState !== WebSocket.OPEN) {
+        logger.warn('WebSocket closed while sending media chunks');
+        break;
       }
-    } else {
-      logger.warn(`No WebSocket connection found for call ${callId}`);
+      ws.send(JSON.stringify(message));
+      offset = end;
     }
   }
 
@@ -1030,31 +1026,15 @@ export class TwilioWebSocketServer {
       );
       return;
     }
-
-    try {
-      // Convert audio buffer to base64 for Twilio
-      const audioPayload = audioBuffer.toString("base64");
-
-      // Create Twilio media message
-      const mediaMessage = {
-        event: "media",
-        streamSid: `MZ${callId.substring(0, 32)}`,
-        media: {
-          track: "outbound",
-          chunk: Date.now().toString(),
-          timestamp: Date.now().toString(),
-          payload: audioPayload,
-        },
-      };
-
-      ws.send(JSON.stringify(mediaMessage));
-      logger.debug(`Audio response sent to call ${callId}`, {
-        audioSize: audioBuffer.length,
-        payloadSize: audioPayload.length,
-      });
-    } catch (error) {
-      logger.error(`Error sending audio response to call ${callId}:`, error);
+    
+    const streamSid = (ws as any).streamSid;
+    if (!streamSid) {
+      logger.warn(`Cannot send audio response - streamSid missing for call ${callId}`);
+      return;
     }
+    
+    this.sendMediaChunks(ws, streamSid, audioBuffer);
+    logger.debug(`Audio response sent to call ${callId}`, { audioSize: audioBuffer.length });
   }
 }
 

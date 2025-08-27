@@ -36,6 +36,20 @@ const COMMON_ACKNOWLEDGMENTS = [
 ];
 
 /**
+ * Estimate text-to-speech duration in milliseconds
+ */
+function estimateTextDuration(text: string): number {
+  // Rough estimation: average speaking rate is about 150-180 words per minute
+  const wordsPerMinute = 160;
+  const words = text.split(/\s+/).length;
+  const durationMinutes = words / wordsPerMinute;
+  const durationMs = durationMinutes * 60 * 1000;
+  
+  // Add buffer time for audio processing and network latency
+  return Math.max(durationMs + 2000, 3000); // Minimum 3 seconds
+}
+
+/**
  * Initialize and pre-cache common responses
  * This function pre-generates audio for common phrases to eliminate first-response latency
  */
@@ -628,6 +642,10 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         
         // After the opening message is sent, explicitly transition to listening state
         // This ensures the agent continues the conversation and is ready for user input
+        // Calculate proper delay based on message length to ensure audio completes
+        const estimatedDuration = estimateTextDuration(message);
+        logger.info(`Opening message sent for call ${callId}, estimated duration: ${estimatedDuration}ms, transitioning to listening state after completion`);
+        
         setTimeout(() => {
           if (ws.readyState === WebSocket.OPEN) {
             const listeningMessage = {
@@ -639,7 +657,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
             twilioManager.sendTwilioMessage(listeningMessage);
             logger.info(`Transitioned to listening state after opening message for call ${callId}, conversation ${conversationId}`);
           }
-        }, 500); // Small delay to ensure client has processed the opening message
+        }, estimatedDuration);
         
       } catch (e) { 
         logger.error(`Error sending opening message for call ${callId}:`, e); 
@@ -1189,7 +1207,7 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
           logger.error(`Error sending JSON ping: ${jsonPingError}`);
         }
       }
-    }, 5000); // More frequent pings: every 5 seconds
+    }, 30000); // Ping every 30 seconds (aligned with Twilio best practices)
 
     // Store the interval for cleanup
     (ws as any).pingInterval = pingInterval;

@@ -382,7 +382,7 @@ const CampaignForm = ({
     }
 
     // Also check the main TTS provider setting from Configuration page
-    const mainTTSProvider = config.ttsProvider;
+    const mainTTSProvider = config.ttsConfig?.provider;
     if (mainTTSProvider && !enabledProviders.includes(mainTTSProvider)) {
       console.log("Adding main TTS provider from configuration:", mainTTSProvider);
       enabledProviders.push(mainTTSProvider);
@@ -438,14 +438,17 @@ const CampaignForm = ({
         let bestVoiceId = '';
         
         // Priority 1: Use the main TTS provider from Configuration page
-        if (config.ttsProvider) {
-          bestProvider = config.ttsProvider;
+        if (config.ttsConfig?.provider) {
+          bestProvider = config.ttsConfig.provider;
           console.log("Using main TTS provider from configuration:", bestProvider);
           
-          // Get the voice ID from Configuration page
-          if (config.voiceId) {
-            bestVoiceId = config.voiceId;
-            console.log("Using voice ID from configuration:", bestVoiceId);
+          // Get the voice ID from Configuration page based on provider
+          if (bestProvider === 'deepgram' && config.ttsConfig?.deepgramTTS?.defaultModel) {
+            bestVoiceId = config.ttsConfig.deepgramTTS.defaultModel;
+            console.log("Using Deepgram default model from configuration:", bestVoiceId);
+          } else if (bestProvider === 'elevenlabs' && config.elevenLabsConfig?.selectedVoiceId) {
+            bestVoiceId = config.elevenLabsConfig.selectedVoiceId;
+            console.log("Using ElevenLabs selected voice from configuration:", bestVoiceId);
           }
         }
         
@@ -463,26 +466,28 @@ const CampaignForm = ({
         
         // Fallback to system configuration if still no provider/voice found
         if (!bestProvider || !bestVoiceId) {
-          // Priority 4: voiceAIConfig conversationalAI defaultVoiceId (system default voice)
-          if (config.voiceAIConfig?.conversationalAI?.defaultVoiceId) {
-            bestVoiceId = config.voiceAIConfig.conversationalAI.defaultVoiceId;
-            bestProvider = bestProvider || "elevenlabs"; // Keep existing provider or default to elevenlabs
-            console.log("Using system default voice ID:", bestVoiceId);
+          // Priority 4: Use provider-appropriate defaults based on configuration
+          if (!bestProvider) {
+            bestProvider = config.ttsConfig?.provider || "elevenlabs";
           }
-          // Priority 5: ElevenLabs first voice
-          else if (config.elevenLabsConfig?.availableVoices?.length > 0) {
-            bestVoiceId = config.elevenLabsConfig.availableVoices[0].voiceId;
-            bestProvider = bestProvider || "elevenlabs";
-            console.log("Using first ElevenLabs voice:", bestVoiceId);
-          }
-          // Priority 6: Final fallback
-          else {
-            console.warn("No voices available in system configuration");
-            if (availableVoiceProviders.length === 0) {
-              showToast("Warning", "No TTS providers configured in system. Please configure TTS providers in the Configuration page.", "destructive");
+          
+          if (!bestVoiceId) {
+            if (bestProvider === 'deepgram') {
+              bestVoiceId = config.ttsConfig?.deepgramTTS?.defaultModel || 'aura-2-thalia-en';
+              console.log("Using Deepgram default model:", bestVoiceId);
+            } else if (bestProvider === 'elevenlabs' && config.elevenLabsConfig?.availableVoices?.length > 0) {
+              bestVoiceId = config.elevenLabsConfig.availableVoices[0].voiceId;
+              console.log("Using first ElevenLabs voice:", bestVoiceId);
+            } else if (config.voiceAIConfig?.conversationalAI?.defaultVoiceId) {
+              bestVoiceId = config.voiceAIConfig.conversationalAI.defaultVoiceId;
+              console.log("Using system default voice ID:", bestVoiceId);
+            } else {
+              console.warn("No voices available in system configuration");
+              if (availableVoiceProviders.length === 0) {
+                showToast("Warning", "No TTS providers configured in system. Please configure TTS providers in the Configuration page.", "destructive");
+              }
+              bestVoiceId = "";
             }
-            bestProvider = bestProvider || "elevenlabs";
-            bestVoiceId = bestVoiceId || "";
           }
         }
         

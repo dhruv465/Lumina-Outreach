@@ -131,16 +131,6 @@ export const CallResilienceMonitor: React.FC<CallResilienceProps> = ({
     );
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'healthy': return 'bg-green-500';
-      case 'warning': return 'bg-yellow-500';
-      case 'degraded': return 'bg-orange-500';
-      case 'critical': return 'bg-red-500';
-      case 'failed': return 'bg-red-700';
-      default: return 'bg-gray-500';
-    }
-  };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -164,7 +154,7 @@ export const CallResilienceMonitor: React.FC<CallResilienceProps> = ({
     return `${minutes}:${(seconds % 60).toString().padStart(2, '0')}`;
   };
 
-  const unresolved Issues = health.issues.filter(issue => !issue.resolved);
+  const unresolvedIssues = health.issues.filter(issue => !issue.resolved);
   const criticalIssues = unresolvedIssues.filter(issue => issue.impact === 'critical');
 
   return (

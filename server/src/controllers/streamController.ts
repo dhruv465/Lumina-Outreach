@@ -143,7 +143,9 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
         if (selectedTTSProvider === 'deepgram') {
           voiceId = config?.ttsConfig?.deepgramTTS?.defaultModel || 'aura-2-thalia-en';
         } else {
-          voiceId = config?.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 'default-voice-id';
+          voiceId = config?.elevenLabsConfig?.selectedVoiceId || 
+                   config?.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 
+                   'default-voice-id';
         }
       }
       
@@ -353,7 +355,9 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
               if (selectedTTSProvider === 'deepgram') {
                 voiceId = config?.ttsConfig?.deepgramTTS?.defaultModel || 'aura-2-thalia-en';
               } else {
-                voiceId = config?.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 'default-voice-id';
+                voiceId = config?.elevenLabsConfig?.selectedVoiceId || 
+                         config?.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 
+                         'default-voice-id';
               }
             }
             

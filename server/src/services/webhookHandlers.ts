@@ -14,6 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import cloudinaryService from '../utils/cloudinaryService';
+import { URL } from 'url';
 // Import Twilio
 const twilio = require('twilio');
 
@@ -396,8 +397,11 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                   const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || `http${req.secure ? 's' : ''}://${host}`;
 
                   const baseUrl = webhookBaseUrl.replace(/^http/, 'ws');
-                  const streamPath = `/voice/optimized-stream/${callId}/${conversationId}`;
+                  // Simplified WebSocket path with query parameters instead of path segments
+                  const streamPath = `/voice/stream`;
                   const urlObject = new URL(streamPath, baseUrl);
+                  urlObject.searchParams.set('callId', callId);
+                  urlObject.searchParams.set('conversationId', conversationId);
                   const wsUrl = urlObject.href;
 
                   logger.info(`Generated websocket URL for Twilio Media Stream: ${wsUrl}`);
@@ -938,21 +942,33 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
                   }
                   return;
             }
-            
+
             if (msg.event === 'start') {
                   streamSid = msg.streamSid || msg.start?.streamSid;
-                  
+
                   // Extract callId and conversationId from URL path or custom parameters
                   const urlPath = req.url || '';
-                  const pathMatch = urlPath.match(/\/voice\/optimized-stream\/([^\/]+)\/([^\/\?]+)/);
+                  // Support legacy paths and the new simplified path
+                  const pathMatch = urlPath.match(/\/voice\/(?:optimized-stream|low-latency|stream)\/([^\/]+)\/([^\/\?]+)/);
                   if (pathMatch) {
                         callId = pathMatch[1];
                         conversationId = pathMatch[2];
-                  } else if (msg.start?.customParameters) {
-                        callId = msg.start.customParameters.callId;
-                        conversationId = msg.start.customParameters.conversationId;
+                  } else {
+                        // Try to extract from query parameters: /voice/stream?callId=...&conversationId=...
+                        try {
+                              const parsed = new URL(urlPath, 'ws://placeholder');
+                              const qCallId = parsed.searchParams.get('callId');
+                              const qConversationId = parsed.searchParams.get('conversationId');
+                              if (qCallId) callId = qCallId;
+                              if (qConversationId) conversationId = qConversationId;
+                        } catch {}
+                        // Fall back to Twilio customParameters sent in the start event
+                        if (msg.start?.customParameters) {
+                              callId = callId || msg.start.customParameters.callId;
+                              conversationId = conversationId || msg.start.customParameters.conversationId;
+                        }
                   }
-                  
+
                   logger.info(`Media stream started for call ${callId}, conv ${conversationId}, streamSid: ${streamSid}`);
 
                   // Send acknowledgment

@@ -78,8 +78,8 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
     // Check if TTS is properly configured based on selected provider
     const selectedTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
     const isTTSConfigured = selectedTTSProvider === 'elevenlabs' 
-      ? config?.elevenLabsConfig?.isEnabled 
-      : config?.ttsConfig?.deepgramTTS?.isEnabled || false;
+      ? config?.elevenLabsConfig?.isEnabled && config?.elevenLabsConfig?.apiKey
+      : config?.ttsConfig?.deepgramTTS?.isEnabled && config?.ttsConfig?.deepgramTTS?.apiKey;
     
     if (!config || !isTTSConfigured) {
       logger.warn(`TTS provider ${selectedTTSProvider} not configured for streaming, will attempt fallback`);
@@ -131,7 +131,24 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
     // Generate initial greeting if this is the first interaction
     if (session.conversationHistory.length === 0) {
       const text = await conversationEngine.generateOpeningMessage(conversationId, 'Customer', call.campaignId.toString());
-      const voiceId = call.personalityId || session.currentPersonality.voiceId || config.elevenLabsConfig.availableVoices[0].voiceId;
+      
+      // Select appropriate voice ID based on the selected TTS provider
+      let voiceId;
+      if (call.personalityId) {
+        voiceId = call.personalityId;
+      } else if (session.currentPersonality.voiceId) {
+        voiceId = session.currentPersonality.voiceId;
+      } else {
+        // Use provider-appropriate default voice
+        if (selectedTTSProvider === 'deepgram') {
+          voiceId = config?.ttsConfig?.deepgramTTS?.defaultModel || 'aura-2-thalia-en';
+        } else {
+          voiceId = config?.elevenLabsConfig?.selectedVoiceId || 
+                   config?.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 
+                   'default-voice-id';
+        }
+      }
+      
       pendingOpeningMessage = { text, voiceId };
     }
     
@@ -156,11 +173,17 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
                 try {
                   let audioSent = false;
                   
-                  if (selectedTTSProvider === 'elevenlabs' && voiceAI) {
+                  if (selectedTTSProvider === 'elevenlabs') {
+                    // Initialize voiceAI service if not already initialized
+                    if (!voiceAI) {
+                      voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
+                    }
                     const audio = await voiceAI.synthesizeSimpleSpeech(text, voiceId);
                     if (audio) {
                       sendAudioToTwilio(audio);
                       audioSent = true;
+                    } else {
+                      logger.warn(`ElevenLabs TTS returned no audio content for opening message in call ${callId}`);
                     }
                   } else if (selectedTTSProvider === 'deepgram') {
                     // Use Deepgram TTS for opening message
@@ -180,14 +203,14 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
                     }
                   }
                   
-                  // Fallback to ElevenLabs if Deepgram failed and ElevenLabs is available
-                  if (!audioSent && config?.elevenLabsConfig?.apiKey) {
-                    logger.info(`Using ElevenLabs fallback for opening message in call ${callId}`);
+                  // Only attempt ElevenLabs fallback if the selected provider actually failed AND ElevenLabs is available
+                  if (!audioSent && selectedTTSProvider !== 'elevenlabs' && config?.elevenLabsConfig?.apiKey) {
+                    logger.info(`Primary TTS provider ${selectedTTSProvider} failed, using ElevenLabs fallback for opening message in call ${callId}`);
                     try {
                       if (!voiceAI) {
                         voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
                       }
-                      const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId || voiceId;
+                      const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 'default-voice-id';
                       const fallbackAudio = await voiceAI.synthesizeSimpleSpeech(text, fallbackVoice);
                       if (fallbackAudio) {
                         sendAudioToTwilio(fallbackAudio);
@@ -321,15 +344,31 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
               );
             }
             
-            // Use the same voice ID that worked for the opening message - prioritize call's personalityId (campaign voice)
-            const voiceId = call.personalityId || 
-                            session.currentPersonality.voiceId || 
-                            (config.elevenLabsConfig?.availableVoices?.[0]?.voiceId);
+            // Use appropriate voice ID based on the selected TTS provider
+            let voiceId;
+            if (call.personalityId) {
+              voiceId = call.personalityId;
+            } else if (session.currentPersonality.voiceId) {
+              voiceId = session.currentPersonality.voiceId;
+            } else {
+              // Use provider-appropriate default voice
+              if (selectedTTSProvider === 'deepgram') {
+                voiceId = config?.ttsConfig?.deepgramTTS?.defaultModel || 'aura-2-thalia-en';
+              } else {
+                voiceId = config?.elevenLabsConfig?.selectedVoiceId || 
+                         config?.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 
+                         'default-voice-id';
+              }
+            }
             
             try {
               let audioSent = false;
               
-              if (selectedTTSProvider === 'elevenlabs' && voiceAI) {
+              if (selectedTTSProvider === 'elevenlabs') {
+                // Initialize voiceAI service if not already initialized
+                if (!voiceAI) {
+                  voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
+                }
                 // Synthesize speech using ElevenLabs
                 const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
                   text: aiResponse.text,
@@ -365,14 +404,14 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
                 logger.warn(`TTS provider ${selectedTTSProvider} not properly configured for call ${callId}`);
               }
               
-              // Universal fallback to ElevenLabs if the primary provider failed
-              if (!audioSent && config?.elevenLabsConfig?.apiKey) {
-                logger.info(`Using ElevenLabs fallback for response in call ${callId}`);
+              // Only attempt ElevenLabs fallback if the primary provider actually failed AND it's not ElevenLabs
+              if (!audioSent && selectedTTSProvider !== 'elevenlabs' && config?.elevenLabsConfig?.apiKey) {
+                logger.info(`Primary TTS provider ${selectedTTSProvider} failed, using ElevenLabs fallback for response in call ${callId}`);
                 try {
                   if (!voiceAI) {
                     voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
                   }
-                  const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId || voiceId;
+                  const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 'default-voice-id';
                   const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(aiResponse.text, fallbackVoice);
                   
                   if (fallbackResponse) {
@@ -390,14 +429,14 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
             } catch (voiceError) {
               logger.error(`Error in response voice synthesis for call ${callId}:`, voiceError);
               
-              // Final fallback attempt with ElevenLabs if available
-              if (config?.elevenLabsConfig?.apiKey) {
+              // Final fallback attempt with ElevenLabs if available and primary provider is not ElevenLabs
+              if (selectedTTSProvider !== 'elevenlabs' && config?.elevenLabsConfig?.apiKey) {
                 try {
                   logger.info(`Final ElevenLabs fallback attempt for call ${callId}`);
                   if (!voiceAI) {
                     voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
                   }
-                  const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId;
+                  const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 'default-voice-id';
                   if (fallbackVoice) {
                     const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(aiResponse.text, fallbackVoice);
                     

@@ -194,9 +194,13 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
 
                                           if (audioResult.method === 'tts') {
                                                 // Check if this is a chunked audio request
-                                                if (!handleChunkedAudioForTwiML(twiml, audioResult.url, 'en')) {
-                                                      // Use regular TTS fallback
-                                                      twiml.say({ voice: 'alice', language: 'en-US' }, errorMessage);
+                                                if (!(await handleChunkedAudioForTwiML(twiml, audioResult.url, 'en', { callId }))) {
+                                                      // Use TTS fallback chain instead of immediate Twilio voice
+                                                      const ttsResult = await synthesizeWithTTSChain(errorMessage, { callId, language: 'en' });
+                                                      if (ttsResult.shouldUseTwilioFallback) {
+                                                            const voiceConfig = ttsResult.twilioVoiceConfig || { voice: 'alice', language: 'en-US' };
+                                                            twiml.say(voiceConfig, errorMessage);
+                                                      }
                                                 }
                                           } else {
                                                 // Use Cloudinary URL or small base64 data
@@ -286,7 +290,7 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
 
                                           if (audioResult.method === 'tts') {
                                                 // Check if this is a chunked audio request
-                                                if (!handleChunkedAudioForTwiML(twiml, audioResult.url, campaign.primaryLanguage)) {
+                                                if (!(await handleChunkedAudioForTwiML(twiml, audioResult.url, campaign.primaryLanguage, { callId, campaignId: campaign._id?.toString() }))) {
                                                       // Use regular TTS fallback
                                                       twiml.say({ voice: 'alice', language: campaign.primaryLanguage === 'hi' ? 'hi-IN' : 'en-US' }, formattedGreeting);
                                                 }
@@ -329,7 +333,7 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
 
                                           if (audioResult.method === 'tts') {
                                                 // Check if this is a chunked audio request
-                                                if (!handleChunkedAudioForTwiML(twiml, audioResult.url, campaign.primaryLanguage)) {
+                                                if (!(await handleChunkedAudioForTwiML(twiml, audioResult.url, campaign.primaryLanguage, { callId, campaignId: campaign._id?.toString() }))) {
                                                       // Use regular TTS fallback
                                                       twiml.say({ voice: 'alice', language: campaign.primaryLanguage === 'hi' ? 'hi-IN' : 'en-US' }, formattedGreeting);
                                                 }

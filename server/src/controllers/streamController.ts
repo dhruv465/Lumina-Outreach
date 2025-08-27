@@ -610,7 +610,8 @@ export const handleConversationalAIStream = async (ws: WebSocket, req: Request):
                   },
                   onCompletion: (response) => {
                     ws.send(JSON.stringify({
-                      type: 'completed',
+                      type: 'utteranceCompleted',
+                      scope: 'opening',
                       conversationId,
                       interrupted: response.interrupted || false,
                       metadata: response.metadata || {}

@@ -402,12 +402,9 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                   const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || `http${req.secure ? 's' : ''}://${host}`;
 
                   const baseUrl = webhookBaseUrl.replace(/^http/, 'ws');
-                  // Simplified WebSocket path with query parameters instead of path segments
-                  const streamPath = `/voice/stream`;
-                  const urlObject = new URL(streamPath, baseUrl);
-                  urlObject.searchParams.set('callId', callId);
-                  urlObject.searchParams.set('conversationId', conversationId);
-                  const wsUrl = urlObject.href;
+                  // Use path segments instead of query parameters for Twilio Media Stream compatibility
+                  const streamPath = `/voice/stream/${callId}/${conversationId}`;
+                  const wsUrl = new URL(streamPath, baseUrl).href;
 
                   logger.info(`Generated websocket URL for Twilio Media Stream: ${wsUrl}`);
 

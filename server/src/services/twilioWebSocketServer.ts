@@ -1,8 +1,6 @@
-import * as WebSocket from "ws";
-import * as http from "http";
-import * as url from "url";
-import logger from "../utils/logger";
-import { Request } from "express";
+import http from 'http';
+import { WebSocketServer, WebSocket, RawData } from 'ws';
+import { parse as parseUrl } from 'url';
 
 /**
  * Dedicated WebSocket server for Twilio Media Streams
@@ -22,9 +20,44 @@ export class TwilioWebSocketServer {
 
   constructor(server: http.Server) {
     logger.info("Initializing TwilioWebSocketServer with HTTP server");
+// Extend WebSocket interface to include isAlive property
+interface ExtendedWebSocket extends WebSocket {
+  isAlive?: boolean;
+}
 
-    // Create WebSocket server with noServer option to handle upgrades manually
-    this.wss = new WebSocket.Server({
+type ConnectionState = {
+  callId: string;
+  conversationId: string;
+  ws: WebSocket;
+  createdAt: number;
+  gotConnected: boolean;
+  gotStart: boolean;
+  streamSid?: string;
+};
+
+// Simple logger shim if a project-level logger isn't available
+const logger = {
+  info: (msg: string, meta?: any) => console.log(`info: ${msg}`, meta ?? ""),
+  warn: (msg: string, meta?: any) => console.warn(`warn: ${msg}`, meta ?? ""),
+  error: (msg: string, meta?: any) => console.error(`error: ${msg}`, meta ?? ""),
+  debug: (msg: string, meta?: any) => console.debug(`debug: ${msg}`, meta ?? ""),
+};
+
+class TwilioWebSocketServer {
+  private readonly wss: WebSocketServer;
+  private readonly active: Map<string, ConnectionState> = new Map();
+  private readonly pathPrefix: string = '/voice/stream';
+  private heartbeatInterval?: NodeJS.Timeout;
+
+  // Optional feature flag to allow bi-directional outbound audio
+  private readonly enableBidi: boolean = process.env.ENABLE_TWILIO_BIDI === 'true';
+
+  // For Twilio Media Streams, outbound audio must be 8kHz PCMU (µ-law), ~20ms frames (160 samples)
+  public static readonly OUTBOUND_SAMPLES_PER_FRAME = 160;
+
+  constructor(private readonly server: http.Server) {
+    // Use "noServer" mode so we can choose which upgrade requests to accept
+    this.wss = new WebSocketServer({
       noServer: true,
       perMessageDeflate: false, // Disable compression for real-time audio
       maxPayload: 1024 * 1024, // 1MB max payload
@@ -135,141 +168,203 @@ export class TwilioWebSocketServer {
               audioPayload,
               message.media?.timestamp
             );
-          }
-
-          logger.debug("Received audio data from Twilio", {
-            callId,
-            payloadSize: audioPayload?.length || 0,
-            timestamp: message.media?.timestamp,
-          });
-        } else if (message.event === "stop") {
-          logger.info("Twilio Media Stream stopped", {
-            callId,
-            conversationId,
-          });
-        } else {
-          logger.debug("Received unknown Twilio event", {
-            callId,
-            event: message.event,
-            message: message,
-          });
-        }
-      } catch (error) {
-        logger.error("Error parsing Twilio message", {
-          error: error instanceof Error ? error.message : String(error),
-          data: data.toString().substring(0, 100),
-          callId,
-        });
-      }
-    });
-  }
-
-  private setupEventHandlers() {
-    this.wss.on(
-      "connection",
-      async (ws: WebSocket, req: http.IncomingMessage) => {
-        logger.info("New Twilio WebSocket connection established", {
-          url: req.url,
-          userAgent: req.headers["user-agent"],
-          origin: req.headers.origin,
-          clientCount: this.wss.clients.size,
-        });
-
-        // Set up proper WebSocket options for Twilio
-        ws.binaryType = "arraybuffer";
-
-        // Configure WebSocket for optimal performance
-        if ((ws as any)._socket) {
-          (ws as any)._socket.setNoDelay(true); // Disable Nagle's algorithm for low latency
-          (ws as any)._socket.setKeepAlive(true, 30000); // Keep connection alive
-        }
-
-        // Add connection metadata
-        (ws as any).isAlive = true;
-        (ws as any).connectionTime = Date.now();
-
-        // Parse URL to extract parameters
-        const parsedUrl = url.parse(req.url || "", true);
-        // Remove .websocket suffix if present
-        const cleanPathname =
-          parsedUrl.pathname?.replace(/\/\.websocket$/, "") || "";
-        const pathParts = cleanPathname.split("/").filter(Boolean) || [];
-
-        // Extract callId and conversationId from URL path
-        let callId: string | undefined;
-        let conversationId: string | undefined;
-
-        if (pathParts.length >= 4) {
-          // Format: /voice/optimized-stream/callId/conversationId, /voice/low-latency/callId/conversationId, or /voice/stream/callId/conversationId
-          if (
-            pathParts[0] === "voice" &&
-            (pathParts[1] === "optimized-stream" ||
-              pathParts[1] === "low-latency" ||
-              pathParts[1] === "stream")
-          ) {
-            callId = pathParts[2];
-            conversationId = pathParts[3];
-          } else {
-            // Legacy format support
-            callId = pathParts[2];
-            conversationId = pathParts[3];
-          }
-
-          // Log the URL parsing for debugging
-          logger.debug(`WebSocket URL parsing: ${parsedUrl.pathname}`, {
-            callId,
-            conversationId,
-            pathParts,
-            originalPath: parsedUrl.pathname,
-            cleanedPath: cleanPathname,
-          });
-        }
-
-        // Also check query parameters
-        if (!callId) callId = parsedUrl.query?.callId as string;
-        if (!conversationId)
-          conversationId = parsedUrl.query?.conversationId as string;
-
-        // Create a mock Express request object for compatibility
-        const mockReq: Partial<Request> = {
-          url: req.url,
-          headers: req.headers,
-          params: {
-            callId: callId || "",
-            conversationId: conversationId || "",
-          },
-          query: parsedUrl.query || {},
-        };
-
-        // Handle the connection using our existing controller
+      // Twilio sends 'audio' subprotocol
+      handleProtocols: (protocols) => {
+        // Handle both Set and Array formats
+        let offered: string[] = [];
         try {
-          // Verify connection parameters before proceeding
-          if (!callId || !conversationId) {
-            logger.error(
-              "Missing required parameters for WebSocket connection",
-              {
-                callId,
-                conversationId,
-                url: req.url,
-                pathname: parsedUrl.pathname,
-              }
-            );
-            ws.close(1002, "Missing required parameters");
-            return;
+          if (Array.isArray(protocols)) {
+            offered = protocols;
+          } else if (protocols && typeof protocols[Symbol.iterator] === 'function') {
+            offered = Array.from(protocols);
+          } else if (protocols && typeof (protocols as any).forEach === 'function') {
+            const tmp: string[] = [];
+            (protocols as any).forEach((p: string) => tmp.push(p));
+            offered = tmp;
           }
+        } catch (err) {
+          logger.warn('Error handling WebSocket protocols', { error: err });
+          return false;
+        }
+        
+        // Prefer 'audio' protocol for Twilio Media Streams
+        if (offered.includes('audio')) return 'audio';
+        
+        // Accept any protocol if no 'audio' is offered
+        return offered.length > 0 ? offered[0] : false;
+      },
+    });
 
-          // Check for duplicate connections to the same endpoint
-          const connectionKey = `${callId}:${conversationId}`;
-          const existingConnection = this.activeConnections.get(connectionKey);
+    // Bind to HTTP upgrade
+    this.server.on('upgrade', (request, socket, head) => {
+      try {
+        const upgradeHeader = (request.headers['upgrade'] || '').toString().toLowerCase();
+        const connectionHeader = (request.headers['connection'] || '').toString().toLowerCase();
+        const url = request.url || '/';
+        const { pathname } = parseUrl(url);
 
-          if (
-            existingConnection &&
-            existingConnection.readyState === WebSocket.OPEN
-          ) {
-            logger.warn(
-              "Duplicate WebSocket connection attempt detected, closing existing connection",
-              {
-                callId,
+        const isWs = upgradeHeader === 'websocket' && connectionHeader.includes('upgrade');
+        const isValidPath = !!pathname && pathname.startsWith(this.pathPrefix);
+
+        logger.info('WebSocket upgrade request intercepted', {
+          upgradeHeader,
+          connectionHeader,
+          url,
+          pathname,
+          isValidPath,
+        });
+
+        // Only handle requests for our specific path prefix
+        if (!isWs || !isValidPath) {
+          // Don't handle this request - let other WebSocket servers handle it
+          return;
+        }
+
+        // Expected pattern: /voice/stream/:callId/:conversationId
+        const parts = pathname!.split('/').filter(Boolean); // ['voice','stream', callId, conversationId]
+        if (parts.length !== 4 || parts[0] !== 'voice' || parts[1] !== 'stream') {
+          logger.warn('Rejecting WS: unexpected path segments', { 
+            pathname, 
+            parts,
+            expected: '/voice/stream/:callId/:conversationId'
+          });
+          socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        const callId = parts[2];
+        const conversationId = parts[3];
+
+        this.wss.handleUpgrade(request, socket, head, (ws) => {
+          // Build connection state first
+          const key = `${callId}:${conversationId}`;
+          const state: ConnectionState = {
+            callId,
+            conversationId,
+            ws,
+            createdAt: Date.now(),
+            gotConnected: false,
+            gotStart: false,
+          };
+          this.active.set(key, state);
+
+          // Wrap ws.send so we gate all server->Twilio sends until 'start'
+          const originalSend = ws.send.bind(ws) as any;
+          let outboundReady = false;
+          const sendQueue: Array<{ data: any; options?: any; cb?: any }> = [];
+
+          (ws as any).send = (data: any, options?: any, cb?: any) => {
+            // Nothing should go out before Twilio's 'start'
+            if (!outboundReady) {
+              sendQueue.push({ data, options, cb });
+              return;
+            }
+
+            // Guard against MP3 payloads on outbound 'media' frames
+            try {
+              const text = typeof data === 'string'
+                ? data
+                : (Buffer.isBuffer(data) ? data.toString('utf8') : '');
+              if (text && text[0] === '{') {
+                const obj = JSON.parse(text);
+                if (obj?.event === 'media' && obj?.track === 'outbound') {
+                  const payload: string | undefined =
+                    obj?.media?.payload ?? obj?.payload;
+                  if (payload) {
+                    const b = Buffer.from(payload, 'base64');
+                    const looksID3 = b.length >= 3 && b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33; // 'ID3'
+                    const looksMP3 = b.length >= 2 && b[0] === 0xFF && (b[1] & 0xE0) === 0xE0;
+                    if (looksID3 || looksMP3) {
+                      logger.error('Blocked outbound MP3 payload: Twilio expects 8kHz PCMU frames.');
+                      if (typeof cb === 'function') cb(new Error('Unsupported outbound codec (MP3)'));
+                      return;
+                    }
+                  }
+                }
+              }
+            } catch {}
+
+            return originalSend(data, options, cb);
+          };
+
+          logger.info('New Twilio WebSocket connection established', { 
+            url: pathname, 
+            userAgent: request.headers['user-agent'],
+            callId,
+            conversationId,
+            protocol: ws.protocol
+          });
+
+          // Set up ping/pong to keep connection alive
+          (ws as ExtendedWebSocket).isAlive = true;
+          ws.on('pong', () => {
+            (ws as ExtendedWebSocket).isAlive = true;
+          });
+
+          // Handle WebSocket open event
+          ws.on('open', () => {
+            logger.info('WebSocket connection opened', { callId, conversationId });
+          });
+
+          // Wire up events
+          ws.on('message', (data: RawData) => {
+            try {
+              const text = data.toString('utf8');
+              logger.debug('Received WebSocket message', { 
+                callId, 
+                conversationId, 
+                messageLength: text.length,
+                messagePreview: text.substring(0, 100)
+              });
+              
+              const msg = JSON.parse(text);
+              const ev = msg?.event;
+
+              if (ev === 'connected') {
+                state.gotConnected = true;
+                logger.info('Twilio connected event', { callId, conversationId });
+                
+                // Send acknowledgment back to Twilio
+                try {
+                  ws.send(JSON.stringify({ event: 'connected' }));
+                } catch (sendErr) {
+                  logger.error('Failed to send connected acknowledgment', { error: sendErr });
+                }
+              } else if (ev === 'start') {
+                state.gotStart = true;
+                state.streamSid = msg?.start?.streamSid || msg?.streamSid;
+                logger.info('Twilio start event', { callId, conversationId, streamSid: state.streamSid });
+
+                // Flush any queued sends and allow outbound
+                outboundReady = true;
+                while (sendQueue.length > 0 && ws.readyState === WebSocket.OPEN) {
+                  const item = sendQueue.shift()!;
+                  try { originalSend(item.data, item.options, item.cb); } catch {}
+                }
+              } else if (ev === 'media') {
+                // Inbound 20ms media frame (base64 PCM µ-law).
+                // You can forward to Deepgram here.
+                // msg.media.payload (base64)
+                logger.debug('Received media frame', { 
+                  callId, 
+                  conversationId, 
+                  payloadLength: msg?.media?.payload?.length || 0 
+                });
+              } else if (ev === 'mark') {
+                // optional marker
+                logger.debug('Received mark event', { callId, conversationId, mark: msg?.mark });
+              } else if (ev === 'stop') {
+                logger.info('Twilio stop event', { callId, conversationId });
+                ws.close();
+              } else {
+                // Unknown or app-specific event
+                logger.debug('Unhandled Twilio WS event', { ev, callId, conversationId });
+              }
+            } catch (err: any) {
+              logger.error('Failed to parse Twilio WS message', { 
+                error: err?.message, 
+                callId, 
                 conversationId,
                 connectionKey,
               }
@@ -345,640 +440,119 @@ export class TwilioWebSocketServer {
           ws.on("close", (code, reason) => {
             if (pingInterval) {
               clearInterval(pingInterval);
+
+                rawData: data.toString('utf8').substring(0, 200)
+              });
             }
-            // Clean up voice agent timers and buffers
-            const connectionKey = `${callId}:${conversationId}`;
-            this.clearConnectionKeepAlive(connectionKey);
-            this.clearConnectionHealthCheck(connectionKey);
-            this.audioChunkBuffers.delete(connectionKey);
+          });
 
-            // Remove from active connections
-            this.activeConnections.delete(connectionKey);
-            logger.info(`WebSocket connection closed for call ${callId}`, {
+          ws.on('close', (code: number, reason: Buffer) => {
+            const reasonStr = reason?.toString?.() || '';
+            const duration = Date.now() - state.createdAt;
+            
+            logger.info('WebSocket connection closed', {
               code,
-              reason: reason.toString(),
-              connectionKey,
-              remainingConnections: this.activeConnections.size,
-              connectionDuration:
-                Date.now() - ((ws as any).connectionTime || Date.now()),
-            });
-          });
-        } catch (error) {
-          logger.error("Error handling WebSocket connection:", {
-            error: error instanceof Error ? error.message : String(error),
-            stack: error instanceof Error ? error.stack : undefined,
-            callId,
-            conversationId,
-          });
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.close(1011, "Internal server error");
-          }
-        }
-
-        // Set up ping/pong for connection health
-        ws.on("pong", () => {
-          (ws as any).isAlive = true;
-        });
-
-        ws.on("error", (error) => {
-          logger.error("WebSocket error:", {
-            error: error.message,
-            code: (error as any).code,
-            callId,
-            conversationId,
-            connectionTime: (ws as any).connectionTime,
-            readyState: ws.readyState,
-            stack: error.stack,
-          });
-
-          // Clean up ping interval on error
-          if ((ws as any).pingInterval) {
-            clearInterval((ws as any).pingInterval);
-          }
-
-          // Handle specific WebSocket errors that might cause Twilio issues
-          if (
-            (error as any).code === "ECONNRESET" ||
-            (error as any).code === "EPIPE" ||
-            (error as any).code === "ENOTFOUND" ||
-            error.message.includes("WebSocket") ||
-            error.message.includes("connection")
-          ) {
-            logger.warn("WebSocket connection error detected, cleaning up", {
-              errorCode: (error as any).code,
+              reason: reasonStr,
+              connectionDuration: duration,
+              connectionKey: key,
               callId,
               conversationId,
+              gotConnected: state.gotConnected,
+              gotStart: state.gotStart,
+              streamSid: state.streamSid
             });
-
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.close(1011, "Connection error");
+            
+            // Log specific close codes for debugging
+            if (code === 1006) {
+              logger.warn('WebSocket closed abnormally (1006) - possible network issue or protocol violation', {
+                callId,
+                conversationId,
+                duration,
+                gotConnected: state.gotConnected,
+                gotStart: state.gotStart
+              });
+            } else if (code === 1002) {
+              logger.error('WebSocket closed due to protocol error (1002)', {
+                callId,
+                conversationId,
+                reason: reasonStr
+              });
             }
-          }
-        });
-      }
-    );
-
-    // Set up connection health monitoring
-    const interval = setInterval(() => {
-      this.wss.clients.forEach((ws) => {
-        if (!(ws as any).isAlive) {
-          logger.warn("Terminating unresponsive WebSocket connection", {
-            connectionTime: (ws as any).connectionTime,
-            readyState: ws.readyState,
+            
+            this.active.delete(key);
           });
 
-          // Clean up ping interval if it exists
-          if ((ws as any).pingInterval) {
-            clearInterval((ws as any).pingInterval);
-          }
+          ws.on('error', (err: any) => {
+            logger.error('Twilio WS error', { 
+              message: (err && err.message) || String(err),
+              callId,
+              conversationId,
+              error: err
+            });
+          });
 
+          // Emit the connection event to the WebSocket server
+          this.wss.emit('connection', ws, request);
+          
+          // Send a small keepalive to ensure connection stays open
+          setTimeout(() => {
+            if (ws.readyState === WebSocket.OPEN && !state.gotConnected) {
+              logger.debug('Sending keepalive ping to maintain connection', { callId, conversationId });
+              try {
+                ws.ping();
+              } catch (pingErr) {
+                logger.warn('Failed to send keepalive ping', { error: pingErr, callId, conversationId });
+              }
+            }
+          }, 1000);
+        });
+      } catch (err: any) {
+        try { socket.write('HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n'); } catch {}
+        socket.destroy();
+        logger.error('Upgrade handling failed', { error: err?.message });
+      }
+    });
+
+    // Set up heartbeat to keep connections alive
+    this.heartbeatInterval = setInterval(() => {
+      this.wss.clients.forEach((ws) => {
+        const extWs = ws as ExtendedWebSocket;
+        if (extWs.isAlive === false) {
+          logger.warn('Terminating inactive WebSocket connection');
           return ws.terminate();
         }
-
-        (ws as any).isAlive = false;
-
-        // Only ping if connection is open
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.ping();
-        }
+        
+        extWs.isAlive = false;
+        ws.ping();
       });
-    }, 30000); // Check every 30 seconds
+    }, 30000); // 30 seconds
 
-    this.wss.on("close", () => {
-      clearInterval(interval);
-    });
-
-    // Log server statistics periodically
-    setInterval(() => {
-      const clientCount = this.wss.clients.size;
-      if (clientCount > 0) {
-        logger.debug(`Active WebSocket connections: ${clientCount}`);
-      }
-    }, 60000); // Log every minute
+    logger.info('Twilio WebSocket server initialized', { mode: 'noServer', serverCreated: true });
   }
 
-  public close() {
-    // Close all active connections
-    this.activeConnections.forEach((ws, connectionKey) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close(1001, "Server shutting down");
-      }
-    });
-    this.activeConnections.clear();
-
-    this.wss.close();
-  }
-
-  public getClientCount(): number {
-    return this.wss.clients.size;
-  }
-
-  public getActiveConnectionCount(): number {
-    return this.activeConnections.size;
-  }
-
-  public getActiveConnections(): string[] {
-    return Array.from(this.activeConnections.keys());
-  }
-
-  /**
-   * Set up keep-alive mechanism for a connection (inspired by Deepgram Voice Agent)
-   * @param connectionKey Connection key
-   * @param ws WebSocket connection
-   */
-  private setupConnectionKeepAlive(connectionKey: string, ws: WebSocket): void {
-    // Clear any existing timer
-    this.clearConnectionKeepAlive(connectionKey);
-
-    // Set up keep-alive timer using ws.ping() instead of JSON messages
-    const timer = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        try { 
-          ws.ping(); 
-          logger.debug(`Keep-alive ping sent for ${connectionKey}`); 
-        } 
-        catch (error) { 
-          logger.error(`Failed keep-alive ping for ${connectionKey}`, error); 
-          this.clearConnectionKeepAlive(connectionKey); 
-        }
-      } else {
-        this.clearConnectionKeepAlive(connectionKey);
-      }
-    }, this.KEEP_ALIVE_INTERVAL);
-
-    this.keepAliveTimers.set(connectionKey, timer);
-    logger.debug(`Keep-alive setup for connection ${connectionKey}`);
-  }
-
-  /**
-   * Clear keep-alive timer for a connection
-   * @param connectionKey Connection key
-   */
-  private clearConnectionKeepAlive(connectionKey: string): void {
-    const timer = this.keepAliveTimers.get(connectionKey);
-    if (timer) {
-      clearInterval(timer);
-      this.keepAliveTimers.delete(connectionKey);
-      logger.debug(`Keep-alive cleared for connection ${connectionKey}`);
-    }
-  }
-
-  /**
-   * Set up connection health monitoring
-   * @param connectionKey Connection key
-   * @param ws WebSocket connection
-   */
-  private setupConnectionHealthCheck(
-    connectionKey: string,
-    ws: WebSocket
-  ): void {
-    // Clear any existing timer
-    this.clearConnectionHealthCheck(connectionKey);
-
-    // Set up health check timer
-    const timer = setInterval(() => {
-      this.checkConnectionHealth(connectionKey, ws);
-    }, this.CONNECTION_HEALTH_CHECK_INTERVAL);
-
-    this.connectionHealthTimers.set(connectionKey, timer);
-    logger.debug(
-      `Connection health check setup for connection ${connectionKey}`
-    );
-  }
-
-  /**
-   * Check connection health
-   * @param connectionKey Connection key
-   * @param ws WebSocket connection
-   */
-  private checkConnectionHealth(connectionKey: string, ws: WebSocket): void {
-    if (ws.readyState !== WebSocket.OPEN) {
-      logger.warn(`Connection ${connectionKey} is not open, cleaning up`);
-      this.clearConnectionHealthCheck(connectionKey);
-      this.clearConnectionKeepAlive(connectionKey);
-      this.activeConnections.delete(connectionKey);
-      this.audioChunkBuffers.delete(connectionKey);
+  /** Optional helper to send an outbound PCMU frame (base64) after start */
+  public sendUlawFrame(callId: string, conversationId: string, base64Ulaw: string) {
+    if (!this.enableBidi) {
+      logger.warn('Outbound media streaming disabled by configuration (ENABLE_TWILIO_BIDI!=true).');
       return;
     }
-
-    // Send health check ping
-    try {
-      ws.ping();
-      logger.debug(`Health check ping sent for connection ${connectionKey}`);
-    } catch (error) {
-      logger.error(
-        `Health check failed for connection ${connectionKey}:`,
-        error
-      );
-      this.clearConnectionHealthCheck(connectionKey);
-      this.clearConnectionKeepAlive(connectionKey);
-    }
-  }
-
-  /**
-   * Clear connection health check timer
-   * @param connectionKey Connection key
-   */
-  private clearConnectionHealthCheck(connectionKey: string): void {
-    const timer = this.connectionHealthTimers.get(connectionKey);
-    if (timer) {
-      clearInterval(timer);
-      this.connectionHealthTimers.delete(connectionKey);
-      logger.debug(
-        `Connection health check cleared for connection ${connectionKey}`
-      );
-    }
-  }
-
-  /**
-   * Handle audio chunk processing (inspired by Deepgram Voice Agent streaming)
-   * @param callId Call ID
-   * @param conversationId Conversation ID
-   * @param audioPayload Base64 encoded audio payload
-   * @param timestamp Audio timestamp
-   */
-  private handleAudioChunk(
-    callId: string,
-    conversationId: string,
-    audioPayload: string,
-    timestamp?: string
-  ): void {
-    const connectionKey = `${callId}:${conversationId}`;
-
-    try {
-      // Decode audio payload
-      const audioBuffer = Buffer.from(audioPayload, "base64");
-
-      // Get or create chunk buffer for this connection
-      let chunkBuffer = this.audioChunkBuffers.get(connectionKey) || [];
-      chunkBuffer.push(audioBuffer);
-
-      // Check if we have enough data to process
-      const totalBufferSize = chunkBuffer.reduce(
-        (total, chunk) => total + chunk.length,
-        0
-      );
-
-      if (totalBufferSize >= this.AUDIO_CHUNK_SIZE) {
-        // Combine chunks and process
-        const combinedBuffer = Buffer.concat(chunkBuffer);
-        chunkBuffer = []; // Clear buffer
-        this.audioChunkBuffers.set(connectionKey, chunkBuffer);
-
-        // Emit audio chunk event for processing
-        this.emitAudioEvent(callId, conversationId, "audioChunkReceived", {
-          audioBuffer: combinedBuffer,
-          size: combinedBuffer.length,
-          timestamp: timestamp || Date.now().toString(),
-        });
-
-        logger.debug(`Processed audio chunk for call ${callId}`, {
-          chunkSize: combinedBuffer.length,
-          timestamp,
-        });
-      } else {
-        // Update buffer
-        this.audioChunkBuffers.set(connectionKey, chunkBuffer);
-      }
-    } catch (error) {
-      logger.error(`Error processing audio chunk for call ${callId}:`, error);
-    }
-  }
-
-  /**
-   * Emit audio events (like Deepgram Voice Agent)
-   * @param callId Call ID
-   * @param conversationId Conversation ID
-   * @param event Event type
-   * @param data Event data
-   */
-  private emitAudioEvent(
-    callId: string,
-    conversationId: string,
-    event: string,
-    data: any
-  ): void {
-    logger.debug(`Audio event for call ${callId}:`, {
-      event,
-      conversationId,
-      dataSize: data.audioBuffer?.length || 0,
-      timestamp: data.timestamp,
-    });
-
-    // Process audio chunks when received
-    if (event === "audioChunkReceived" && data.audioBuffer) {
-      // Process audio asynchronously to avoid blocking the WebSocket
-      setImmediate(async () => {
-        try {
-          await this.processReceivedAudio(
-            callId,
-            conversationId,
-            data.audioBuffer
-          );
-        } catch (error) {
-          logger.error(
-            `Error processing received audio for call ${callId}:`,
-            error
-          );
-        }
-      });
-    }
-  }
-
-  /**
-   * Process received audio chunk and generate AI response
-   */
-  private async processReceivedAudio(
-    callId: string,
-    conversationId: string,
-    audioBuffer: Buffer
-  ): Promise<void> {
-    try {
-      logger.info(
-        `Processing audio chunk for call ${callId}, size: ${audioBuffer.length} bytes`
-      );
-
-      // Get configuration for speech services
-      const Configuration = require("../models/Configuration").default;
-      const config = await Configuration.findOne();
-      if (!config) {
-        logger.error("No configuration found for audio processing");
-        return;
-      }
-
-      // Get conversation session from the conversation engine
-      const { conversationEngine } = await import("./index");
-      let session = conversationEngine.getSession(conversationId);
-      if (!session) {
-        logger.warn(
-          `No session found for conversation ${conversationId}, creating new one`
-        );
-        const Call = require("../models/Call").default;
-        const call = await Call.findById(callId);
-        if (!call) {
-          logger.error(`No call found with ID ${callId}`);
-          return;
-        }
-
-        const newConversationId = await conversationEngine.startConversation(
-          callId,
-          call.leadId.toString(),
-          call.campaignId.toString(),
-          call.personalityId
-        );
-        session = conversationEngine.getSession(newConversationId);
-        if (!session) {
-          logger.error("Failed to create conversation session");
-          return;
-        }
-      }
-
-      // Transcribe audio using available speech recognition service
-      let transcribedText = "";
-
-      // Try to use Deepgram if configured
-      if (config.deepgramConfig?.isEnabled && config.deepgramConfig?.apiKey) {
-        try {
-          const speechAnalysisService =
-            conversationEngine.getSpeechAnalysisService();
-          const transcriptionResult =
-            await speechAnalysisService.transcribeAudio(audioBuffer);
-          transcribedText = transcriptionResult.transcript || "";
-
-          logger.info(
-            `Deepgram transcription for call ${callId}: "${transcribedText.substring(
-              0,
-              100
-            )}..."`
-          );
-        } catch (deepgramError) {
-          logger.error(
-            `Deepgram transcription failed for call ${callId}:`,
-            deepgramError
-          );
-        }
-      }
-
-      // Skip processing if no meaningful speech detected
-      if (!transcribedText || transcribedText.trim().length < 3) {
-        logger.debug(`No meaningful speech detected for call ${callId}`);
-        return;
-      }
-
-      // Process the transcribed text with conversation engine
-      const aiResponse = await conversationEngine.processUserInput(
-        conversationId,
-        transcribedText
-      );
-
-      logger.info(
-        `AI response for call ${callId}: "${aiResponse.text.substring(
-          0,
-          100
-        )}..."`
-      );
-
-      // Generate speech from AI response
-      await this.generateAndSendAudioResponse(
-        aiResponse.text,
-        callId,
-        session,
-        config
-      );
-    } catch (error) {
-      logger.error(`Error in processReceivedAudio for call ${callId}:`, error);
-    }
-  }
-
-  /**
-   * Generate audio from AI response and send to Twilio
-   */
-  private async generateAndSendAudioResponse(
-    responseText: string,
-    callId: string,
-    session: any,
-    config: any
-  ): Promise<void> {
-    try {
-      // Get voice configuration
-      const Call = require("../models/Call").default;
-      const Campaign = require("../models/Campaign").default;
-      const call = await Call.findById(callId);
-      const campaign = call ? await Campaign.findById(call.campaignId) : null;
-
-      // Determine voice ID
-      const voiceId =
-        call?.personalityId ||
-        session.currentPersonality?.voiceId ||
-        campaign?.voiceConfiguration?.voiceId ||
-        config?.voiceAIConfig?.conversationalAI?.defaultVoiceId ||
-        "default";
-
-      // Get TTS provider configuration
-      const selectedTTSProvider = config.ttsConfig?.provider || "elevenlabs";
-
-      // Check if the selected provider has the required API key configuration
-      const isElevenLabsConfigured = !!(config.elevenLabsConfig?.apiKey);
-      const isDeepgramConfigured = !!(config.ttsConfig?.deepgramTTS?.apiKey);
-
-      if (
-        selectedTTSProvider === "elevenlabs" &&
-        isElevenLabsConfigured
-      ) {
-        // Use ElevenLabs for synthesis
-        const { EnhancedVoiceAIService } = await import(
-          "./enhancedVoiceAIService"
-        );
-        const voiceAI = new EnhancedVoiceAIService(
-          config.elevenLabsConfig.apiKey
-        );
-        const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
-          text: responseText,
-          personalityId: voiceId,
-          language: session.language === "Hindi" ? "hi" : "en",
-        });
-
-        if (speechResponse?.audioContent) {
-          this.sendAudioToCall(callId, speechResponse.audioContent);
-          logger.info(`Sent ElevenLabs audio response for call ${callId}`);
-        }
-      } else if (
-        selectedTTSProvider === "deepgram" &&
-        isDeepgramConfigured
-      ) {
-        // Use Deepgram TTS
-        const { synthesizeSpeechWithProvider } = await import(
-          "../utils/ttsServiceFactory"
-        );
-
-        // Determine appropriate Deepgram model to use
-        let deepgramModel = voiceId;
-        const deepgramModels = [
-          "aura-2-thalia-en",
-          "aura-asteria-en",
-          "aura-luna-en",
-          "aura-stella-en",
-          "aura-athena-en",
-          "aura-hera-en",
-          "aura-orion-en",
-          "aura-arcas-en",
-          "aura-perseus-en",
-          "aura-angus-en",
-          "aura-orpheus-en",
-          "aura-helios-en",
-          "aura-zeus-en",
-        ];
-
-        // If voiceId is not a valid Deepgram model, use configured default or safe fallback
-        if (!deepgramModels.includes(voiceId)) {
-          deepgramModel =
-            config.ttsConfig.deepgramTTS.defaultModel || "aura-2-thalia-en";
-          logger.info(
-            `Voice ID ${voiceId} is not a Deepgram model, using ${deepgramModel} instead`
-          );
-        }
-
-        const speechResponse = await synthesizeSpeechWithProvider(
-          config,
-          responseText,
-          deepgramModel,
-          session.language === "Hindi" ? "hi" : "en",
-          { encoding: "linear16", sampleRate: 8000, model: deepgramModel }
-        );
-
-        if (speechResponse?.audioContent) {
-          this.sendAudioToCall(callId, speechResponse.audioContent);
-          logger.info(`Sent Deepgram audio response for call ${callId}`, {
-            model: deepgramModel,
-            encoding: "linear16",
-            sampleRate: 8000,
-            audioSize: speechResponse.audioContent.length,
-          });
-        }
-      } else {
-        // Selected provider not configured, try fallback logic
-        let fallbackUsed = false;
-        
-        if (!fallbackUsed && selectedTTSProvider !== "elevenlabs" && isElevenLabsConfigured) {
-          // Try ElevenLabs as fallback
-          try {
-            logger.info(`${selectedTTSProvider} not configured for call ${callId}, falling back to ElevenLabs`);
-            const { EnhancedVoiceAIService } = await import("./enhancedVoiceAIService");
-            const voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
-            const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
-              text: responseText,
-              personalityId: voiceId,
-              language: session.language === "Hindi" ? "hi" : "en",
-            });
-
-            if (speechResponse?.audioContent) {
-              this.sendAudioToCall(callId, speechResponse.audioContent);
-              logger.info(`Sent ElevenLabs fallback audio response for call ${callId}`);
-              fallbackUsed = true;
-            }
-          } catch (fallbackError) {
-            logger.warn(`ElevenLabs fallback failed for call ${callId}:`, fallbackError);
-          }
-        }
-        
-        if (!fallbackUsed && selectedTTSProvider !== "deepgram" && isDeepgramConfigured) {
-          // Try Deepgram as fallback
-          try {
-            logger.info(`${selectedTTSProvider} not configured for call ${callId}, falling back to Deepgram`);
-            const { synthesizeSpeechWithProvider } = await import("../utils/ttsServiceFactory");
-            const speechResponse = await synthesizeSpeechWithProvider(
-              config,
-              responseText,
-              "aura-2-thalia-en", // Use default Deepgram voice
-              session.language === "Hindi" ? "hi" : "en",
-              { encoding: "linear16", sampleRate: 8000 }
-            );
-
-            if (speechResponse?.audioContent) {
-              this.sendAudioToCall(callId, speechResponse.audioContent);
-              logger.info(`Sent Deepgram fallback audio response for call ${callId}`);
-              fallbackUsed = true;
-            }
-          } catch (fallbackError) {
-            logger.warn(`Deepgram fallback failed for call ${callId}:`, fallbackError);
-          }
-        }
-        
-        if (!fallbackUsed) {
-          logger.warn(
-            `TTS provider ${selectedTTSProvider} not configured and no fallback available for call ${callId}`,
-            {
-              selectedProvider: selectedTTSProvider,
-              elevenLabsConfigured: isElevenLabsConfigured,
-              deepgramConfigured: isDeepgramConfigured
-            }
-          );
-        }
-      }
-    } catch (error) {
-      logger.error(
-        `Error generating audio response for call ${callId}:`,
-        error
-      );
-    }
-  }
-
-  /**
-   * Send audio data to a specific call via WebSocket
-   */
-  private sendAudioToCall(callId: string, audioData: Buffer): void {
-    const connection = this.findConnectionByCallId(callId);
-    if (!connection) {
-      logger.warn(`No WebSocket connection found for call ${callId}`);
+    const key = `${callId}:${conversationId}`;
+    const state = this.active.get(key);
+    if (!state?.ws || !state.gotStart || !state.streamSid || state.ws.readyState !== WebSocket.OPEN) {
+      logger.warn('Cannot send outbound frame: stream not ready', { key });
       return;
     }
-    const { ws, streamSid } = connection as any;
-    if (!streamSid) {
-      logger.warn(`Cannot send audio to call ${callId}: streamSid not available`);
-      return;
+    const msg = {
+      event: 'media',
+      streamSid: state.streamSid,
+      track: 'outbound',
+      media: { payload: base64Ulaw },
+    };
+    try {
+      (state.ws as any).send(JSON.stringify(msg));
+    } catch (err: any) {
+      logger.error('Failed to send outbound frame', { error: err?.message });
     }
-    this.sendMediaChunks(ws, streamSid, audioData);
-    logger.debug(`Queued audio to call ${callId}, size: ${audioData.length} bytes`);
   }
 
   /**
@@ -1021,124 +595,31 @@ export class TwilioWebSocketServer {
       }
       ws.send(JSON.stringify(message));
       offset = end;
+  /** Cleanup method to stop heartbeat and close connections */
+  public cleanup() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = undefined;
     }
-  }
-
-  /**
-   * Find WebSocket connection by call ID
-   */
-  private findConnectionByCallId(
-    callId: string
-  ): { ws: WebSocket; streamSid: string; sequenceNumber: number } | null {
-    for (const [connectionKey, ws] of this.activeConnections.entries()) {
-      if (connectionKey.startsWith(callId + ":")) {
-        // Get stream metadata stored on the WebSocket
-        const streamSid = (ws as any).streamSid;
-        const sequenceNumber = (ws as any).sequenceNumber || 0;
-        (ws as any).sequenceNumber = sequenceNumber + 1;
-
-        return { ws, streamSid, sequenceNumber };
+    
+    // Close all active connections
+    this.active.forEach((state) => {
+      if (state.ws.readyState === WebSocket.OPEN) {
+        state.ws.close();
       }
-    }
-    return null;
-  }
-
-  /**
-   * Handle user started speaking event (like Deepgram Voice Agent)
-   * @param callId Call ID
-   * @param conversationId Conversation ID
-   */
-  public handleUserStartedSpeaking(
-    callId: string,
-    conversationId: string
-  ): void {
-    this.emitAudioEvent(callId, conversationId, "userStartedSpeaking", {
-      timestamp: Date.now().toString(),
     });
-
-    logger.debug(`User started speaking in call ${callId}`);
-  }
-
-  /**
-   * Handle agent started speaking event (like Deepgram Voice Agent)
-   * @param callId Call ID
-   * @param conversationId Conversation ID
-   * @param responseLatency Response latency in milliseconds
-   */
-  public handleAgentStartedSpeaking(
-    callId: string,
-    conversationId: string,
-    responseLatency: number
-  ): void {
-    this.emitAudioEvent(callId, conversationId, "agentStartedSpeaking", {
-      responseLatency,
-      timestamp: Date.now().toString(),
-    });
-
-    logger.debug(
-      `Agent started speaking in call ${callId} with ${responseLatency}ms latency`
-    );
-  }
-
-  /**
-   * Handle agent audio done event (like Deepgram Voice Agent)
-   * @param callId Call ID
-   * @param conversationId Conversation ID
-   */
-  public handleAgentAudioDone(callId: string, conversationId: string): void {
-    this.emitAudioEvent(callId, conversationId, "agentAudioDone", {
-      timestamp: Date.now().toString(),
-    });
-
-    logger.debug(`Agent audio completed for call ${callId}`);
-  }
-
-  /**
-   * Send audio response to Twilio (like Deepgram Voice Agent audio streaming)
-   * @param callId Call ID
-   * @param conversationId Conversation ID
-   * @param audioBuffer Audio buffer to send
-   */
-  public sendAudioResponse(
-    callId: string,
-    conversationId: string,
-    audioBuffer: Buffer
-  ): void {
-    const connectionKey = `${callId}:${conversationId}`;
-    const ws = this.activeConnections.get(connectionKey);
-
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      logger.warn(
-        `Cannot send audio response - connection not available for call ${callId}`
-      );
-      return;
-    }
+    this.active.clear();
     
-    const streamSid = (ws as any).streamSid;
-    if (!streamSid) {
-      logger.warn(`Cannot send audio response - streamSid missing for call ${callId}`);
-      return;
-    }
-    
-    this.sendMediaChunks(ws, streamSid, audioBuffer);
-    logger.debug(`Audio response sent to call ${callId}`, { audioSize: audioBuffer.length });
+    // Close the WebSocket server
+    this.wss.close();
   }
 }
 
-// Export singleton instance
-let twilioWSServer: TwilioWebSocketServer | null = null;
-
-export function initializeTwilioWebSocketServer(
-  server: http.Server
-): TwilioWebSocketServer {
-  if (twilioWSServer) {
-    twilioWSServer.close();
-  }
-
-  twilioWSServer = new TwilioWebSocketServer(server);
-  return twilioWSServer;
+// Factory function to initialize the Twilio WebSocket server
+export function initializeTwilioWebSocketServer(server: http.Server): TwilioWebSocketServer {
+  return new TwilioWebSocketServer(server);
 }
 
-export function getTwilioWebSocketServer(): TwilioWebSocketServer | null {
-  return twilioWSServer;
-}
+// Export the class as well for direct usage
+export { TwilioWebSocketServer };
+export default TwilioWebSocketServer;

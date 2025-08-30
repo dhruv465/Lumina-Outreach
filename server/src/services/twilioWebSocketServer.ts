@@ -18,7 +18,7 @@ export class TwilioWebSocketServer {
   private readonly KEEP_ALIVE_INTERVAL = 15000; // 15 seconds (like Deepgram Voice Agent)
   private readonly CONNECTION_HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
   private readonly AUDIO_CHUNK_SIZE = 8192; // 8KB chunks
-  private static readonly OUTBOUND_AUDIO_CHUNK_SIZE = 32 * 1024; // 32KB raw per chunk
+  private static readonly OUTBOUND_AUDIO_CHUNK_SIZE = 640; // 640 bytes (~40ms at 8kHz PCM16)
 
   constructor(server: http.Server) {
     logger.info("Initializing TwilioWebSocketServer with HTTP server");
@@ -29,10 +29,7 @@ export class TwilioWebSocketServer {
       perMessageDeflate: false, // Disable compression for real-time audio
       maxPayload: 1024 * 1024, // 1MB max payload
       clientTracking: true,
-      handleProtocols: (protocols) => {
-        // Accept any protocol for Twilio compatibility
-        return protocols.size > 0 ? Array.from(protocols)[0] : false;
-      },
+      // Remove handleProtocols to accept upgrades without subprotocol (Twilio compatibility)
     });
 
     // Handle upgrade events manually to prevent Express interference
@@ -114,8 +111,7 @@ export class TwilioWebSocketServer {
             conversationId,
             streamSid: message.streamSid,
           });
-          // Store stream metadata on WebSocket for later use
-          (ws as any).streamSid = message.streamSid;
+          // Initialize sequence number on connect, but don't assign streamSid until "start"
           (ws as any).sequenceNumber = 0;
         } else if (message.event === "start") {
           const streamSid = message.start?.streamSid || message.streamSid;
@@ -124,9 +120,11 @@ export class TwilioWebSocketServer {
             conversationId,
             streamSid: streamSid,
           });
-          // Store stream metadata on WebSocket for later use
+          // Only assign streamSid on "start" event, not "connected"
           (ws as any).streamSid = streamSid;
-          (ws as any).sequenceNumber = 0;
+          if (typeof (ws as any).sequenceNumber !== 'number') {
+            (ws as any).sequenceNumber = 0;
+          }
         } else if (message.event === "media") {
           // Handle incoming audio data with chunking (inspired by Deepgram Voice Agent)
           const audioPayload = message.media?.payload;
@@ -286,6 +284,10 @@ export class TwilioWebSocketServer {
           // Initialize audio chunk buffer for this connection
           this.audioChunkBuffers.set(connectionKey, []);
 
+          // Check if this is a Twilio /voice/* socket to avoid protocol violations
+          const userAgent = req.headers["user-agent"] || "";
+          const isTwilioSocket = userAgent.startsWith("Twilio.TmeWs") || cleanPathname.startsWith("/voice");
+
           // Set up keep-alive and connection health monitoring (inspired by Deepgram Voice Agent)
           this.setupConnectionKeepAlive(connectionKey, ws);
           this.setupConnectionHealthCheck(connectionKey, ws);
@@ -300,14 +302,25 @@ export class TwilioWebSocketServer {
               userAgent: req.headers["user-agent"],
               connectionKey,
               activeConnections: this.activeConnections.size,
+              isTwilioSocket,
             }
           );
 
-          // Handle the enhanced real-time media stream with new services
-          const { handleRealTimeMediaStream } = await import(
-            "../controllers/enhancedRealTimeController"
-          );
-          handleRealTimeMediaStream(ws, mockReq as Request);
+          // Guard: Do NOT invoke handleRealTimeMediaStream on Twilio /voice/* sockets
+          // to prevent sending non-Twilio frames which violates Twilio Media Streams protocol
+          if (!isTwilioSocket) {
+            // Handle the enhanced real-time media stream with new services
+            const { handleRealTimeMediaStream } = await import(
+              "../controllers/enhancedRealTimeController"
+            );
+            handleRealTimeMediaStream(ws, mockReq as Request);
+          } else {
+            logger.info("Skipping handleRealTimeMediaStream for Twilio socket to prevent protocol violations", {
+              callId,
+              userAgent,
+              path: cleanPathname
+            });
+          }
 
 
           // Set up Twilio-specific message handler
@@ -972,6 +985,20 @@ export class TwilioWebSocketServer {
    * Send media in safe chunks to avoid fragmentation
    */
   private sendMediaChunks(ws: WebSocket, streamSid: string, audioData: Buffer): void {
+    // Guard: Ensure streamSid exists and socket is OPEN before sending frames
+    if (!streamSid) {
+      logger.warn('Cannot send media chunks: streamSid is missing');
+      return;
+    }
+    
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      logger.warn('Cannot send media chunks: WebSocket is not open', {
+        readyState: ws?.readyState,
+        streamSid
+      });
+      return;
+    }
+
     const sock: any = ws as any;
     if (typeof sock.sequenceNumber !== 'number') sock.sequenceNumber = 0;
     let offset = 0;

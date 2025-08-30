@@ -132,22 +132,14 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
     if (session.conversationHistory.length === 0) {
       const text = await conversationEngine.generateOpeningMessage(conversationId, 'Customer', call.campaignId.toString());
       
-      // Select appropriate voice ID based on the selected TTS provider
+      // Use appropriate voice ID based on the configured personality
       let voiceId;
       if (call.personalityId) {
         voiceId = call.personalityId;
       } else if (session.currentPersonality.voiceId) {
         voiceId = session.currentPersonality.voiceId;
-      } else {
-        // Use provider-appropriate default voice
-        if (selectedTTSProvider === 'deepgram') {
-          voiceId = config?.ttsConfig?.deepgramTTS?.defaultModel || 'aura-2-thalia-en';
-        } else {
-          voiceId = config?.elevenLabsConfig?.selectedVoiceId || 
-                   config?.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 
-                   'default-voice-id';
-        }
       }
+      // Note: No need to provide fallback voice here - let TTSProviderService resolve it
       
       pendingOpeningMessage = { text, voiceId };
     }
@@ -171,57 +163,25 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
               if (pendingOpeningMessage) {
                 const { text, voiceId } = pendingOpeningMessage;
                 try {
-                  let audioSent = false;
+                  // Use TTSProviderService to handle synthesis and fallbacks automatically
+                  const { getTTSProviderService } = await import('../services/ttsProviderService');
+                  const ttsService = getTTSProviderService();
                   
-                  if (selectedTTSProvider === 'elevenlabs') {
-                    // Initialize voiceAI service if not already initialized
-                    if (!voiceAI) {
-                      voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
-                    }
-                    const audio = await voiceAI.synthesizeSimpleSpeech(text, voiceId);
-                    if (audio) {
-                      sendAudioToTwilio(audio);
-                      audioSent = true;
-                    } else {
-                      logger.warn(`ElevenLabs TTS returned no audio content for opening message in call ${callId}`);
-                    }
-                  } else if (selectedTTSProvider === 'deepgram') {
-                    // Use Deepgram TTS for opening message
-                    const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
-                    const speechResponse = await synthesizeSpeechWithProvider(
-                      config,
-                      text,
-                      voiceId,
-                      'en',
-                      { encoding: 'linear16', sampleRate: 8000 }
-                    );
-                    if (speechResponse?.audioContent) {
-                      sendAudioToTwilio(speechResponse.audioContent);
-                      audioSent = true;
-                    } else {
-                      logger.warn(`Deepgram TTS failed for opening message, attempting fallback for call ${callId}`);
-                    }
-                  }
+                  const result = await ttsService.synthesizeSpeech({
+                    text,
+                    voiceId,
+                    encoding: 'linear16',
+                    sampleRate: 8000
+                  });
                   
-                  // Only attempt ElevenLabs fallback if the selected provider actually failed AND ElevenLabs is available
-                  if (!audioSent && selectedTTSProvider !== 'elevenlabs' && config?.elevenLabsConfig?.apiKey) {
-                    logger.info(`Primary TTS provider ${selectedTTSProvider} failed, using ElevenLabs fallback for opening message in call ${callId}`);
-                    try {
-                      if (!voiceAI) {
-                        voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
-                      }
-                      const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 'default-voice-id';
-                      const fallbackAudio = await voiceAI.synthesizeSimpleSpeech(text, fallbackVoice);
-                      if (fallbackAudio) {
-                        sendAudioToTwilio(fallbackAudio);
-                        audioSent = true;
-                      }
-                    } catch (fallbackError) {
-                      logger.error(`ElevenLabs fallback also failed for opening message in call ${callId}:`, fallbackError);
-                    }
-                  }
-                  
-                  if (!audioSent) {
+                  if (result?.audioContent) {
+                    sendAudioToTwilio(result.audioContent);
+                    logger.info(`Opening message synthesis successful with ${result.metadata.provider}`, {
+                      callId,
+                      fallbackUsed: result.metadata.fallbackUsed,
+                      provider: result.metadata.provider
+                    });
+                  } else {
                     logger.warn(`All TTS providers failed for opening message in call ${callId}, continuing without audio`);
                   }
                 } catch (e) { 
@@ -344,110 +304,40 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
               );
             }
             
-            // Use appropriate voice ID based on the selected TTS provider
+            // Use appropriate voice ID based on the configured personality
             let voiceId;
             if (call.personalityId) {
               voiceId = call.personalityId;
             } else if (session.currentPersonality.voiceId) {
               voiceId = session.currentPersonality.voiceId;
-            } else {
-              // Use provider-appropriate default voice
-              if (selectedTTSProvider === 'deepgram') {
-                voiceId = config?.ttsConfig?.deepgramTTS?.defaultModel || 'aura-2-thalia-en';
-              } else {
-                voiceId = config?.elevenLabsConfig?.selectedVoiceId || 
-                         config?.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 
-                         'default-voice-id';
-              }
             }
+            // Note: No need to provide fallback voice here - let TTSProviderService resolve it
             
             try {
-              let audioSent = false;
+              // Use TTSProviderService to handle synthesis and fallbacks automatically
+              const { getTTSProviderService } = await import('../services/ttsProviderService');
+              const ttsService = getTTSProviderService();
               
-              if (selectedTTSProvider === 'elevenlabs') {
-                // Initialize voiceAI service if not already initialized
-                if (!voiceAI) {
-                  voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
-                }
-                // Synthesize speech using ElevenLabs
-                const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
-                  text: aiResponse.text,
-                  personalityId: voiceId,
-                  language: session.language || 'English'
+              const result = await ttsService.synthesizeSpeech({
+                text: aiResponse.text,
+                voiceId,
+                language: session.language === 'Hindi' ? 'hi' : 'en',
+                encoding: 'linear16',
+                sampleRate: 8000
+              });
+              
+              if (result?.audioContent) {
+                sendAudioToTwilio(result.audioContent);
+                logger.info(`AI response synthesis successful with ${result.metadata.provider}`, {
+                  callId,
+                  fallbackUsed: result.metadata.fallbackUsed,
+                  provider: result.metadata.provider
                 });
-                
-                // Send synthesized audio back through WebSocket
-                if (speechResponse && speechResponse.audioContent) {
-                  sendAudioToTwilio(speechResponse.audioContent);
-                  audioSent = true;
-                } else {
-                  logger.warn(`ElevenLabs TTS returned no audio content for call ${callId}`);
-                }
-              } else if (selectedTTSProvider === 'deepgram') {
-                // Use Deepgram TTS for response
-                const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
-                const speechResponse = await synthesizeSpeechWithProvider(
-                  config,
-                  aiResponse.text,
-                  voiceId,
-                  session.language === 'Hindi' ? 'hi' : 'en',
-                  { encoding: 'linear16', sampleRate: 8000 }
-                );
-                
-                if (speechResponse?.audioContent) {
-                  sendAudioToTwilio(speechResponse.audioContent);
-                  audioSent = true;
-                } else {
-                  logger.warn(`Deepgram TTS failed for response, attempting fallback for call ${callId}`);
-                }
               } else {
-                logger.warn(`TTS provider ${selectedTTSProvider} not properly configured for call ${callId}`);
-              }
-              
-              // Only attempt ElevenLabs fallback if the primary provider actually failed AND it's not ElevenLabs
-              if (!audioSent && selectedTTSProvider !== 'elevenlabs' && config?.elevenLabsConfig?.apiKey) {
-                logger.info(`Primary TTS provider ${selectedTTSProvider} failed, using ElevenLabs fallback for response in call ${callId}`);
-                try {
-                  if (!voiceAI) {
-                    voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
-                  }
-                  const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 'default-voice-id';
-                  const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(aiResponse.text, fallbackVoice);
-                  
-                  if (fallbackResponse) {
-                    sendAudioToTwilio(fallbackResponse);
-                    audioSent = true;
-                  }
-                } catch (fallbackError) {
-                  logger.error(`ElevenLabs fallback synthesis failed for response in call ${callId}:`, fallbackError);
-                }
-              }
-              
-              if (!audioSent) {
-                logger.warn(`All TTS providers failed for response in call ${callId}, continuing without audio`);
+                logger.warn(`All TTS providers failed for AI response in call ${callId}, continuing without audio`);
               }
             } catch (voiceError) {
               logger.error(`Error in response voice synthesis for call ${callId}:`, voiceError);
-              
-              // Final fallback attempt with ElevenLabs if available and primary provider is not ElevenLabs
-              if (selectedTTSProvider !== 'elevenlabs' && config?.elevenLabsConfig?.apiKey) {
-                try {
-                  logger.info(`Final ElevenLabs fallback attempt for call ${callId}`);
-                  if (!voiceAI) {
-                    voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
-                  }
-                  const fallbackVoice = config.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 'default-voice-id';
-                  if (fallbackVoice) {
-                    const fallbackResponse = await voiceAI.synthesizeSimpleSpeech(aiResponse.text, fallbackVoice);
-                    
-                    if (fallbackResponse) {
-                      sendAudioToTwilio(fallbackResponse);
-                    }
-                  }
-                } catch (finalFallbackError) {
-                  logger.error(`Final fallback synthesis failed for response in call ${callId}:`, finalFallbackError);
-                }
-              }
             }
           }
         }

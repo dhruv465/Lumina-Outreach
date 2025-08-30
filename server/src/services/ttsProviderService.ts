@@ -40,28 +40,6 @@ export class TTSProviderService {
   }
 
   /**
-   * Check if a voice ID looks like a Deepgram model
-   */
-  private isDeepgramVoiceId(voiceId: string): boolean {
-    const deepgramModels = [
-      'aura-2-thalia-en',
-      'aura-asteria-en',
-      'aura-luna-en',
-      'aura-stella-en',
-      'aura-athena-en',
-      'aura-hera-en',
-      'aura-orion-en',
-      'aura-arcas-en',
-      'aura-perseus-en',
-      'aura-angus-en',
-      'aura-orpheus-en',
-      'aura-helios-en',
-      'aura-zeus-en'
-    ];
-    return deepgramModels.includes(voiceId);
-  }
-
-  /**
    * Extract error code from error object for metrics tracking
    */
   private extractErrorCode(error: any): string {
@@ -139,24 +117,16 @@ export class TTSProviderService {
    */
   public async synthesizeSpeech(options: TTSOptions): Promise<TTSResult> {
     const config = await this.getTTSConfig();
-    let primaryProvider = config.primaryProvider || config.provider || 'elevenlabs';
+    const primaryProvider = config.primaryProvider || config.provider || 'elevenlabs';
     const startTime = Date.now();
     const requestId = `tts_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    // Auto-detect provider based on voice ID if it looks like a Deepgram model
-    if (options.voiceId && this.isDeepgramVoiceId(options.voiceId)) {
-      primaryProvider = 'deepgram';
-      logger.info('Auto-detected Deepgram provider based on voice ID', {
-        voiceId: options.voiceId,
-        requestId
-      });
-    }
 
     logger.info('TTS synthesis request', {
       textLength: options.text.length,
       primaryProvider,
       voiceId: options.voiceId,
       model: options.model,
+      useSelectedFallbackVoice: config.useSelectedFallbackVoice,
       requestId
     });
 
@@ -217,7 +187,19 @@ export class TTSProviderService {
             const fallbackStartTime = Date.now();
             logger.info(`Attempting TTS fallback to ${fallbackProvider}`, { requestId });
             
-            const result = await this.synthesizeWithProvider(fallbackProvider, options);
+            // Prepare options for fallback - respect useSelectedFallbackVoice setting
+            let fallbackOptions = { ...options };
+            if (config.useSelectedFallbackVoice !== false) { // Default is true
+              // For fallback, use the provider-specific selected voice, not the original voiceId
+              delete fallbackOptions.voiceId; // Let the provider method resolve the voice
+              logger.info(`Using selected fallback voice for ${fallbackProvider}`, {
+                useSelectedFallbackVoice: config.useSelectedFallbackVoice,
+                originalVoiceId: options.voiceId,
+                requestId
+              });
+            }
+            
+            const result = await this.synthesizeWithProvider(fallbackProvider, fallbackOptions);
             const fallbackLatency = Date.now() - fallbackStartTime;
             const totalLatency = Date.now() - startTime;
             
@@ -311,21 +293,33 @@ export class TTSProviderService {
 
     // Get configuration voice settings to pass to synthesis
     const config = await this.getTTSConfig();
-    const campaignVoiceSettings = config?.elevenLabsConfig ? {
-      speed: config.elevenLabsConfig.voiceSpeed,
-      stability: config.elevenLabsConfig.voiceStability,
-      clarity: config.elevenLabsConfig.voiceClarity
+    
+    // Resolve voice ID based on priority: args.voiceId || selectedVoicesByProvider.elevenlabs || elevenLabsConfig.selectedVoiceId
+    const voiceId = options.voiceId || 
+                   this.configuration?.ttsConfig?.selectedVoicesByProvider?.elevenlabs || 
+                   this.configuration?.elevenLabsConfig?.selectedVoiceId;
+    
+    if (!voiceId) {
+      throw new Error('No ElevenLabs voice selected. Please select a voice in the Configuration page.');
+    }
+
+    const campaignVoiceSettings = this.configuration?.elevenLabsConfig ? {
+      speed: this.configuration.elevenLabsConfig.voiceSpeed,
+      stability: this.configuration.elevenLabsConfig.voiceStability,
+      clarity: this.configuration.elevenLabsConfig.voiceClarity
     } : undefined;
 
-    logger.info('TTS synthesis with voice settings:', {
-      voiceId: options.voiceId,
+    logger.info('ElevenLabs TTS synthesis with voice settings:', {
+      voiceId,
+      providedVoiceId: options.voiceId,
+      selectedVoice: this.configuration?.ttsConfig?.selectedVoicesByProvider?.elevenlabs,
       campaignVoiceSettings,
       textLength: options.text.length
     });
 
     const result = await this.elevenLabsService.synthesizeAdaptiveVoice({
       text: options.text,
-      personalityId: options.voiceId || 'default-voice-id',
+      personalityId: voiceId,
       language: options.language || 'en',
       campaignVoiceSettings
     });
@@ -335,7 +329,7 @@ export class TTSProviderService {
       metadata: {
         provider: 'elevenlabs',
         model: result.metadata.voiceId,
-        voiceId: options.voiceId,
+        voiceId: voiceId,
         encoding: 'mp3',
         duration: result.metadata.duration,
         fallbackUsed: false
@@ -358,12 +352,21 @@ export class TTSProviderService {
       throw new Error('Deepgram TTS API key not configured');
     }
 
+    // Resolve voice ID based on priority: args.voiceId || selectedVoicesByProvider.deepgram || defaultModel
+    const voiceId = options.voiceId || 
+                   this.configuration?.ttsConfig?.selectedVoicesByProvider?.deepgram || 
+                   deepgramConfig.defaultModel;
+    
+    if (!voiceId) {
+      throw new Error('No Deepgram voice selected. Please select a Deepgram voice in the Configuration page.');
+    }
+
     // Create a new instance with the current API key from configuration
     const deepgramTTS = new DeepgramTTSService(deepgramConfig.apiKey);
 
     const encoding = options.encoding || deepgramConfig.voiceSettings?.encoding || 'mp3';
     const synthesisOptions = {
-      model: options.voiceId || options.model || deepgramConfig.defaultModel || 'aura-2-thalia-en',
+      model: voiceId,
       encoding: encoding,
       // Only include sample_rate for non-mp3 encodings (per Deepgram documentation)
       ...(encoding !== 'mp3' && { 
@@ -374,6 +377,9 @@ export class TTSProviderService {
     logger.info('Deepgram TTS synthesis request', {
       textLength: options.text.length,
       model: synthesisOptions.model,
+      providedVoiceId: options.voiceId,
+      selectedVoice: this.configuration?.ttsConfig?.selectedVoicesByProvider?.deepgram,
+      defaultModel: deepgramConfig.defaultModel,
       encoding: synthesisOptions.encoding,
       sampleRate: synthesisOptions.sample_rate,
       hasApiKey: !!deepgramConfig.apiKey
@@ -389,7 +395,7 @@ export class TTSProviderService {
       metadata: {
         provider: 'deepgram',
         model: synthesisOptions.model,
-        voiceId: options.voiceId,
+        voiceId: voiceId,
         encoding: synthesisOptions.encoding,
         duration: Math.ceil(options.text.length / 15), // Rough estimate
         fallbackUsed: false
@@ -503,6 +509,16 @@ export class TTSProviderService {
         'ttsConfig.autoFallback': newConfig.autoFallback
       };
 
+      // Handle selectedVoicesByProvider if provided
+      if (newConfig.selectedVoicesByProvider) {
+        updateObject['ttsConfig.selectedVoicesByProvider'] = newConfig.selectedVoicesByProvider;
+      }
+
+      // Handle useSelectedFallbackVoice if provided
+      if (newConfig.useSelectedFallbackVoice !== undefined) {
+        updateObject['ttsConfig.useSelectedFallbackVoice'] = newConfig.useSelectedFallbackVoice;
+      }
+
       // Handle deepgramTTS configuration if provided
       if (newConfig.deepgramTTS) {
         updateObject['ttsConfig.deepgramTTS'] = {
@@ -524,6 +540,8 @@ export class TTSProviderService {
         provider: newConfig.provider,
         primaryProvider: newConfig.primaryProvider,
         fallbackProviders: newConfig.fallbackProviders,
+        selectedVoicesByProvider: newConfig.selectedVoicesByProvider,
+        useSelectedFallbackVoice: newConfig.useSelectedFallbackVoice,
         deepgramTTSUpdated: !!newConfig.deepgramTTS
       });
     } catch (error) {

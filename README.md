@@ -1,239 +1,140 @@
-# Lumina Outreach: Intelligent Communication System
+# Lumina Outreach
 
-A comprehensive intelligent communication platform with AI-powered outreach capabilities, integrated with a custom CRM dashboard that manages leads, executes outbound calls, handles conversations intelligently, and provides detailed performance analytics.
+Developer README — concise guide to run, develop and contribute to Lumina Outreach (Project-Call).
 
-## Getting Started
+Lumina Outreach is an AI-powered intelligent communication platform and CRM focused on outbound voice outreach, lead management, campaign orchestration, and analytics. The system pairs a React + TypeScript dashboard (client/) with a Node.js + TypeScript backend (server/) and supports multi-provider TTS, telephony integrations, and real-time websocket flows.
 
-### Setup
+## Quick start (developer)
 
-1. Clone the repository
-   ```bash
-   git clone https://github.com/dhruv465/Project-Call.git
-   cd Project-Call
-   ```
+Prereqs: Node.js 18+, Yarn or npm, MongoDB local or remote, API keys for Twilio and one TTS provider (ElevenLabs and/or Deepgram).
 
-2. Run the setup script to initialize your environment
-   ```bash
-   ./setup-env.sh
-   ```
-   This script will:
-   - Create a `.env` file from the template
-   - Install git hooks to prevent accidental commits of sensitive data
-   - Run npm install if needed
+1) Clone repo
 
-3. Update your `.env` file with actual credentials
-   ```bash
-   # Open the .env file and replace placeholder values
-   nano server/.env
-   ```
-
-4. Start the server and client
-   ```bash
-   # Start the server
-   cd server
-   npm run dev
-   
-   # In a new terminal, start the client
-   cd client
-   npm run dev
-   ```
-
-### Environment Variables
-
-The project requires several environment variables to be set in the `server/.env` file. The `setup-env.sh` script creates this file from the `.env.example` template, but you need to update it with your actual credentials.
-
-Important security note: **Never commit your `.env` file to the repository.** It contains sensitive information like API keys and database credentials.
-
-### TTS Configuration
-
-The system supports multiple Text-to-Speech providers with automatic fallback:
-
-#### Multi-Provider Setup
-- **Primary Provider**: ElevenLabs (default) or Deepgram TTS
-- **Fallback Provider**: Automatic fallback to secondary provider on failure
-- **Voice Models**: Support for multiple voice personalities and models
-
-#### Quick TTS Setup
-1. Add API keys to your configuration via the admin interface
-2. Choose your primary TTS provider (ElevenLabs or Deepgram)
-3. Enable automatic fallback for improved reliability
-4. Test your configuration using the built-in verification tools
-
-For detailed TTS configuration, see [DEEPGRAM_TTS.md](./DEEPGRAM_TTS.md).
-
-## Features
-
-### Lead Management
-- CSV import with validation
-- API endpoints for real-time lead ingestion
-- Data validation and integrity
-- Lead segmentation capabilities
-- Comprehensive lead tracking
-
-### Campaign Configuration
-- Campaign setup wizard
-- Script generation system
-- A/B testing framework
-- Template library
-- Compliance checking for Indian telecommunication standards
-
-### Voice AI System
-- Advanced emotion detection with cultural context
-- Multiple voice personalities with adaptation
-- **Multi-provider TTS system** (ElevenLabs + Deepgram TTS) with automatic fallback
-- Bilingual conversation support (English/Hindi)
-- Real-time personality adaptation based on customer emotions
-- Cultural intelligence and communication patterns
-- Natural conversation flow management
-- Comprehensive demo and testing framework
-
-### Telephony Integration
-- Twilio API integration for outbound calling
-- **Dual TTS provider support** (ElevenLabs + Deepgram TTS) with intelligent fallback
-- Call queue management
-- Automatic retry logic
-- Call recording and storage
-
-### Conversation AI Engine
-- Multi-LLM selection system
-- Multi-language support
-- Speech-to-Text processing
-- Intent analysis
-- Objection handling framework
-- Callback scheduling
-- Dynamic conversation flow management
-
-### CRM Dashboard
-- Real-time KPI visualization
-- Role-based access control
-- Customizable widget arrangement
-- Dark/light theme support
-- Comprehensive metrics and analytics
-
-## Technology Stack
-
-### Frontend
-- React.js
-- TypeScript
-- ShadCN UI
-- Chart.js/D3.js for visualizations
-- WebSocket for real-time updates
-
-### Backend
-- Node.js
-- Express.js
-- TypeScript
-- MongoDB
-- In-memory caching
-
-### APIs
-- Twilio for telephony
-- **Multi-provider TTS**: ElevenLabs + Deepgram for voice synthesis with automatic fallback
-- Various LLM APIs (OpenAI, Anthropic, etc.)
-- Speech-to-Text services
-
-### Infrastructure
-- Native Node.js development
-- Local development environment
-- MongoDB database
-- Monitoring and logging
-
-## Getting Started
-
-### Prerequisites
-- Node.js (v18+)
-- MongoDB
-- API keys for Twilio, ElevenLabs, and LLM services
-
-### Installation
-
-#### Development Setup
-1. Clone the repository
-2. Copy the example environment files:
-   ```bash
-   cp server/.env.example server/.env
-   cp client/.env.example client/.env
-   ```
-3. Edit the `.env` files with your API keys and configuration
-4. Run the application using the provided script:
-   ```bash
-   ./run.sh start
-   ```
-   
-#### Method 2: Manual Setup
-1. Clone the repository
-2. Install root dependencies:
-   ```bash
-   npm install
-   ```
-3. Install server dependencies:
-   ```bash
-   cd server
-   npm install
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-4. Install client dependencies:
-   ```bash
-   cd client
-   npm install
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-5. Start development servers:
-   ```bash
-   # From project root
-   npm run start:dev
-   ```
-
-## Project Structure
-```
-lumina-outreach/
-├── client/                  # Frontend React application
-│   ├── public/
-│   └── src/
-│       ├── components/      # UI components
-│       ├── hooks/           # Custom React hooks
-│       ├── layouts/         # Page layouts
-│       ├── pages/           # Application pages
-│       ├── services/        # API service connections
-│       ├── store/           # State management
-│       ├── styles/          # Global styles
-│       └── utils/           # Utility functions
-├── server/                  # Backend Node.js application
-│   ├── src/
-│   │   ├── config/          # Configuration files
-│   │   ├── controllers/     # Route controllers
-│   │   ├── models/          # Database models
-│   │   ├── routes/          # API routes
-│   │   ├── services/        # Business logic
-│   │   ├── types/           # TypeScript types
-│   │   └── utils/           # Utility functions
-│   ├── tests/               # Backend tests
-│   └── tsconfig.json        # TypeScript configuration
-├── shared/                  # Shared TypeScript types
-├── scripts/                 # Development and testing scripts
-├── .env.example             # Example environment variables
-├── .gitignore               # Git ignore file
-├── package.json             # Project configuration
-└── README.md                # Project documentation
+```bash
+git clone https://github.com/dhruv465/Project-Call.git
+cd Project-Call
 ```
 
-## Security and Compliance
-- End-to-end encryption for sensitive data
-- Audit trails for system interactions
-- Compliance monitoring dashboard
-- Rate limiting to prevent abuse
-- Data retention policies aligned with Indian regulations
-- User authentication and authorization
+2) Copy env templates and edit values
 
-## Performance Optimization
-- Connection pooling for database operations
-- CDN integration for static assets
-- Caching strategies
-- Optimized API responses
-- Lazy loading for dashboard components
-- Performance monitoring and alerting
+```bash
+cp server/.env.example server/.env
+cp client/.env.example client/.env
+# edit server/.env and client/.env with your keys and DB URL
+```
+
+3) Install dependencies
+
+```bash
+# from project root
+npm install
+
+# or, install per workspace if preferred
+cd server && npm install && cd ../client && npm install
+```
+
+4) Start servers (dev)
+
+```bash
+# Start backend
+cd server
+npm run dev
+
+# In another terminal: start frontend
+cd client
+npm run dev
+```
+
+If the repo provides helper scripts (e.g. `./run.sh` or `npm run start:dev`), they may combine the above steps.
+
+## What this repo contains (high level)
+
+- client/: React + TypeScript front-end (Vite). Key folders:
+   - src/components, pages, layouts, hooks, services
+- server/: Node.js + TypeScript backend API and services
+   - src/controllers, services, routes, config, models
+- uploads/: storage for recordings/attachments
+- scripts/: dev & maintenance scripts
+
+See the full project layout in the repository root for more details.
+
+## Important configuration notes
+
+- Environment variables: edit `server/.env` and `client/.env` before running. Do not commit .env files.
+- TTS providers: the system supports multiple TTS providers (ElevenLabs, Deepgram). The code contains a multi-provider layer with automatic fallback — configure API keys and preferred provider in `server/.env` or admin UI.
+- Telephony: Twilio integration is the default telephony provider; set Twilio keys in `server/.env`.
+
+## Developer workflows
+
+- Local development: run the backend and frontend in dev mode to get live reloads.
+- Testing: backend tests are under `server/tests`. Run with the repo's configured test script (example):
+
+```bash
+cd server
+npm test
+```
+
+- Lint & typecheck: run TypeScript and lint scripts defined in package.json (root or per-package). Example:
+
+```bash
+npm run build # or npm run lint / npm run typecheck if available
+```
+
+## Architecture & data flow (short)
+
+- Frontend (client) connects to backend via REST and WebSocket for real-time updates.
+- Backend orchestrates campaigns, connects to telephony (Twilio), synthesizes audio via TTS providers, records calls, and logs events.
+- Conversation engine uses LLM/Speech-to-Text integrations to manage call dialog and intent handling.
+
+## Troubleshooting & common checks
+
+- Server fails to start: check `server/.env` for missing keys and MongoDB connection string.
+- Client dev server port conflicts: change Vite port in `client/vite.config.ts` or in `client/package.json` dev script.
+- TTS failures: confirm provider API key, region, and that fallback provider is configured.
+
+Logs:
+- Backend logs appear under `server/logs/` and `server/combined.log` for recent activity.
+
+## Security
+
+- Sensitive keys must be stored in `.env` and never committed.
+- Ensure access control and rate limiting are enabled in production deployments.
+
+## Contributing
+
+- Branching: create feature branches off `main` (e.g., `feat/<short-desc>`).
+- Tests: add unit tests for new server-side logic under `server/tests` and for client components where relevant.
+- PR checklist: add description, link to any related ticket, include tests or screenshots for UI changes.
+
+## Notes for new developers
+
+- Start by running the backend and client locally and exploring the UI pages under `client/src/pages`.
+- Inspect `server/src/controllers` and `server/src/services` to follow request flows (calls, campaigns, leads ingestion).
+- Look for TTS integration code in `server/services` (ElevenLabs/Deepgram adapters) and telephony hooks near `server/services/twilio` or similar.
+
+## Useful commands (zsh)
+
+```bash
+# install deps (root)
+npm install
+
+# start backend (dev)
+cd server && npm run dev
+
+# start frontend (dev)
+cd client && npm run dev
+
+# run server tests
+cd server && npm test
+```
 
 ## License
+
 MIT
+
+---
+Additional docs
+
+- Contributing guide: `CONTRIBUTING.md`
+- Troubleshooting: `TROUBLESHOOTING.md`
+- Quick dev commands: `Makefile` (run `make install`, `make server`, `make client`, `make test`)

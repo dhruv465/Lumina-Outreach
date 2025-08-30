@@ -2,6 +2,24 @@ import http from 'http';
 import { WebSocketServer, WebSocket, RawData } from 'ws';
 import { parse as parseUrl } from 'url';
 
+/**
+ * Dedicated WebSocket server for Twilio Media Streams
+ * Uses native 'ws' library for robust WebSocket framing
+ */
+export class TwilioWebSocketServer {
+  private wss: WebSocket.Server;
+  private activeConnections: Map<string, WebSocket> = new Map();
+  // Voice Agent patterns
+  private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
+  private connectionHealthTimers: Map<string, NodeJS.Timeout> = new Map();
+  private audioChunkBuffers: Map<string, Buffer[]> = new Map();
+  private readonly KEEP_ALIVE_INTERVAL = 15000; // 15 seconds (like Deepgram Voice Agent)
+  private readonly CONNECTION_HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
+  private readonly AUDIO_CHUNK_SIZE = 8192; // 8KB chunks
+  private static readonly OUTBOUND_AUDIO_CHUNK_SIZE = 640; // 640 bytes (~40ms at 8kHz PCM16)
+
+  constructor(server: http.Server) {
+    logger.info("Initializing TwilioWebSocketServer with HTTP server");
 // Extend WebSocket interface to include isAlive property
 interface ExtendedWebSocket extends WebSocket {
   isAlive?: boolean;
@@ -41,6 +59,115 @@ class TwilioWebSocketServer {
     // Use "noServer" mode so we can choose which upgrade requests to accept
     this.wss = new WebSocketServer({
       noServer: true,
+      perMessageDeflate: false, // Disable compression for real-time audio
+      maxPayload: 1024 * 1024, // 1MB max payload
+      clientTracking: true,
+      // Remove handleProtocols to accept upgrades without subprotocol (Twilio compatibility)
+    });
+
+    // Handle upgrade events manually to prevent Express interference
+    server.on("upgrade", (request, socket, head) => {
+      const pathname = url.parse(request.url || "").pathname || "";
+
+      // Handle both with and without .websocket suffix
+      const normalizedPathname = pathname.replace(/\/\.websocket$/, "");
+
+      // Determine whether this upgrade request is targeting a supported Twilio media stream endpoint.
+      // Include legacy paths (optimized-stream/low-latency) as well as the new simplified path (/voice/stream).
+      const isValidPath =
+        normalizedPathname.startsWith("/voice/optimized-stream") ||
+        normalizedPathname.startsWith("/voice/low-latency") ||
+        normalizedPathname.startsWith("/voice/stream") || // simplified streaming path
+        normalizedPathname.startsWith("/stream") ||
+        pathname.includes(".websocket") ||
+        pathname.includes("project-call-stream");
+
+      // Verify WebSocket upgrade headers
+      const hasValidHeaders =
+        request.headers.upgrade === "websocket" &&
+        request.headers.connection &&
+        request.headers.connection.toLowerCase().includes("upgrade");
+
+      logger.info("WebSocket upgrade request intercepted", {
+        url: request.url,
+        pathname,
+        normalizedPathname,
+        isValidPath,
+        hasValidHeaders,
+        userAgent: request.headers["user-agent"],
+        upgradeHeader: request.headers.upgrade,
+        connectionHeader: request.headers.connection,
+      });
+
+      // Only handle Twilio-specific paths, let other WebSocket connections (like Socket.IO) pass through
+      if (isValidPath && hasValidHeaders) {
+        // Handle the upgrade for Twilio WebSocket connections
+        this.wss.handleUpgrade(request, socket, head, (ws) => {
+          this.wss.emit("connection", ws, request);
+        });
+      } else if (isValidPath) {
+        // Reject only if it's a Twilio path but with invalid headers
+        logger.warn(
+          "Rejecting WebSocket upgrade for invalid headers on Twilio path",
+          {
+            pathname,
+            isValidPath,
+            hasValidHeaders,
+          }
+        );
+        socket.destroy();
+      }
+      // For non-Twilio paths (like Socket.IO), let them be handled by other servers
+      // No action needed - the request will continue to other handlers
+    });
+
+    this.setupEventHandlers();
+    logger.info("Twilio WebSocket server initialized", {
+      serverCreated: !!this.wss,
+      mode: "noServer",
+    });
+  }
+
+
+  private setupTwilioMessageHandler(
+    ws: WebSocket,
+    callId: string,
+    conversationId: string
+  ) {
+    ws.on("message", (data: WebSocket.Data) => {
+      try {
+        const message = JSON.parse(data.toString());
+
+        if (message.event === "connected") {
+          logger.info("Twilio Media Stream connected", {
+            callId,
+            conversationId,
+            streamSid: message.streamSid,
+          });
+          // Initialize sequence number on connect, but don't assign streamSid until "start"
+          (ws as any).sequenceNumber = 0;
+        } else if (message.event === "start") {
+          const streamSid = message.start?.streamSid || message.streamSid;
+          logger.info("Twilio Media Stream started", {
+            callId,
+            conversationId,
+            streamSid: streamSid,
+          });
+          // Only assign streamSid on "start" event, not "connected"
+          (ws as any).streamSid = streamSid;
+          if (typeof (ws as any).sequenceNumber !== 'number') {
+            (ws as any).sequenceNumber = 0;
+          }
+        } else if (message.event === "media") {
+          // Handle incoming audio data with chunking (inspired by Deepgram Voice Agent)
+          const audioPayload = message.media?.payload;
+          if (audioPayload) {
+            this.handleAudioChunk(
+              callId,
+              conversationId,
+              audioPayload,
+              message.media?.timestamp
+            );
       // Twilio sends 'audio' subprotocol
       handleProtocols: (protocols) => {
         // Handle both Set and Array formats
@@ -239,6 +366,81 @@ class TwilioWebSocketServer {
                 error: err?.message, 
                 callId, 
                 conversationId,
+                connectionKey,
+              }
+            );
+            existingConnection.close(1000, "Replaced by new connection");
+            this.activeConnections.delete(connectionKey);
+          }
+
+          // Store the new connection
+          this.activeConnections.set(connectionKey, ws);
+
+          // Initialize audio chunk buffer for this connection
+          this.audioChunkBuffers.set(connectionKey, []);
+
+          // Check if this is a Twilio /voice/* socket to avoid protocol violations
+          const userAgent = req.headers["user-agent"] || "";
+          const isTwilioSocket = userAgent.startsWith("Twilio.TmeWs") || cleanPathname.startsWith("/voice");
+
+          // Set up keep-alive and connection health monitoring (inspired by Deepgram Voice Agent)
+          this.setupConnectionKeepAlive(connectionKey, ws);
+          this.setupConnectionHealthCheck(connectionKey, ws);
+
+          // Log successful connection establishment
+          logger.info(
+            "Establishing WebSocket connection for Twilio Media Stream",
+            {
+              callId,
+              conversationId,
+              url: req.url,
+              userAgent: req.headers["user-agent"],
+              connectionKey,
+              activeConnections: this.activeConnections.size,
+              isTwilioSocket,
+            }
+          );
+
+          // Guard: Do NOT invoke handleRealTimeMediaStream on Twilio /voice/* sockets
+          // to prevent sending non-Twilio frames which violates Twilio Media Streams protocol
+          if (!isTwilioSocket) {
+            // Handle the enhanced real-time media stream with new services
+            const { handleRealTimeMediaStream } = await import(
+              "../controllers/enhancedRealTimeController"
+            );
+            handleRealTimeMediaStream(ws, mockReq as Request);
+          } else {
+            logger.info("Skipping handleRealTimeMediaStream for Twilio socket to prevent protocol violations", {
+              callId,
+              userAgent,
+              path: cleanPathname
+            });
+          }
+
+
+          // Set up Twilio-specific message handler
+          this.setupTwilioMessageHandler(ws, callId, conversationId);
+
+          // Set up ping/pong to keep connection alive for Twilio
+          const pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.ping();
+              logger.debug(
+                `Ping sent to keep WebSocket connection alive for call ${callId}`
+              );
+            } else {
+              clearInterval(pingInterval);
+            }
+          }, 15000); // Send ping every 15 seconds
+
+          // Store the interval for cleanup
+          (ws as any).pingInterval = pingInterval;
+
+          // Clean up interval when connection closes
+          ws.on("close", (code, reason) => {
+            if (pingInterval) {
+              clearInterval(pingInterval);
+
                 rawData: data.toString('utf8').substring(0, 200)
               });
             }
@@ -353,6 +555,46 @@ class TwilioWebSocketServer {
     }
   }
 
+  /**
+   * Send media in safe chunks to avoid fragmentation
+   */
+  private sendMediaChunks(ws: WebSocket, streamSid: string, audioData: Buffer): void {
+    // Guard: Ensure streamSid exists and socket is OPEN before sending frames
+    if (!streamSid) {
+      logger.warn('Cannot send media chunks: streamSid is missing');
+      return;
+    }
+    
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      logger.warn('Cannot send media chunks: WebSocket is not open', {
+        readyState: ws?.readyState,
+        streamSid
+      });
+      return;
+    }
+
+    const sock: any = ws as any;
+    if (typeof sock.sequenceNumber !== 'number') sock.sequenceNumber = 0;
+    let offset = 0;
+    while (offset < audioData.length) {
+      const end = Math.min(offset + TwilioWebSocketServer.OUTBOUND_AUDIO_CHUNK_SIZE, audioData.length);
+      const slice = audioData.slice(offset, end);
+      const message = {
+        event: 'media',
+        streamSid,
+        media: {
+          track: 'outbound',
+          chunk: (++sock.sequenceNumber).toString(),
+          timestamp: Date.now().toString(),
+          payload: slice.toString('base64'),
+        },
+      };
+      if (ws.readyState !== WebSocket.OPEN) {
+        logger.warn('WebSocket closed while sending media chunks');
+        break;
+      }
+      ws.send(JSON.stringify(message));
+      offset = end;
   /** Cleanup method to stop heartbeat and close connections */
   public cleanup() {
     if (this.heartbeatInterval) {

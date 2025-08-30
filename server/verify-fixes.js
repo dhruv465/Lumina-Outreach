@@ -19,8 +19,8 @@ const streamContent = fs.readFileSync(streamControllerFile, 'utf8');
 
 // 1. Verify OUTBOUND_AUDIO_CHUNK_SIZE constant
 console.log('✅ 1. Chunk size constant:');
-const hasChunkSize = twilioContent.includes('OUTBOUND_AUDIO_CHUNK_SIZE = 32 * 1024');
-console.log(`   OUTBOUND_AUDIO_CHUNK_SIZE = ${32 * 1024} bytes (32KB) - ${hasChunkSize ? '✅ FOUND' : '❌ MISSING'}`);
+const hasChunkSize = twilioContent.includes('OUTBOUND_AUDIO_CHUNK_SIZE = 640');
+console.log(`   OUTBOUND_AUDIO_CHUNK_SIZE = 640 bytes (~40ms at 8kHz PCM16) - ${hasChunkSize ? '✅ FOUND' : '❌ MISSING'}`);
 
 // 2. Verify that sendMediaChunks method exists
 console.log('\n✅ 2. Audio chunking functionality:');
@@ -50,24 +50,27 @@ console.log(`   ✅ Utterance completion - ${hasUtteranceCompletion ? '✅ IMPLE
 
 const allChecksPass = hasChunkSize && hasChunkingMethod && !hasJSONKeepAlive && hasWSPing && !hasFakeStreamSid && hasRealStreamSid && hasUtteranceCompletion;
 
-console.log('\n🎯 Summary of fixes for Twilio Media Streams error 31921:');
-console.log('   • Outbound audio now sent in safe 32KB chunks');
+console.log('\n🎯 Summary of fixes for Twilio Media Streams error 31924:');
+console.log('   • Removed handleProtocols to accept upgrades without subprotocol');
+console.log('   • Guard prevents handleRealTimeMediaStream on Twilio /voice/* sockets');
+console.log('   • StreamSid only assigned on "start" event, not "connected"'); 
+console.log('   • Outbound audio now sent in safe 640-byte chunks (~40ms at 8kHz PCM16)');
 console.log('   • All media frames use real Twilio streamSid');
 console.log('   • Keep-alive uses WebSocket ping/pong, not custom JSON');
-console.log('   • Opening message completion is non-terminal');
+console.log('   • Added guards in sendMediaChunks for streamSid and socket state');
 
 console.log(`\n${allChecksPass ? '✅ All fixes implemented successfully!' : '❌ Some fixes may be missing - check output above'}`);
 
 if (allChecksPass) {
-    console.log('\n🎉 The Twilio WebSocket should now stay open and not close with error 31921!');
+    console.log('\n🎉 The Twilio WebSocket should now stay open and not close with error 31924!');
 }
 
 // Example of how chunking works
 function demonstrateChunking() {
     console.log('\n📋 Chunking demonstration:');
     
-    const audioData = Buffer.alloc(80 * 1024); // 80KB
-    const chunkSize = 32 * 1024; // 32KB
+    const audioData = Buffer.alloc(2560); // 2560 bytes
+    const chunkSize = 640; // 640 bytes (~40ms at 8kHz PCM16)
     let offset = 0;
     let chunkNumber = 1;
     

@@ -202,11 +202,12 @@ export class TwilioWebSocketServer {
         let conversationId: string | undefined;
 
         if (pathParts.length >= 4) {
-          // Format: /voice/optimized-stream/callId/conversationId or /voice/low-latency/callId/conversationId
+          // Format: /voice/optimized-stream/callId/conversationId, /voice/low-latency/callId/conversationId, or /voice/stream/callId/conversationId
           if (
             pathParts[0] === "voice" &&
             (pathParts[1] === "optimized-stream" ||
-              pathParts[1] === "low-latency")
+              pathParts[1] === "low-latency" ||
+              pathParts[1] === "stream")
           ) {
             callId = pathParts[2];
             conversationId = pathParts[3];
@@ -803,9 +804,13 @@ export class TwilioWebSocketServer {
       // Get TTS provider configuration
       const selectedTTSProvider = config.ttsConfig?.provider || "elevenlabs";
 
+      // Check if the selected provider has the required API key configuration
+      const isElevenLabsConfigured = !!(config.elevenLabsConfig?.apiKey);
+      const isDeepgramConfigured = !!(config.ttsConfig?.deepgramTTS?.apiKey);
+
       if (
         selectedTTSProvider === "elevenlabs" &&
-        config.elevenLabsConfig?.isEnabled
+        isElevenLabsConfigured
       ) {
         // Use ElevenLabs for synthesis
         const { EnhancedVoiceAIService } = await import(
@@ -826,7 +831,7 @@ export class TwilioWebSocketServer {
         }
       } else if (
         selectedTTSProvider === "deepgram" &&
-        config.ttsConfig?.deepgramTTS?.isEnabled
+        isDeepgramConfigured
       ) {
         // Use Deepgram TTS
         const { synthesizeSpeechWithProvider } = await import(
@@ -878,9 +883,64 @@ export class TwilioWebSocketServer {
           });
         }
       } else {
-        logger.warn(
-          `TTS provider ${selectedTTSProvider} not configured or available for call ${callId}`
-        );
+        // Selected provider not configured, try fallback logic
+        let fallbackUsed = false;
+        
+        if (!fallbackUsed && selectedTTSProvider !== "elevenlabs" && isElevenLabsConfigured) {
+          // Try ElevenLabs as fallback
+          try {
+            logger.info(`${selectedTTSProvider} not configured for call ${callId}, falling back to ElevenLabs`);
+            const { EnhancedVoiceAIService } = await import("./enhancedVoiceAIService");
+            const voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
+            const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
+              text: responseText,
+              personalityId: voiceId,
+              language: session.language === "Hindi" ? "hi" : "en",
+            });
+
+            if (speechResponse?.audioContent) {
+              this.sendAudioToCall(callId, speechResponse.audioContent);
+              logger.info(`Sent ElevenLabs fallback audio response for call ${callId}`);
+              fallbackUsed = true;
+            }
+          } catch (fallbackError) {
+            logger.warn(`ElevenLabs fallback failed for call ${callId}:`, fallbackError);
+          }
+        }
+        
+        if (!fallbackUsed && selectedTTSProvider !== "deepgram" && isDeepgramConfigured) {
+          // Try Deepgram as fallback
+          try {
+            logger.info(`${selectedTTSProvider} not configured for call ${callId}, falling back to Deepgram`);
+            const { synthesizeSpeechWithProvider } = await import("../utils/ttsServiceFactory");
+            const speechResponse = await synthesizeSpeechWithProvider(
+              config,
+              responseText,
+              "aura-2-thalia-en", // Use default Deepgram voice
+              session.language === "Hindi" ? "hi" : "en",
+              { encoding: "linear16", sampleRate: 8000 }
+            );
+
+            if (speechResponse?.audioContent) {
+              this.sendAudioToCall(callId, speechResponse.audioContent);
+              logger.info(`Sent Deepgram fallback audio response for call ${callId}`);
+              fallbackUsed = true;
+            }
+          } catch (fallbackError) {
+            logger.warn(`Deepgram fallback failed for call ${callId}:`, fallbackError);
+          }
+        }
+        
+        if (!fallbackUsed) {
+          logger.warn(
+            `TTS provider ${selectedTTSProvider} not configured and no fallback available for call ${callId}`,
+            {
+              selectedProvider: selectedTTSProvider,
+              elevenLabsConfigured: isElevenLabsConfigured,
+              deepgramConfigured: isDeepgramConfigured
+            }
+          );
+        }
       }
     } catch (error) {
       logger.error(

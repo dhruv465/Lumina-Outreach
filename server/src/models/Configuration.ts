@@ -34,6 +34,7 @@ export interface IConfiguration extends mongoose.Document {
       status: string;
     };
     useFlashModel?: boolean; // Whether to use the Flash v2.5 model
+    isSelectedVoiceExplicit?: boolean;
   };
   ragConfig?: {
     embeddingModel: string;
@@ -89,6 +90,11 @@ export interface IConfiguration extends mongoose.Document {
     primaryProvider: string;
     fallbackProviders: string[];
     autoFallback: boolean;
+    selectedVoicesByProvider?: {
+      elevenlabs?: string;
+      deepgram?: string;
+    };
+    useSelectedFallbackVoice?: boolean;
     deepgramTTS?: {
       apiKey: string;
       isEnabled: boolean;
@@ -101,6 +107,7 @@ export interface IConfiguration extends mongoose.Document {
       lastVerified?: Date | null;
       status?: 'unverified' | 'verified' | 'failed';
       lastError?: string;
+      isSelectedModelExplicit?: boolean;
     };
   };
   voiceAIConfig: {
@@ -352,6 +359,10 @@ const ConfigurationSchema = new mongoose.Schema(
         type: Boolean,
         default: true,
       },
+      isSelectedVoiceExplicit: {
+        type: Boolean,
+        default: false,
+      },
     },
     deepgramConfig: {
       apiKey: {
@@ -472,6 +483,20 @@ const ConfigurationSchema = new mongoose.Schema(
         type: Boolean,
         default: true,
       },
+      selectedVoicesByProvider: {
+        elevenlabs: {
+          type: String,
+          required: false,
+        },
+        deepgram: {
+          type: String,
+          required: false,
+        },
+      },
+      useSelectedFallbackVoice: {
+        type: Boolean,
+        default: true,
+      },
       deepgramTTS: {
         apiKey: {
           type: String,
@@ -525,6 +550,10 @@ const ConfigurationSchema = new mongoose.Schema(
         },
         lastError: {
           type: String,
+        },
+        isSelectedModelExplicit: {
+          type: Boolean,
+          default: false,
         },
       },
     },

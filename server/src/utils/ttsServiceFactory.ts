@@ -58,33 +58,7 @@ export async function synthesizeSpeechWithProvider(
   options?: { encoding?: string; sampleRate?: number; model?: string }
 ): Promise<{ audioContent: Buffer | null; method: 'tts' | 'fallback' }> {
   try {
-    // Auto-detect provider based on voice ID if it looks like a Deepgram model
-    let selectedProvider = configuration?.ttsConfig?.provider || 'elevenlabs';
-    
-    if (voiceId) {
-      const deepgramModels = [
-        'aura-2-thalia-en',
-        'aura-asteria-en',
-        'aura-luna-en',
-        'aura-stella-en',
-        'aura-athena-en',
-        'aura-hera-en',
-        'aura-orion-en',
-        'aura-arcas-en',
-        'aura-perseus-en',
-        'aura-angus-en',
-        'aura-orpheus-en',
-        'aura-helios-en',
-        'aura-zeus-en'
-      ];
-      
-      // Only override provider if voice ID is explicitly a Deepgram model
-      if (deepgramModels.includes(voiceId)) {
-        selectedProvider = 'deepgram';
-        logger.info(`Auto-detected Deepgram provider based on voice ID: ${voiceId}`);
-      }
-      // For non-Deepgram voices, keep the configured provider
-    }
+    const selectedProvider = configuration?.ttsConfig?.provider || 'elevenlabs';
     
     logger.info(`Synthesizing speech with provider: ${selectedProvider}, voice: ${voiceId}`);
     
@@ -92,7 +66,7 @@ export async function synthesizeSpeechWithProvider(
     const ttsProviderService = new TTSProviderService();
     const response = await ttsProviderService.synthesizeSpeech({
       text,
-      voiceId: voiceId || (selectedProvider === 'deepgram' ? 'aura-2-thalia-en' : 'XvRdSQXvmv5jHPGBw0XU'),
+      voiceId,
       model: options?.model,
       language,
       encoding: options?.encoding,
@@ -113,30 +87,7 @@ export async function synthesizeSpeechWithProvider(
  * Check if the selected TTS provider is properly configured
  */
 export function isTTSProviderConfigured(configuration: any, voiceId?: string): boolean {
-  let selectedProvider = configuration?.ttsConfig?.provider || 'elevenlabs';
-  
-  // Auto-detect provider based on voice ID if it looks like a Deepgram model
-  if (voiceId) {
-    const deepgramModels = [
-      'aura-2-thalia-en',
-      'aura-asteria-en',
-      'aura-luna-en',
-      'aura-stella-en',
-      'aura-athena-en',
-      'aura-hera-en',
-      'aura-orion-en',
-      'aura-arcas-en',
-      'aura-perseus-en',
-      'aura-angus-en',
-      'aura-orpheus-en',
-      'aura-helios-en',
-      'aura-zeus-en'
-    ];
-    
-    if (deepgramModels.includes(voiceId)) {
-      selectedProvider = 'deepgram';
-    }
-  }
+  const selectedProvider = configuration?.ttsConfig?.provider || 'elevenlabs';
   
   switch (selectedProvider) {
     case 'elevenlabs':

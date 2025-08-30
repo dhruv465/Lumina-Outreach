@@ -41,7 +41,15 @@ router.get('/config', async (req, res) => {
  */
 router.post('/config', async (req, res) => {
   try {
-    const { provider, primaryProvider, fallbackProviders, autoFallback, deepgramTTS } = req.body;
+    const { 
+      provider, 
+      primaryProvider, 
+      fallbackProviders, 
+      autoFallback, 
+      deepgramTTS, 
+      selectedVoicesByProvider, 
+      useSelectedFallbackVoice 
+    } = req.body;
 
     if (!provider && !primaryProvider) {
       return res.status(400).json({
@@ -56,7 +64,9 @@ router.post('/config', async (req, res) => {
       primaryProvider: primaryProvider || provider,
       fallbackProviders: fallbackProviders || ['deepgram'],
       autoFallback: autoFallback !== undefined ? autoFallback : true,
-      ...(deepgramTTS && { deepgramTTS })
+      ...(deepgramTTS && { deepgramTTS }),
+      ...(selectedVoicesByProvider && { selectedVoicesByProvider }),
+      ...(useSelectedFallbackVoice !== undefined && { useSelectedFallbackVoice })
     };
 
     await ttsService.updateTTSConfig(newConfig);
@@ -64,7 +74,9 @@ router.post('/config', async (req, res) => {
     logger.info('TTS provider configuration updated', {
       provider: newConfig.provider,
       primaryProvider: newConfig.primaryProvider,
-      fallbackProviders: newConfig.fallbackProviders
+      fallbackProviders: newConfig.fallbackProviders,
+      selectedVoicesByProvider: newConfig.selectedVoicesByProvider,
+      useSelectedFallbackVoice: newConfig.useSelectedFallbackVoice
     });
 
     res.json({

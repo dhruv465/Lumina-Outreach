@@ -24,7 +24,19 @@ NODE_ENV=development npm run dev
 - Confirm API keys in `server/.env` for ElevenLabs/Deepgram/Twilio.
 - Check provider-specific error messages in backend logs; many TTS errors are permission/quota related.
 
-4) Tests failing locally
+4) ASR (Speech-to-Text) configuration
+
+- Ensure ASR provider API key is configured in `server/.env`. Currently supported: Deepgram.
+- Required environment variables:
+  ```bash
+  DEEPGRAM_API_KEY=your_deepgram_api_key_here
+  ```
+- If ASR is misconfigured, the system can speak but not listen, breaking bidirectional call functionality.
+- Check system configuration status via the configuration UI or health endpoints.
+- Verify Deepgram account has sufficient credits and API access permissions.
+- Error symptoms: WebSocket sessions close immediately with "Speech recognition not configured" message.
+
+5) Tests failing locally
 
 - Ensure node modules are installed for the package containing tests (root vs server/client).
 - Run tests with increased verbosity to see stack traces: `cd server && npm test -- --runInBand`.

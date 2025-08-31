@@ -8,6 +8,7 @@ export interface ConfigurationStatus {
   telephonyConfigured: boolean;
   voiceConfigured: boolean;
   llmConfigured: boolean;
+  asrConfigured: boolean;
   overallConfigured: boolean;
   details: {
     twilioAccountSid: boolean;
@@ -15,6 +16,7 @@ export interface ConfigurationStatus {
     twilioPhoneNumber: boolean;
     elevenLabsApiKey: boolean;
     llmApiKey: boolean;
+    asrApiKey: boolean;
   };
 }
 
@@ -34,15 +36,23 @@ export async function checkTelephonyConfiguration(): Promise<ConfigurationStatus
     const llmProvider = config.llmConfig?.providers?.find((p: any) => p.name === config.llmConfig?.defaultProvider);
     const llmApiKey = !!(llmProvider?.apiKey && !llmProvider.apiKey.includes('••••'));
     
+    // Check ASR configuration (support both asrConfig.apiKey and deepgramConfig.apiKey)
+    const asrApiKey = !!(
+      (config.asrConfig?.apiKey && !config.asrConfig.apiKey.includes('••••')) ||
+      (config.deepgramConfig?.apiKey && !config.deepgramConfig.apiKey.includes('••••'))
+    );
+    
     const telephonyConfigured = twilioAccountSid && twilioAuthToken && twilioPhoneNumber;
     const voiceConfigured = elevenLabsApiKey;
     const llmConfigured = llmApiKey;
-    const overallConfigured = telephonyConfigured && voiceConfigured && llmConfigured;
+    const asrConfigured = asrApiKey;
+    const overallConfigured = telephonyConfigured && voiceConfigured && llmConfigured && asrConfigured;
     
     return {
       telephonyConfigured,
       voiceConfigured,
       llmConfigured,
+      asrConfigured,
       overallConfigured,
       details: {
         twilioAccountSid,
@@ -50,6 +60,7 @@ export async function checkTelephonyConfiguration(): Promise<ConfigurationStatus
         twilioPhoneNumber,
         elevenLabsApiKey,
         llmApiKey,
+        asrApiKey,
       }
     };
   } catch (error) {
@@ -58,6 +69,7 @@ export async function checkTelephonyConfiguration(): Promise<ConfigurationStatus
       telephonyConfigured: false,
       voiceConfigured: false,
       llmConfigured: false,
+      asrConfigured: false,
       overallConfigured: false,
       details: {
         twilioAccountSid: false,
@@ -65,6 +77,7 @@ export async function checkTelephonyConfiguration(): Promise<ConfigurationStatus
         twilioPhoneNumber: false,
         elevenLabsApiKey: false,
         llmApiKey: false,
+        asrApiKey: false,
       }
     };
   }

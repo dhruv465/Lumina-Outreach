@@ -7,6 +7,7 @@ import twilio from 'twilio';
 import { EventEmitter } from 'events';
 import { TwilioCallStatus, CallData, TelephonyServiceInterface } from '../types/telephony';
 import logger, { getErrorMessage } from '../utils/logger';
+import { isTwilioCallSid } from '../utils/twilioUtils';
 
 export class RealTelephonyService implements TelephonyServiceInterface {
   private client: twilio.Twilio;
@@ -89,7 +90,8 @@ export class RealTelephonyService implements TelephonyServiceInterface {
         from,
         status: call.status as TwilioCallStatus,
         startTime: new Date().toISOString(),
-        recordings: []
+        recordings: [],
+        twilioCallSid: call.sid // Store the real Twilio CallSid for health checks
       });
 
       // Set up keep-alive and connection health monitoring (inspired by Deepgram Voice Agent)
@@ -211,7 +213,8 @@ export class RealTelephonyService implements TelephonyServiceInterface {
           id: callId,
           status,
           startTime: new Date().toISOString(),
-          recordings: []
+          recordings: [],
+          twilioCallSid: isTwilioCallSid(callId) ? callId : undefined // Store CallSid if valid
         });
       } else {
         logger.warn(`Received status update for unknown call: ${callId}`);
@@ -439,12 +442,20 @@ export class RealTelephonyService implements TelephonyServiceInterface {
     try {
       // For real calls, check Twilio call status
       if (!callData.isFallback && !this.fallbackMode) {
-        const twilioCall = await this.client.calls(callId).fetch();
+        // Prefer stored Twilio CallSid, fallback to callId if it's a valid CallSid
+        const twilioCallSid = callData.twilioCallSid || (isTwilioCallSid(callId) ? callId : null);
         
-        // Update local status if different
-        if (twilioCall.status !== callData.status) {
-          logger.info(`Call ${callId} status updated from health check: ${callData.status} -> ${twilioCall.status}`);
-          this.handleCallStatusChange(callId, twilioCall.status as TwilioCallStatus);
+        if (twilioCallSid) {
+          const twilioCall = await this.client.calls(twilioCallSid).fetch();
+          
+          // Update local status if different
+          if (twilioCall.status !== callData.status) {
+            logger.info(`Call ${callId} status updated from health check: ${callData.status} -> ${twilioCall.status}`);
+            this.handleCallStatusChange(callId, twilioCall.status as TwilioCallStatus);
+          }
+        } else {
+          // Skip Twilio fetch if no valid CallSid available
+          logger.debug(`Skipping Twilio health check for call ${callId} - no valid CallSid available`);
         }
       }
 
@@ -605,6 +616,9 @@ export class RealTelephonyService implements TelephonyServiceInterface {
       try {
         // Ping the Twilio API by listing a resource
         await this.client.calls.list({limit: 1});
+        
+        // Note: ASR configuration status should be checked separately by advancedTelephonyService
+        // for complete system readiness assessment
         return { status: 'healthy' };
       } catch (error) {
         logger.error(`Twilio API check failed: ${getErrorMessage(error)}`);

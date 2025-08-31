@@ -501,6 +501,18 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
       return;
     }
     
+    // Check if ASR is properly configured (required for bidirectional functionality)
+    const isASRConfigured = !!(
+      config?.asrConfig?.apiKey || 
+      config?.deepgramConfig?.apiKey
+    );
+    
+    if (!isASRConfigured) {
+      logger.error('ASR (speech-to-text) not configured for streaming session');
+      ws.close(1008, 'Speech recognition not configured');
+      return;
+    }
+    
     // Both ElevenLabs and Deepgram support streaming
     if (selectedTTSProvider !== 'elevenlabs' && selectedTTSProvider !== 'deepgram') {
       logger.error(`Streaming not yet supported for TTS provider: ${selectedTTSProvider}`);

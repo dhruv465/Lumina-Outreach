@@ -789,7 +789,8 @@ export class AdvancedTelephonyService {
   }> {
     const checks = {
       twilio: false,
-      configuration: false
+      configuration: false,
+      asr: false
     };
 
     try {
@@ -804,6 +805,14 @@ export class AdvancedTelephonyService {
 
     // Check configuration status
     checks.configuration = this.configuration !== null;
+    
+    // Check ASR configuration status
+    if (this.configuration) {
+      checks.asr = !!(
+        this.configuration.asrConfig?.apiKey ||
+        this.configuration.deepgramConfig?.apiKey
+      );
+    }
 
     const healthyChecks = Object.values(checks).filter(Boolean).length;
     const totalChecks = Object.keys(checks).length;

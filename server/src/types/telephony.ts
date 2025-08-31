@@ -35,6 +35,7 @@ export interface CallData {
   transcript?: string;
   analysis?: any;
   isFallback?: boolean;
+  twilioCallSid?: string; // Real Twilio CallSid (CA...) for API calls
 }
 
 // Interface for telephony events

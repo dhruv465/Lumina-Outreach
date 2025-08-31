@@ -212,8 +212,35 @@ export const getSystemConfiguration = async (_req: Request, res: Response) => {
         intentDetection: {
           closingPhrases: ["goodbye", "bye", "end call", "hang up", "that's all"],
           objectionPhrases: ["not interested", "don't need", "too expensive", "not right now"]
+        },
+        deepgramConfig: {
+          apiKey: process.env.DEEPGRAM_API_KEY || '',
+          isEnabled: !!process.env.DEEPGRAM_API_KEY,
+          primaryModel: 'nova-2',
+          fallbackModels: ['nova', 'base'],
+          autoFallback: true,
+          tier: 'enhanced',
+          retryAttempts: 3,
+          timeoutMs: 30000,
+          status: process.env.DEEPGRAM_API_KEY ? 'unverified' : 'unverified'
         }
       });
+    }
+
+    // Ensure deepgramConfig exists and has environment variable fallback
+    if (!configuration.deepgramConfig) {
+      configuration.deepgramConfig = {
+        apiKey: process.env.DEEPGRAM_API_KEY || '',
+        isEnabled: !!process.env.DEEPGRAM_API_KEY,
+        primaryModel: 'nova-2',
+        fallbackModels: ['nova', 'base'],
+        autoFallback: true,
+        tier: 'enhanced',
+        retryAttempts: 3,
+        timeoutMs: 30000,
+        status: process.env.DEEPGRAM_API_KEY ? 'unverified' : 'unverified'
+      };
+      await configuration.save();
     }
 
     // Remove sensitive information before sending to client

@@ -24,17 +24,32 @@ NODE_ENV=development npm run dev
 - Confirm API keys in `server/.env` for ElevenLabs/Deepgram/Twilio.
 - Check provider-specific error messages in backend logs; many TTS errors are permission/quota related.
 
-4) ASR (Speech-to-Text) configuration
+## ASR (Speech-to-Text): Deepgram
 
-- Ensure ASR provider API key is configured in `server/.env`. Currently supported: Deepgram.
-- Required environment variables:
+### Required Configuration
+- Configure Deepgram API key in `server/.env`:
   ```bash
   DEEPGRAM_API_KEY=your_deepgram_api_key_here
   ```
-- If ASR is misconfigured, the system can speak but not listen, breaking bidirectional call functionality.
-- Check system configuration status via the configuration UI or health endpoints.
-- Verify Deepgram account has sufficient credits and API access permissions.
-- Error symptoms: WebSocket sessions close immediately with "Speech recognition not configured" message.
+- Alternatively, configure via the web UI under Configuration → ASR Settings
+
+### Common Error Symptoms
+- **No transcripts appearing**: User speaks but no text appears in conversation logs
+- **Agent never responds to user**: System can speak but cannot listen, causing one-way communication
+- **WebSocket sessions close immediately**: Error message "ASR not configured: Deepgram API key missing"
+- **Calls connect but hang silently**: Missing bidirectional functionality
+
+### Quick Verification Steps
+1. Check configuration status via web UI Configuration page
+2. Verify Deepgram account has sufficient credits at [Deepgram Console](https://console.deepgram.com/)
+3. Test API key validity via Configuration → ASR Settings → Test Connection
+4. Check server logs for ASR-related errors during call setup
+5. Verify health endpoint shows `asr: true` at `/api/health`
+
+### Account Requirements
+- Active Deepgram account with API access
+- Sufficient credit balance for transcription usage
+- API key with appropriate permissions for speech-to-text operations
 
 5) Tests failing locally
 

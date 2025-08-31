@@ -8,6 +8,7 @@ import { EventEmitter } from 'events';
 import { TwilioCallStatus, CallData, TelephonyServiceInterface } from '../types/telephony';
 import logger, { getErrorMessage } from '../utils/logger';
 import { isTwilioCallSid } from '../utils/twilioUtils';
+import Configuration from '../models/Configuration';
 
 export class RealTelephonyService implements TelephonyServiceInterface {
   private client: twilio.Twilio;
@@ -617,8 +618,26 @@ export class RealTelephonyService implements TelephonyServiceInterface {
         // Ping the Twilio API by listing a resource
         await this.client.calls.list({limit: 1});
         
-        // Note: ASR configuration status should be checked separately by advancedTelephonyService
-        // for complete system readiness assessment
+        // Check ASR configuration status for informational purposes
+        try {
+          const config = await Configuration.findOne();
+          const isASRConfigured = !!(
+            config?.asrConfig?.apiKey ||
+            config?.deepgramConfig?.apiKey ||
+            process.env.DEEPGRAM_API_KEY
+          );
+          
+          if (!isASRConfigured) {
+            return {
+              status: 'degraded',
+              message: 'ASR configuration missing (Deepgram)'
+            };
+          }
+        } catch (error) {
+          logger.warn('Unable to check ASR configuration in realTelephonyService:', getErrorMessage(error));
+          // Don't change status for configuration check failures
+        }
+        
         return { status: 'healthy' };
       } catch (error) {
         logger.error(`Twilio API check failed: ${getErrorMessage(error)}`);

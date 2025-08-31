@@ -31,7 +31,18 @@ export async function checkTelephonyConfiguration(): Promise<ConfigurationStatus
     const twilioAuthToken = !!(config.twilioConfig?.authToken && !config.twilioConfig.authToken.includes('••••'));
     const twilioPhoneNumber = !!(config.twilioConfig?.phoneNumbers?.[0]);
     
-    const elevenLabsApiKey = !!(config.elevenLabsConfig?.apiKey && !config.elevenLabsConfig.apiKey.includes('••••'));
+    // Determine voice configuration based on selected TTS provider
+    const selectedTTSProvider = config.ttsConfig?.provider || 'elevenlabs';
+    let voiceConfigured = false;
+    
+    if (selectedTTSProvider === 'elevenlabs') {
+      voiceConfigured = !!(config.elevenLabsConfig?.isEnabled && config.elevenLabsConfig?.apiKey && !config.elevenLabsConfig.apiKey.includes('••••'));
+    } else if (selectedTTSProvider === 'deepgram') {
+      voiceConfigured = !!(config.ttsConfig?.deepgramTTS?.isEnabled && config.ttsConfig?.deepgramTTS?.apiKey && !config.ttsConfig.deepgramTTS.apiKey.includes('••••'));
+    } else {
+      // For other providers, fall back to ElevenLabs check for backward compatibility
+      voiceConfigured = !!(config.elevenLabsConfig?.apiKey && !config.elevenLabsConfig.apiKey.includes('••••'));
+    }
     
     const llmProvider = config.llmConfig?.providers?.find((p: any) => p.name === config.llmConfig?.defaultProvider);
     const llmApiKey = !!(llmProvider?.apiKey && !llmProvider.apiKey.includes('••••'));
@@ -43,7 +54,6 @@ export async function checkTelephonyConfiguration(): Promise<ConfigurationStatus
     );
     
     const telephonyConfigured = twilioAccountSid && twilioAuthToken && twilioPhoneNumber;
-    const voiceConfigured = elevenLabsApiKey;
     const llmConfigured = llmApiKey;
     const asrConfigured = asrApiKey;
     const overallConfigured = telephonyConfigured && voiceConfigured && llmConfigured && asrConfigured;
@@ -58,7 +68,7 @@ export async function checkTelephonyConfiguration(): Promise<ConfigurationStatus
         twilioAccountSid,
         twilioAuthToken,
         twilioPhoneNumber,
-        elevenLabsApiKey,
+        elevenLabsApiKey: selectedTTSProvider === 'elevenlabs' ? voiceConfigured : !!(config.elevenLabsConfig?.apiKey && !config.elevenLabsConfig.apiKey.includes('••••')),
         llmApiKey,
         asrApiKey,
       }

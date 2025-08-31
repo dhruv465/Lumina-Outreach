@@ -75,6 +75,22 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
     
     // Get system configuration
     config = await Configuration.findOne();
+    
+    // Check if ASR is properly configured (required for bidirectional functionality)
+    const isASRConfigured = !!(
+      config?.asrConfig?.apiKey || 
+      config?.deepgramConfig?.apiKey
+    );
+    
+    if (!isASRConfigured) {
+      logger.error('Speech recognition not configured for streaming session', {
+        callId,
+        conversationId
+      });
+      ws.close(1008, 'Speech recognition not configured');
+      return;
+    }
+    
     // Check if TTS is properly configured based on selected provider
     const selectedTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
     const isTTSConfigured = selectedTTSProvider === 'elevenlabs' 

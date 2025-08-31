@@ -22,6 +22,7 @@ wsRouter.ws('/voice/conversational-ai', handleConversationalAIStream);
 // wsRouter.ws('/voice/optimized-stream/:callId/:conversationId', handleOptimizedVoiceStream);
 
 // Handle Twilio stream webhook (keep this for backward compatibility)
+// Legacy route - consider migrating to dedicated TwilioWebSocketServer
 wsRouter.ws('/stream', handleTwilioStreamWebhook);
 
 export default router;

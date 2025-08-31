@@ -508,8 +508,11 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
     );
     
     if (!isASRConfigured) {
-      logger.error('ASR (speech-to-text) not configured for streaming session');
-      ws.close(1008, 'Speech recognition not configured');
+      logger.error('ASR (speech-to-text) not configured for streaming session', {
+        callId,
+        conversationId
+      });
+      ws.close(1008, 'ASR not configured: Deepgram API key missing');
       return;
     }
     

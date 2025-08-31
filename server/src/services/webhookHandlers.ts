@@ -926,6 +926,12 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
  * Processes real-time audio streams from the call
  */
 export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
+      // Log warning about legacy route usage
+      logger.info('Legacy Twilio /stream route in use; dedicated TwilioWebSocketServer is recommended', {
+        url: req.url,
+        userAgent: req.headers['user-agent']
+      });
+      
       let callId: string | undefined;
       let conversationId: string | undefined;
       let streamSid: string | undefined;

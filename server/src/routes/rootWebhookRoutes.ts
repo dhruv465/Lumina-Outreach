@@ -17,13 +17,27 @@ const router = express.Router();
 router.post('/', async (req, res) => {
   const webhookType = req.query.webhookType as string || '';
   
-  // Log incoming webhook for debugging
-  console.log(`Received webhook at root path with type: ${webhookType}`, {
-    body: req.body,
-    query: req.query,
+  // Log incoming webhook for debugging - sanitized to avoid PII exposure
+  const sanitizedLogData = {
+    webhookType,
     path: req.path,
-    url: req.url
-  });
+    url: req.url,
+    query: req.query,
+    // Include only non-sensitive metadata from body
+    metadata: {
+      CallSid: req.body.CallSid,
+      CallStatus: req.body.CallStatus,
+      AnsweredBy: req.body.AnsweredBy,
+      Direction: req.body.Direction,
+      // Mask phone numbers for privacy
+      From: req.body.From ? req.body.From.replace(/(\+1)(\d{3})(\d{3})(\d{4})/, '$1$2***$4') : undefined,
+      To: req.body.To ? req.body.To.replace(/(\+1)(\d{3})(\d{3})(\d{4})/, '$1$2***$4') : undefined,
+      Level: req.body.Level,
+      AccountSid: req.body.AccountSid
+    }
+  };
+  
+  console.log(`Received webhook at root path with type: ${webhookType}`, sanitizedLogData);
 
   // Check for Twilio system notifications first
   if (req.body.Level && req.body.Payload && req.body.AccountSid) {

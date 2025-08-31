@@ -160,10 +160,27 @@ export class RealTelephonyService implements TelephonyServiceInterface {
         throw new Error('Telephony service is in fallback mode');
       }
       
-      // End the call via Twilio
-      await this.client.calls(callId).update({ status: 'completed' });
+      // Determine which Twilio SID to use for the API call
+      let twilioSid: string | null = null;
       
-      logger.info(`Call ended: ${callId}`);
+      if (isTwilioCallSid(callId)) {
+        // If callId is already a valid Twilio CallSid, use it directly
+        twilioSid = callId;
+      } else if (callData.twilioCallSid) {
+        // Otherwise, use the stored Twilio CallSid if available
+        twilioSid = callData.twilioCallSid;
+      }
+      
+      if (twilioSid) {
+        // End the call via Twilio using the real CallSid
+        await this.client.calls(twilioSid).update({ status: 'completed' });
+        logger.info(`Call ended: ${callId} (Twilio SID: ${twilioSid})`);
+      } else {
+        // No valid Twilio CallSid available, skip Twilio API call and simulate local completion
+        logger.info(`No valid Twilio CallSid available for call ${callId}, marking as completed locally`);
+        this.handleCallStatusChange(callId, 'completed');
+      }
+      
       return true;
     } catch (error) {
       logger.error(`Error ending call ${callId}: ${getErrorMessage(error)}`, { error });

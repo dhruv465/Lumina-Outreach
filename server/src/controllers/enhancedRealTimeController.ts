@@ -91,6 +91,22 @@ export const handleRealTimeMediaStream = async (ws: WebSocket, req: Request): Pr
 
     // Get configuration to determine TTS provider
     const config = await Configuration.findOne();
+    
+    // Check if ASR is properly configured (required for bidirectional functionality)
+    const isASRConfigured = !!(
+      config?.asrConfig?.apiKey || 
+      config?.deepgramConfig?.apiKey
+    );
+    
+    if (!isASRConfigured) {
+      logger.error('Speech recognition not configured for streaming session', {
+        callId,
+        conversationId
+      });
+      ws.close(1008, 'Speech recognition not configured');
+      return;
+    }
+    
     const configuredTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
     
     // Ensure the TTS provider is compatible with optimized audio pipeline

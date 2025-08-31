@@ -639,7 +639,6 @@ export class RealTelephonyService implements TelephonyServiceInterface {
         try {
           const config = await Configuration.findOne();
           const isASRConfigured = !!(
-            config?.asrConfig?.apiKey ||
             config?.deepgramConfig?.apiKey ||
             process.env.DEEPGRAM_API_KEY
           );

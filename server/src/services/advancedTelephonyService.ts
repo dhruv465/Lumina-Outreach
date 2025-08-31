@@ -809,7 +809,6 @@ export class AdvancedTelephonyService {
     // Check ASR configuration status
     if (this.configuration) {
       checks.asr = !!(
-        this.configuration.asrConfig?.apiKey ||
         this.configuration.deepgramConfig?.apiKey
       );
     }

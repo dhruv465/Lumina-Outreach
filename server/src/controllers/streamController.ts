@@ -78,7 +78,6 @@ export const handleVoiceStream = async (ws: WebSocket, req: Request): Promise<vo
     
     // Check if ASR is properly configured (required for bidirectional functionality)
     const isASRConfigured = !!(
-      config?.asrConfig?.apiKey || 
       config?.deepgramConfig?.apiKey
     );
     

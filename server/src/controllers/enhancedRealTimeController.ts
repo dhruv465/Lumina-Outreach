@@ -94,7 +94,6 @@ export const handleRealTimeMediaStream = async (ws: WebSocket, req: Request): Pr
     
     // Check if ASR is properly configured (required for bidirectional functionality)
     const isASRConfigured = !!(
-      config?.asrConfig?.apiKey || 
       config?.deepgramConfig?.apiKey
     );
     

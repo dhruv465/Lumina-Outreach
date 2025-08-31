@@ -37,6 +37,10 @@ interface DeepgramTTSConnectionData {
   apiKey: string;
 }
 
+interface DeepgramConnectionData {
+  apiKey: string;
+}
+
 interface VoiceSynthesisTestData {
   voiceId: string;
   text: string;
@@ -174,6 +178,12 @@ export const configApi = {
   // Test Deepgram TTS connection
   testDeepgramTTSConnection: async (connectionData: DeepgramTTSConnectionData) => {
     const response = await api.post('/configuration/test-deepgram-tts', connectionData);
+    return response.data;
+  },
+  
+  // Test Deepgram STT connection
+  testDeepgramConnection: async (connectionData: DeepgramConnectionData) => {
+    const response = await api.post('/configuration/test-deepgram', connectionData);
     return response.data;
   },
 

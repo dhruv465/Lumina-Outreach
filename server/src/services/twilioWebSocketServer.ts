@@ -1,25 +1,11 @@
 import http from 'http';
 import { WebSocketServer, WebSocket, RawData } from 'ws';
 import { parse as parseUrl } from 'url';
+import url from 'url';
+import { Request } from 'express';
+import { ParamsDictionary } from 'express-serve-static-core';
+import { ParsedQs } from 'qs';
 
-/**
- * Dedicated WebSocket server for Twilio Media Streams
- * Uses native 'ws' library for robust WebSocket framing
- */
-export class TwilioWebSocketServer {
-  private wss: WebSocket.Server;
-  private activeConnections: Map<string, WebSocket> = new Map();
-  // Voice Agent patterns
-  private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
-  private connectionHealthTimers: Map<string, NodeJS.Timeout> = new Map();
-  private audioChunkBuffers: Map<string, Buffer[]> = new Map();
-  private readonly KEEP_ALIVE_INTERVAL = 15000; // 15 seconds (like Deepgram Voice Agent)
-  private readonly CONNECTION_HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
-  private readonly AUDIO_CHUNK_SIZE = 8192; // 8KB chunks
-  private static readonly OUTBOUND_AUDIO_CHUNK_SIZE = 640; // 640 bytes (~40ms at 8kHz PCM16)
-
-  constructor(server: http.Server) {
-    logger.info("Initializing TwilioWebSocketServer with HTTP server");
 // Extend WebSocket interface to include isAlive property
 interface ExtendedWebSocket extends WebSocket {
   isAlive?: boolean;
@@ -43,26 +29,41 @@ const logger = {
   debug: (msg: string, meta?: any) => console.debug(`debug: ${msg}`, meta ?? ""),
 };
 
-class TwilioWebSocketServer {
+/**
+ * Dedicated WebSocket server for Twilio Media Streams
+ * Uses native 'ws' library for robust WebSocket framing
+ */
+export class TwilioWebSocketServer {
   private readonly wss: WebSocketServer;
   private readonly active: Map<string, ConnectionState> = new Map();
   private readonly pathPrefix: string = '/voice/stream';
   private heartbeatInterval?: NodeJS.Timeout;
+  private activeConnections: Map<string, WebSocket> = new Map();
+  private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
+  private connectionHealthTimers: Map<string, NodeJS.Timeout> = new Map();
+  private audioChunkBuffers: Map<string, Buffer[]> = new Map();
 
   // Optional feature flag to allow bi-directional outbound audio
   private readonly enableBidi: boolean = process.env.ENABLE_TWILIO_BIDI === 'true';
 
+  // Constants for intervals and sizes
+  private readonly KEEP_ALIVE_INTERVAL = 15000; // 15 seconds (like Deepgram Voice Agent)
+  private readonly CONNECTION_HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
+  private readonly AUDIO_CHUNK_SIZE = 8192; // 8KB chunks
+  
   // For Twilio Media Streams, outbound audio must be 8kHz PCMU (µ-law), ~20ms frames (160 samples)
   public static readonly OUTBOUND_SAMPLES_PER_FRAME = 160;
+  public static readonly OUTBOUND_AUDIO_CHUNK_SIZE = 640; // 640 bytes (~40ms at 8kHz PCM16)
 
   constructor(private readonly server: http.Server) {
+    logger.info("Initializing TwilioWebSocketServer with HTTP server");
+    
     // Use "noServer" mode so we can choose which upgrade requests to accept
     this.wss = new WebSocketServer({
       noServer: true,
       perMessageDeflate: false, // Disable compression for real-time audio
       maxPayload: 1024 * 1024, // 1MB max payload
       clientTracking: true,
-      // Remove handleProtocols to accept upgrades without subprotocol (Twilio compatibility)
     });
 
     // Handle upgrade events manually to prevent Express interference
@@ -126,82 +127,14 @@ class TwilioWebSocketServer {
       serverCreated: !!this.wss,
       mode: "noServer",
     });
-  }
-
-
-  private setupTwilioMessageHandler(
-    ws: WebSocket,
-    callId: string,
-    conversationId: string
-  ) {
-    ws.on("message", (data: WebSocket.Data) => {
-      try {
-        const message = JSON.parse(data.toString());
-
-        if (message.event === "connected") {
-          logger.info("Twilio Media Stream connected", {
-            callId,
-            conversationId,
-            streamSid: message.streamSid,
-          });
-          // Initialize sequence number on connect, but don't assign streamSid until "start"
-          (ws as any).sequenceNumber = 0;
-        } else if (message.event === "start") {
-          const streamSid = message.start?.streamSid || message.streamSid;
-          logger.info("Twilio Media Stream started", {
-            callId,
-            conversationId,
-            streamSid: streamSid,
-          });
-          // Only assign streamSid on "start" event, not "connected"
-          (ws as any).streamSid = streamSid;
-          if (typeof (ws as any).sequenceNumber !== 'number') {
-            (ws as any).sequenceNumber = 0;
-          }
-        } else if (message.event === "media") {
-          // Handle incoming audio data with chunking (inspired by Deepgram Voice Agent)
-          const audioPayload = message.media?.payload;
-          if (audioPayload) {
-            this.handleAudioChunk(
-              callId,
-              conversationId,
-              audioPayload,
-              message.media?.timestamp
-            );
-      // Twilio sends 'audio' subprotocol
-      handleProtocols: (protocols) => {
-        // Handle both Set and Array formats
-        let offered: string[] = [];
-        try {
-          if (Array.isArray(protocols)) {
-            offered = protocols;
-          } else if (protocols && typeof protocols[Symbol.iterator] === 'function') {
-            offered = Array.from(protocols);
-          } else if (protocols && typeof (protocols as any).forEach === 'function') {
-            const tmp: string[] = [];
-            (protocols as any).forEach((p: string) => tmp.push(p));
-            offered = tmp;
-          }
-        } catch (err) {
-          logger.warn('Error handling WebSocket protocols', { error: err });
-          return false;
-        }
-        
-        // Prefer 'audio' protocol for Twilio Media Streams
-        if (offered.includes('audio')) return 'audio';
-        
-        // Accept any protocol if no 'audio' is offered
-        return offered.length > 0 ? offered[0] : false;
-      },
-    });
-
+    
     // Bind to HTTP upgrade
     this.server.on('upgrade', (request, socket, head) => {
       try {
         const upgradeHeader = (request.headers['upgrade'] || '').toString().toLowerCase();
         const connectionHeader = (request.headers['connection'] || '').toString().toLowerCase();
-        const url = request.url || '/';
-        const { pathname } = parseUrl(url);
+        const urlPath = request.url || '/';
+        const { pathname } = parseUrl(urlPath);
 
         const isWs = upgradeHeader === 'websocket' && connectionHeader.includes('upgrade');
         const isValidPath = !!pathname && pathname.startsWith(this.pathPrefix);
@@ -209,7 +142,7 @@ class TwilioWebSocketServer {
         logger.info('WebSocket upgrade request intercepted', {
           upgradeHeader,
           connectionHeader,
-          url,
+          url: urlPath,
           pathname,
           isValidPath,
         });
@@ -238,7 +171,7 @@ class TwilioWebSocketServer {
 
         this.wss.handleUpgrade(request, socket, head, (ws) => {
           // Build connection state first
-          const key = `${callId}:${conversationId}`;
+          const connectionKey = `${callId}:${conversationId}`;
           const state: ConnectionState = {
             callId,
             conversationId,
@@ -247,7 +180,11 @@ class TwilioWebSocketServer {
             gotConnected: false,
             gotStart: false,
           };
-          this.active.set(key, state);
+          this.active.set(connectionKey, state);
+          this.activeConnections.set(connectionKey, ws);
+
+          // Initialize audio chunk buffer for this connection
+          this.audioChunkBuffers.set(connectionKey, []);
 
           // Wrap ws.send so we gate all server->Twilio sends until 'start'
           const originalSend = ws.send.bind(ws) as any;
@@ -351,6 +288,17 @@ class TwilioWebSocketServer {
                   conversationId, 
                   payloadLength: msg?.media?.payload?.length || 0 
                 });
+                
+                // Handle audio data
+                const audioPayload = msg.media?.payload;
+                if (audioPayload) {
+                  this.handleAudioChunk(
+                    callId,
+                    conversationId,
+                    audioPayload,
+                    msg.media?.timestamp
+                  );
+                }
               } else if (ev === 'mark') {
                 // optional marker
                 logger.debug('Received mark event', { callId, conversationId, mark: msg?.mark });
@@ -366,81 +314,6 @@ class TwilioWebSocketServer {
                 error: err?.message, 
                 callId, 
                 conversationId,
-                connectionKey,
-              }
-            );
-            existingConnection.close(1000, "Replaced by new connection");
-            this.activeConnections.delete(connectionKey);
-          }
-
-          // Store the new connection
-          this.activeConnections.set(connectionKey, ws);
-
-          // Initialize audio chunk buffer for this connection
-          this.audioChunkBuffers.set(connectionKey, []);
-
-          // Check if this is a Twilio /voice/* socket to avoid protocol violations
-          const userAgent = req.headers["user-agent"] || "";
-          const isTwilioSocket = userAgent.startsWith("Twilio.TmeWs") || cleanPathname.startsWith("/voice");
-
-          // Set up keep-alive and connection health monitoring (inspired by Deepgram Voice Agent)
-          this.setupConnectionKeepAlive(connectionKey, ws);
-          this.setupConnectionHealthCheck(connectionKey, ws);
-
-          // Log successful connection establishment
-          logger.info(
-            "Establishing WebSocket connection for Twilio Media Stream",
-            {
-              callId,
-              conversationId,
-              url: req.url,
-              userAgent: req.headers["user-agent"],
-              connectionKey,
-              activeConnections: this.activeConnections.size,
-              isTwilioSocket,
-            }
-          );
-
-          // Guard: Do NOT invoke handleRealTimeMediaStream on Twilio /voice/* sockets
-          // to prevent sending non-Twilio frames which violates Twilio Media Streams protocol
-          if (!isTwilioSocket) {
-            // Handle the enhanced real-time media stream with new services
-            const { handleRealTimeMediaStream } = await import(
-              "../controllers/enhancedRealTimeController"
-            );
-            handleRealTimeMediaStream(ws, mockReq as Request);
-          } else {
-            logger.info("Skipping handleRealTimeMediaStream for Twilio socket to prevent protocol violations", {
-              callId,
-              userAgent,
-              path: cleanPathname
-            });
-          }
-
-
-          // Set up Twilio-specific message handler
-          this.setupTwilioMessageHandler(ws, callId, conversationId);
-
-          // Set up ping/pong to keep connection alive for Twilio
-          const pingInterval = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.ping();
-              logger.debug(
-                `Ping sent to keep WebSocket connection alive for call ${callId}`
-              );
-            } else {
-              clearInterval(pingInterval);
-            }
-          }, 15000); // Send ping every 15 seconds
-
-          // Store the interval for cleanup
-          (ws as any).pingInterval = pingInterval;
-
-          // Clean up interval when connection closes
-          ws.on("close", (code, reason) => {
-            if (pingInterval) {
-              clearInterval(pingInterval);
-
                 rawData: data.toString('utf8').substring(0, 200)
               });
             }
@@ -454,7 +327,7 @@ class TwilioWebSocketServer {
               code,
               reason: reasonStr,
               connectionDuration: duration,
-              connectionKey: key,
+              connectionKey,
               callId,
               conversationId,
               gotConnected: state.gotConnected,
@@ -479,7 +352,9 @@ class TwilioWebSocketServer {
               });
             }
             
-            this.active.delete(key);
+            this.active.delete(connectionKey);
+            this.activeConnections.delete(connectionKey);
+            this.audioChunkBuffers.delete(connectionKey);
           });
 
           ws.on('error', (err: any) => {
@@ -490,9 +365,10 @@ class TwilioWebSocketServer {
               error: err
             });
           });
-
-          // Emit the connection event to the WebSocket server
-          this.wss.emit('connection', ws, request);
+          
+          // Set up keep-alive and connection health monitoring
+          this.setupConnectionKeepAlive(connectionKey, ws);
+          this.setupConnectionHealthCheck(connectionKey, ws);
           
           // Send a small keepalive to ensure connection stays open
           setTimeout(() => {
@@ -530,8 +406,86 @@ class TwilioWebSocketServer {
     logger.info('Twilio WebSocket server initialized', { mode: 'noServer', serverCreated: true });
   }
 
+  private setupEventHandlers(): void {
+    this.wss.on('connection', (ws, request) => {
+      // Default handlers can go here
+    });
+  }
+
+  private handleAudioChunk(callId: string, conversationId: string, base64Payload: string, timestamp?: string): void {
+    // Handle incoming audio chunks
+    const connectionKey = `${callId}:${conversationId}`;
+    const existingConnection = this.activeConnections.get(connectionKey);
+    
+    if (!existingConnection) {
+      logger.warn('Received audio chunk for unknown connection', { connectionKey });
+      return;
+    }
+
+    // Implementation for audio chunk handling
+    try {
+      const audioData = Buffer.from(base64Payload, 'base64');
+      // Process audio data here
+    } catch (error) {
+      logger.error('Error processing audio chunk', { error, callId, conversationId });
+    }
+  }
+
+  private setupConnectionKeepAlive(connectionKey: string, ws: WebSocket): void {
+    // Clear any existing keep-alive timer
+    if (this.keepAliveTimers.has(connectionKey)) {
+      clearInterval(this.keepAliveTimers.get(connectionKey));
+    }
+
+    // Set up new keep-alive timer
+    const keepAliveTimer = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.ping();
+          logger.debug(`Sent keep-alive ping for ${connectionKey}`);
+        } catch (error) {
+          logger.error(`Failed to send keep-alive ping for ${connectionKey}`, { error });
+        }
+      } else {
+        // Stop the timer if the connection is closed
+        clearInterval(keepAliveTimer);
+        this.keepAliveTimers.delete(connectionKey);
+        logger.debug(`Stopped keep-alive timer for closed connection ${connectionKey}`);
+      }
+    }, this.KEEP_ALIVE_INTERVAL);
+
+    this.keepAliveTimers.set(connectionKey, keepAliveTimer);
+  }
+
+  private setupConnectionHealthCheck(connectionKey: string, ws: WebSocket): void {
+    // Clear any existing health check timer
+    if (this.connectionHealthTimers.has(connectionKey)) {
+      clearInterval(this.connectionHealthTimers.get(connectionKey));
+    }
+
+    // Set up new health check timer
+    const healthCheckTimer = setInterval(() => {
+      try {
+        if (ws.readyState !== WebSocket.OPEN) {
+          logger.warn(`Connection ${connectionKey} health check failed, socket state: ${ws.readyState}`);
+          clearInterval(healthCheckTimer);
+          this.connectionHealthTimers.delete(connectionKey);
+        }
+      } catch (error) {
+        logger.error(`Error in health check for ${connectionKey}`, { error });
+      }
+    }, this.CONNECTION_HEALTH_CHECK_INTERVAL);
+
+    this.connectionHealthTimers.set(connectionKey, healthCheckTimer);
+  }
+
+  // Helper function to clean a pathname
+  private cleanPathname(pathname: string): string {
+    return pathname.replace(/\/\.websocket$/, "");
+  }
+
   /** Optional helper to send an outbound PCMU frame (base64) after start */
-  public sendUlawFrame(callId: string, conversationId: string, base64Ulaw: string) {
+  public sendUlawFrame(callId: string, conversationId: string, base64Ulaw: string): void {
     if (!this.enableBidi) {
       logger.warn('Outbound media streaming disabled by configuration (ENABLE_TWILIO_BIDI!=true).');
       return;
@@ -576,6 +530,7 @@ class TwilioWebSocketServer {
     const sock: any = ws as any;
     if (typeof sock.sequenceNumber !== 'number') sock.sequenceNumber = 0;
     let offset = 0;
+    
     while (offset < audioData.length) {
       const end = Math.min(offset + TwilioWebSocketServer.OUTBOUND_AUDIO_CHUNK_SIZE, audioData.length);
       const slice = audioData.slice(offset, end);
@@ -589,14 +544,19 @@ class TwilioWebSocketServer {
           payload: slice.toString('base64'),
         },
       };
+      
       if (ws.readyState !== WebSocket.OPEN) {
         logger.warn('WebSocket closed while sending media chunks');
         break;
       }
+      
       ws.send(JSON.stringify(message));
       offset = end;
+    }
+  }
+
   /** Cleanup method to stop heartbeat and close connections */
-  public cleanup() {
+  public cleanup(): void {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = undefined;
@@ -620,6 +580,4 @@ export function initializeTwilioWebSocketServer(server: http.Server): TwilioWebS
   return new TwilioWebSocketServer(server);
 }
 
-// Export the class as well for direct usage
-export { TwilioWebSocketServer };
 export default TwilioWebSocketServer;

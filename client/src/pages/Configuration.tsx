@@ -2415,6 +2415,88 @@ Keep the conversation natural and engaging. If they're not interested, politely 
             Deepgram Nova-2 provides higher accuracy and lower latency than
             OpenAI Whisper for speech recognition.
           </div>
+          
+          <div className="mt-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                try {
+                  if (!config.deepgramApiKey) {
+                    toast({
+                      title: "API Key Required",
+                      description: "Please enter a valid Deepgram API key before testing.",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  
+                  toast({
+                    title: "Testing Deepgram STT",
+                    description: "Please wait while we verify your Speech-to-Text configuration...",
+                  });
+                  
+                  const response = await configApi.testDeepgramConnection({
+                    apiKey: config.deepgramApiKey
+                  });
+                  
+                  if (response.success) {
+                    toast({
+                      title: "Deepgram STT Test Successful",
+                      description: "Your Speech-to-Text configuration is working correctly.",
+                      variant: "default",
+                    });
+                    
+                    // Update status to verified on successful test
+                    setConfig((prev) => ({
+                      ...prev,
+                      deepgramStatus: "verified",
+                    }));
+                  } else {
+                    toast({
+                      title: "Deepgram STT Test Failed",
+                      description: response.message || "Failed to connect to Deepgram STT service.",
+                      variant: "destructive",
+                    });
+                    
+                    // Update status to failed
+                    setConfig((prev) => ({
+                      ...prev,
+                      deepgramStatus: "failed",
+                    }));
+                  }
+                } catch (error: any) {
+                  console.error("Deepgram STT test error:", error);
+                  
+                  // Check for rate limit errors (429)
+                  const is429Error = error.response?.status === 429 || 
+                    error.message?.includes("429") || 
+                    error.message?.toLowerCase().includes("rate limit");
+                  
+                  toast({
+                    title: "STT Test Failed",
+                    description: is429Error 
+                      ? "Rate limit exceeded. Please try again later." 
+                      : error.message || "An error occurred during the STT test.",
+                    variant: "destructive",
+                  });
+                  
+                  // Update status to failed
+                  setConfig((prev) => ({
+                    ...prev,
+                    deepgramStatus: "failed",
+                  }));
+                }
+              }}
+              className="w-full"
+            >
+              <Mic className="h-4 w-4 mr-2" />
+              Test STT Configuration
+            </Button>
+            <div className="text-xs text-muted-foreground mt-2 text-center">
+              Test your Deepgram Speech-to-Text configuration
+            </div>
+          </div>
         </CardContent>
       </Card>
 

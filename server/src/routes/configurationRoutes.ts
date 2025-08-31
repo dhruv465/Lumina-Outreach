@@ -21,6 +21,7 @@ import {
   validateCompleteDeepgramConfiguration,
   batchTestDeepgramModels
 } from '../controllers/configurationController';
+import { testDeepgramASRConnection } from '../controllers/testDeepgramASRConnection';
 import { testLLMChat, testLLMConnection, getAllLLMModels, getProviderLLMModels, getDynamicProviderModels } from '../controllers/llmControllers';
 import { 
   testModelCompatibility,
@@ -63,6 +64,7 @@ router.post('/test-llm-chat', testLLMChat);
 router.post('/test-twilio', testTwilioConnection);
 router.post('/test-elevenlabs', testElevenLabsConnection);
 router.post('/test-deepgram-tts', testDeepgramTTSConnection);
+router.post('/test-deepgram', testDeepgramASRConnection);
 router.post('/test-voice', testVoiceSynthesis);
 router.post('/test-call', makeTestCall);
 router.post('/verify/elevenlabs', verifyElevenLabsApiKey);

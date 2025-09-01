@@ -20,7 +20,12 @@ async function checkASRConfiguration(): Promise<{
   try {
     const config = await Configuration.findOne();
     
-    if (!config || !config.deepgramConfig?.apiKey) {
+    // Check for API key in both new asrConfig and legacy deepgramConfig locations
+    // Use type assertion to avoid TypeScript errors with potentially undefined properties
+    const configAny = config as any;
+    const apiKey = (configAny?.asrConfig?.apiKey || config?.deepgramConfig?.apiKey);
+    
+    if (!config || !apiKey) {
       return {
         configured: false,
         message: 'Deepgram API key not configured. Please configure your Deepgram API key in the Configuration page to enable Speech-to-Text functionality.'
@@ -36,9 +41,12 @@ async function checkASRConfiguration(): Promise<{
       };
     }
 
+    // Return the config from either asrConfig or deepgramConfig
+    const configToReturn = configAny.asrConfig || config.deepgramConfig;
+
     return {
       configured: true,
-      config: config.deepgramConfig
+      config: configToReturn
     };
   } catch (error) {
     logger.error('Error checking ASR configuration:', getErrorMessage(error));
@@ -137,13 +145,43 @@ export async function testSTT(req: Request, res: Response): Promise<void> {
     // Get Deepgram service
     const deepgramService = getDeepgramService();
     if (!deepgramService) {
-      res.status(500).json({
-        success: false,
-        testId,
-        asrConfigured: false,
-        message: 'Deepgram STT service not available'
-      });
-      return;
+      // Try to initialize it with the API key from configuration
+      const dbConfig = await Configuration.findOne();
+      const configAny = dbConfig as any;
+      const apiKey = configAny?.asrConfig?.apiKey || dbConfig?.deepgramConfig?.apiKey;
+      
+      if (apiKey) {
+        try {
+          // Initialize the service with the API key
+          const { initializeDeepgramService } = await import('../services/deepgramService');
+          initializeDeepgramService(apiKey);
+          
+          // Try again to get the service
+          const initializedService = getDeepgramService();
+          if (!initializedService) {
+            throw new Error('Failed to initialize Deepgram service');
+          }
+          
+          logger.info('Deepgram service initialized for STT test');
+        } catch (initError) {
+          logger.error(`Failed to initialize Deepgram service: ${getErrorMessage(initError)}`);
+          res.status(500).json({
+            success: false,
+            testId,
+            asrConfigured: false,
+            message: 'Failed to initialize Deepgram STT service'
+          });
+          return;
+        }
+      } else {
+        res.status(500).json({
+          success: false,
+          testId,
+          asrConfigured: false,
+          message: 'Deepgram STT service not available'
+        });
+        return;
+      }
     }
 
     logger.info('Starting STT transcription', { 

@@ -51,9 +51,26 @@ function createTestWAVBuffer(): Buffer {
  */
 export async function testDeepgramASRConnection(req: Request, res: Response) {
   const startTime = Date.now();
+  // Define timeout ID at the function scope level
+  let timeoutId: NodeJS.Timeout;
 
   try {
     logger.info('Testing Deepgram ASR connectivity');
+    
+    // Set a timeout for the request (5 seconds)
+    timeoutId = setTimeout(() => {
+      logger.warn('Deepgram ASR connectivity test timed out after 5 seconds');
+      res.status(504).json({
+        success: false,
+        message: 'ASR connectivity test timed out after 5 seconds',
+        latencyMs: Date.now() - startTime
+      });
+    }, 5000);
+
+    // Set up special error handling for this test endpoint
+    process.on('unhandledRejection', (reason) => {
+      logger.error(`Unhandled rejection in Deepgram test: ${getErrorMessage(reason)}`);
+    });
 
     // Read configuration and verify ASR is configured
     const config = await Configuration.findOne();
@@ -76,13 +93,28 @@ export async function testDeepgramASRConnection(req: Request, res: Response) {
     }
 
     // Initialize service via existing getDeepgramService()
-    const deepgramService = getDeepgramService();
+    let deepgramService = getDeepgramService();
     
+    // If service is not initialized, try to initialize it now with the API key
     if (!deepgramService) {
-      return res.status(500).json({
-        success: false,
-        message: 'Deepgram ASR service not initialized. Please check your configuration and restart the service.'
-      });
+      try {
+        const { initializeDeepgramService } = await import('../services/deepgramService');
+        initializeDeepgramService(asrApiKey);
+        deepgramService = getDeepgramService();
+        
+        // If still not initialized, return error
+        if (!deepgramService) {
+          throw new Error('Failed to initialize Deepgram service with the provided API key');
+        }
+        
+        logger.info('Deepgram service initialized dynamically for ASR test');
+      } catch (initError) {
+        logger.error(`Failed to initialize Deepgram service: ${getErrorMessage(initError)}`);
+        return res.status(500).json({
+          success: false,
+          message: 'Deepgram ASR service could not be initialized. Please check your configuration and restart the service.'
+        });
+      }
     }
 
     // Generate a short in-memory silent WAV buffer
@@ -102,30 +134,88 @@ export async function testDeepgramASRConnection(req: Request, res: Response) {
       language
     });
 
+    // Log the raw response structure for debugging purposes
+    logger.debug('Raw Deepgram transcription result:', 
+      typeof transcriptionResult === 'object' 
+        ? JSON.stringify(transcriptionResult, null, 2) 
+        : transcriptionResult
+    );
+
     // Measure latency
     const latencyMs = Date.now() - startTime;
 
-    // Extract transcript from result
-    const transcript = transcriptionResult.transcript || '';
+    // Extract transcript from result, with more robust null/undefined checks
+    let transcript = '';
+    let responseStructure = 'Unknown';
+    
+    if (!transcriptionResult) {
+      // Instead of throwing an error, handle the null result case
+      logger.warn('Empty transcription result returned from Deepgram service. This might be expected for a silent test file.');
+      responseStructure = 'Empty result';
+    } else if (typeof transcriptionResult === 'string') {
+      // Handle string response
+      transcript = transcriptionResult;
+      responseStructure = 'String response';
+      logger.debug('Received string transcription result:', transcript);
+    } else if (typeof transcriptionResult !== 'object') {
+      // Handle unexpected type
+      logger.warn(`Unexpected transcription result type: ${typeof transcriptionResult}`);
+      responseStructure = `Unexpected type: ${typeof transcriptionResult}`;
+    } else {
+      // For object responses, log the raw structure
+      logger.debug('Raw transcription result structure:',  
+        JSON.stringify(transcriptionResult, null, 2));
+      responseStructure = 'Object response';
+      
+      // Check if result structure contains transcript directly or needs to be extracted from nested properties
+      if (transcriptionResult.transcript !== undefined) {
+        // Direct transcript property exists
+        transcript = transcriptionResult.transcript || '';
+        responseStructure = 'Direct transcript property';
+      } else if (transcriptionResult.result?.results?.channels) {
+        // Extract from nested structure similar to the deepgramService.ts implementation
+        const channels = transcriptionResult.result.results.channels;
+        const result = channels && channels.length > 0 && channels[0].alternatives && channels[0].alternatives.length > 0 
+          ? channels[0].alternatives[0] 
+          : null;
+        
+        transcript = result?.transcript || '';
+        responseStructure = 'Nested channels structure';
+      } else {
+        // Could not determine the structure
+        logger.debug('Could not extract transcript from result structure:', 
+          JSON.stringify(transcriptionResult));
+        responseStructure = 'Unknown structure';
+      }
+    }
 
     logger.info('Deepgram ASR connectivity test completed successfully', {
       latencyMs,
       model,
       language,
-      transcriptLength: transcript.length
+      transcriptLength: transcript.length,
+      hasTranscript: transcript.length > 0
     });
 
+    // Clear the timeout since we've got a response
+    clearTimeout(timeoutId);
+    
     // Return success response with specified format
+    // Even if transcript is empty, consider it a success if we got a response from the service
     res.status(200).json({
       success: true,
       message: 'ASR reachable',
       transcript,
       model,
       language,
-      latencyMs
+      latencyMs,
+      responseStructure
     });
 
   } catch (error: any) {
+    // Clear the timeout if we caught an error
+    clearTimeout(timeoutId);
+    
     const latencyMs = Date.now() - startTime;
     const errorMessage = getErrorMessage(error);
 

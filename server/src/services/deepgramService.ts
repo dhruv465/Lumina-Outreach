@@ -544,7 +544,7 @@ export class DeepgramService extends EventEmitter {
             : null;
             
           const transcriptionResult = {
-            transcript: result?.transcript || '',
+            transcript: result?.transcript || '', // Always ensure transcript is at least an empty string
             confidence: result?.confidence || 0,
             words: result?.words || [],
             language: transcriptionOptions.language,

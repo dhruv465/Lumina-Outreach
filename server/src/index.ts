@@ -348,7 +348,6 @@ app.use("/api/deepgram-metrics", (req, res) => {
 app.use("/api/deepgram", deepgramTestRoutes); // Deepgram testing routes
 app.use("/api/deepgram-tts", deepgramTTSRoutes); // Deepgram TTS routes
 app.use("/api/stt", sttRoutes); // Speech-to-Text testing routes
-app.use("/stt", sttRoutes); // STT live test page (non-API route)
 app.use("/api/tts-provider", ttsProviderRoutes); // TTS Provider management routes
 app.use("/api/realtime", enhancedRealTimeRoutes); // Enhanced real-time call functionality
 app.use("/api", healthRoutes); // Health monitoring and resilience routes

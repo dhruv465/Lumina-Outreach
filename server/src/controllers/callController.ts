@@ -81,6 +81,7 @@ export const initiateCall = async (req: Request & { user?: any }, res: Response)
       recordCall: configuration.complianceSettings.recordCalls,
       priority: 'medium',
       personalityId: campaign.voiceConfiguration?.voiceId, // Store campaign voice ID
+      voiceProvider: campaign.voiceConfiguration?.provider, // Store voice provider
       conversationLog: []
     });
 

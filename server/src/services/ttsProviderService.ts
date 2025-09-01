@@ -16,6 +16,7 @@ export interface TTSOptions {
   sampleRate?: number;
   speed?: number;
   pitch?: number;
+  provider?: TTSProvider;
 }
 
 export interface TTSResult {
@@ -117,7 +118,8 @@ export class TTSProviderService {
    */
   public async synthesizeSpeech(options: TTSOptions): Promise<TTSResult> {
     const config = await this.getTTSConfig();
-    const primaryProvider = config.primaryProvider || config.provider || 'elevenlabs';
+    // If a specific provider is requested in the options, use that instead of the default
+    const primaryProvider = options.provider || config.primaryProvider || config.provider || 'elevenlabs';
     const startTime = Date.now();
     const requestId = `tts_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -187,10 +189,23 @@ export class TTSProviderService {
             const fallbackStartTime = Date.now();
             logger.info(`Attempting TTS fallback to ${fallbackProvider}`, { requestId });
             
-            // Prepare options for fallback - respect useSelectedFallbackVoice setting
+            // Prepare options for fallback
             let fallbackOptions = { ...options };
-            if (config.useSelectedFallbackVoice !== false) { // Default is true
-              // For fallback, use the provider-specific selected voice, not the original voiceId
+            
+            // IMPORTANT: For campaign voice selection, we need to respect the campaign's voice settings
+            // Check if this is a campaign call (identified by voiceId format)
+            const isCampaignVoice = options.voiceId && 
+                                    (options.voiceId.startsWith('aura-') || 
+                                     options.voiceId.includes('deepgram'));
+            
+            if (isCampaignVoice) {
+              // For campaign voice, keep the selected voice ID
+              logger.info(`Using campaign-selected voice for ${fallbackProvider} fallback`, {
+                campaignVoiceId: options.voiceId,
+                requestId
+              });
+            } else if (config.useSelectedFallbackVoice !== false) { // Default is true
+              // For fallback in general cases, use the provider-specific selected voice
               delete fallbackOptions.voiceId; // Let the provider method resolve the voice
               logger.info(`Using selected fallback voice for ${fallbackProvider}`, {
                 useSelectedFallbackVoice: config.useSelectedFallbackVoice,
@@ -215,6 +230,14 @@ export class TTSProviderService {
               fallbackUsed: true,
               fallbackReason: primaryErrorMessage,
               requestId
+            });
+            
+            // Update the metadata to show the correct provider
+            result.metadata.provider = fallbackProvider;
+            
+            logger.info(`${fallbackProvider} TTS fallback successful`, {
+              audioSize: result.audioContent.length,
+              textLength: options.text.length
             });
             
             logger.info('TTS synthesis successful with fallback provider', {
@@ -353,6 +376,7 @@ export class TTSProviderService {
     }
 
     // Resolve voice ID based on priority: args.voiceId || selectedVoicesByProvider.deepgram || defaultModel
+    // IMPORTANT: We respect the provided voiceId from the campaign configuration
     const voiceId = options.voiceId || 
                    this.configuration?.ttsConfig?.selectedVoicesByProvider?.deepgram || 
                    deepgramConfig.defaultModel;
@@ -365,8 +389,10 @@ export class TTSProviderService {
     const deepgramTTS = new DeepgramTTSService(deepgramConfig.apiKey);
 
     const encoding = options.encoding || deepgramConfig.voiceSettings?.encoding || 'mp3';
+    
+    // Make sure we're explicitly passing the selected voice to Deepgram
     const synthesisOptions = {
-      model: voiceId,
+      model: voiceId,  // This should be using the campaign-selected voice
       encoding: encoding,
       // Only include sample_rate for non-mp3 encodings (per Deepgram documentation)
       ...(encoding !== 'mp3' && { 
@@ -382,13 +408,20 @@ export class TTSProviderService {
       defaultModel: deepgramConfig.defaultModel,
       encoding: synthesisOptions.encoding,
       sampleRate: synthesisOptions.sample_rate,
-      hasApiKey: !!deepgramConfig.apiKey
+      hasApiKey: !!deepgramConfig.apiKey,
+      requestedVoice: voiceId
     });
 
+    // Pass the voice model explicitly to ensure it's used
     const audioBuffer = await deepgramTTS.synthesizeSpeechWithStream(
       options.text,
       synthesisOptions
     );
+
+    logger.info(`Deepgram TTS using voice: ${voiceId}`, {
+      textLength: options.text.length,
+      audioSize: audioBuffer.length
+    });
 
     return {
       audioContent: audioBuffer,

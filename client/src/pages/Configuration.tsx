@@ -1016,6 +1016,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
             {
               text: testText,
               voiceId: config.voiceId,
+              provider: "elevenlabs",
               language: "en",
             },
             {
@@ -1091,6 +1092,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
             {
               text: testText,
               voiceId: config.voiceId,
+              provider: "deepgram",
               language: "en",
             },
             {

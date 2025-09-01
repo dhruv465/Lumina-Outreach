@@ -140,7 +140,14 @@ const llmModels = [
 ];
 
 // Voice provider options - will be dynamically loaded from system configuration
-const defaultVoiceProviders = ["elevenlabs", "google", "aws"];
+// This is just a fallback if API fails
+const defaultVoiceProviders = [
+  "elevenlabs",
+  "deepgram",
+  "openai",
+  "google",
+  "aws",
+];
 
 const CampaignForm = ({
   campaignId,
@@ -155,9 +162,15 @@ const CampaignForm = ({
   const [systemConfig, setSystemConfig] = useState<any>(null);
   const [availableLLMModels, setAvailableLLMModels] =
     useState<string[]>(llmModels);
-  const [availableVoiceProviders, setAvailableVoiceProviders] = useState<string[]>(defaultVoiceProviders);
-  const [availableVoices, setAvailableVoices] = useState<{[key: string]: any[]}>({});
-  const [loadingVoices, setLoadingVoices] = useState<{[key: string]: boolean}>({});
+  const [availableVoiceProviders, setAvailableVoiceProviders] = useState<
+    string[]
+  >(defaultVoiceProviders);
+  const [availableVoices, setAvailableVoices] = useState<{
+    [key: string]: any[];
+  }>({});
+  const [loadingVoices, setLoadingVoices] = useState<{
+    [key: string]: boolean;
+  }>({});
 
   // Toast function for notifications
   const showToast = (
@@ -246,46 +259,65 @@ const CampaignForm = ({
   // Load voices for a specific TTS provider
   const loadVoicesForProvider = async (provider: string, config: any) => {
     console.log(`Loading voices for provider: ${provider}`);
-    
+
     // Set loading state
-    setLoadingVoices(prev => ({ ...prev, [provider]: true }));
-    
+    setLoadingVoices((prev) => ({ ...prev, [provider]: true }));
+
     try {
       let voices: any[] = [];
-      
-      switch (provider) {
-        case "elevenlabs":
-          if (config.elevenLabsConfig?.apiKey) {
-            try {
-              const result = await configApi.testElevenLabsConnection({
-                apiKey: config.elevenLabsConfig.apiKey,
-              });
-              if (result.success && result.details?.availableVoices) {
-                voices = result.details.availableVoices;
-                console.log(`Loaded ${voices.length} ElevenLabs voices`);
-              }
-            } catch (error) {
-              console.error("Error loading ElevenLabs voices:", error);
-              // Fallback to stored voices if API call fails
-              if (config.elevenLabsConfig?.availableVoices?.length > 0) {
-                voices = config.elevenLabsConfig.availableVoices;
-                console.log(`Using stored ElevenLabs voices: ${voices.length}`);
+
+      // First try to load from the API endpoint if it's available
+      try {
+        const response = await api.get(
+          `/tts-provider/voices?provider=${provider}`
+        );
+        if (
+          response.data.success &&
+          response.data.voices &&
+          response.data.voices.length > 0
+        ) {
+          voices = response.data.voices;
+          console.log(
+            `Loaded ${voices.length} voices for ${provider} from API endpoint`
+          );
+        }
+      } catch (apiError) {
+        console.warn(
+          `API endpoint for ${provider} voices unavailable:`,
+          apiError
+        );
+        // Continue to provider-specific methods
+      }
+
+      // If API endpoint didn't work, try provider-specific methods
+      if (voices.length === 0) {
+        switch (provider) {
+          case "elevenlabs":
+            if (config.elevenLabsConfig?.apiKey) {
+              try {
+                const result = await configApi.testElevenLabsConnection({
+                  apiKey: config.elevenLabsConfig.apiKey,
+                });
+                if (result.success && result.details?.availableVoices) {
+                  voices = result.details.availableVoices;
+                  console.log(
+                    `Loaded ${voices.length} ElevenLabs voices from test connection`
+                  );
+                }
+              } catch (error) {
+                console.error("Error loading ElevenLabs voices:", error);
+                // Fallback to stored voices if API call fails
+                if (config.elevenLabsConfig?.availableVoices?.length > 0) {
+                  voices = config.elevenLabsConfig.availableVoices;
+                  console.log(
+                    `Using stored ElevenLabs voices: ${voices.length}`
+                  );
+                }
               }
             }
-          }
-          break;
-          
-        case "deepgram":
-          try {
-            // Use the dedicated TTS provider voices endpoint instead of test connection
-            const response = await api.get(`/tts-provider/voices?provider=deepgram`);
-            if (response.data.success && response.data.voices) {
-              voices = response.data.voices;
-              console.log(`Loaded ${voices.length} Deepgram TTS voices`);
-            }
-          } catch (error) {
-            console.error("Error loading Deepgram TTS voices:", error);
-            // Fallback to test connection if available
+            break;
+
+          case "deepgram":
             if (config.ttsConfig?.deepgramTTS?.apiKey) {
               try {
                 const result = await configApi.testDeepgramTTSConnection({
@@ -293,55 +325,114 @@ const CampaignForm = ({
                 });
                 if (result.success && result.details?.availableVoices) {
                   voices = result.details.availableVoices;
-                  console.log(`Loaded ${voices.length} Deepgram TTS voices via fallback`);
+                  console.log(
+                    `Loaded ${voices.length} Deepgram TTS voices from test connection`
+                  );
                 }
-              } catch (fallbackError) {
-                console.error("Error loading Deepgram TTS voices via fallback:", fallbackError);
+              } catch (error) {
+                console.error("Error loading Deepgram TTS voices:", error);
               }
             }
-          }
-          break;
-          
-        case "openai":
-          // OpenAI has predefined voices
-          voices = [
-            { voiceId: "alloy", name: "Alloy" },
-            { voiceId: "echo", name: "Echo" },
-            { voiceId: "fable", name: "Fable" },
-            { voiceId: "onyx", name: "Onyx" },
-            { voiceId: "nova", name: "Nova" },
-            { voiceId: "shimmer", name: "Shimmer" }
-          ];
-          console.log("Using predefined OpenAI TTS voices");
-          break;
-          
-        case "google":
-          // TODO: Implement Google TTS voice loading
-          console.log("Google TTS voice loading not implemented yet");
-          break;
-          
-        case "aws":
-          // TODO: Implement AWS Polly voice loading
-          console.log("AWS Polly voice loading not implemented yet");
-          break;
-          
-        default:
-          console.warn(`Unknown TTS provider: ${provider}`);
+            break;
+
+          case "openai":
+            // OpenAI has predefined voices
+            voices = [
+              { voiceId: "alloy", name: "Alloy" },
+              { voiceId: "echo", name: "Echo" },
+              { voiceId: "fable", name: "Fable" },
+              { voiceId: "onyx", name: "Onyx" },
+              { voiceId: "nova", name: "Nova" },
+              { voiceId: "shimmer", name: "Shimmer" },
+            ];
+            console.log("Using predefined OpenAI TTS voices");
+            break;
+
+          case "google":
+            // Basic Google TTS voices
+            voices = [
+              {
+                voiceId: "en-US-Standard-A",
+                name: "Standard Female A (en-US)",
+              },
+              { voiceId: "en-US-Standard-B", name: "Standard Male B (en-US)" },
+              {
+                voiceId: "en-US-Standard-C",
+                name: "Standard Female C (en-US)",
+              },
+              { voiceId: "en-US-Standard-D", name: "Standard Male D (en-US)" },
+              {
+                voiceId: "en-US-Standard-E",
+                name: "Standard Female E (en-US)",
+              },
+              {
+                voiceId: "en-US-Standard-F",
+                name: "Standard Female F (en-US)",
+              },
+              { voiceId: "en-US-Wavenet-A", name: "Wavenet Female A (en-US)" },
+              { voiceId: "en-US-Wavenet-B", name: "Wavenet Male B (en-US)" },
+              { voiceId: "en-US-Wavenet-C", name: "Wavenet Female C (en-US)" },
+              { voiceId: "en-US-Wavenet-D", name: "Wavenet Male D (en-US)" },
+              { voiceId: "en-US-Wavenet-E", name: "Wavenet Female E (en-US)" },
+              { voiceId: "en-US-Wavenet-F", name: "Wavenet Female F (en-US)" },
+            ];
+            console.log("Using predefined Google TTS voices");
+            break;
+
+          case "aws":
+            // Basic AWS Polly voices
+            voices = [
+              { voiceId: "Joanna", name: "Joanna (en-US)" },
+              { voiceId: "Matthew", name: "Matthew (en-US)" },
+              { voiceId: "Amy", name: "Amy (en-GB)" },
+              { voiceId: "Emma", name: "Emma (en-GB)" },
+              { voiceId: "Brian", name: "Brian (en-GB)" },
+              { voiceId: "Aditi", name: "Aditi (en-IN)" },
+              { voiceId: "Raveena", name: "Raveena (en-IN)" },
+              { voiceId: "Joey", name: "Joey (en-US)" },
+            ];
+            console.log("Using predefined AWS Polly voices");
+            break;
+
+          default:
+            console.warn(`Unknown TTS provider: ${provider}`);
+        }
       }
-      
+
+      // If we still have no voices but have stored voices in the config, use those
+      if (voices.length === 0) {
+        if (
+          provider === "elevenlabs" &&
+          config.elevenLabsConfig?.availableVoices?.length > 0
+        ) {
+          voices = config.elevenLabsConfig.availableVoices;
+          console.log(
+            `Using stored ElevenLabs voices as last resort: ${voices.length}`
+          );
+        } else if (
+          provider === "deepgram" &&
+          config.ttsConfig?.deepgramTTS?.availableVoices?.length > 0
+        ) {
+          voices = config.ttsConfig.deepgramTTS.availableVoices;
+          console.log(
+            `Using stored Deepgram voices as last resort: ${voices.length}`
+          );
+        }
+      }
+
       // Update the voices map for this provider
-      setAvailableVoices(prev => ({
+      setAvailableVoices((prev) => ({
         ...prev,
-        [provider]: voices
+        [provider]: voices,
       }));
-      
+
       return voices;
     } catch (error) {
       console.error(`Error loading voices for ${provider}:`, error);
       return [];
     } finally {
       // Clear loading state
-      setLoadingVoices(prev => ({ ...prev, [provider]: false }));
+      setLoadingVoices((prev) => ({ ...prev, [provider]: false }));
     }
   };
 
@@ -352,46 +443,80 @@ const CampaignForm = ({
     console.log("Loading TTS providers from config:", config);
 
     // Check ElevenLabs
-    if (config.elevenLabsConfig?.isEnabled && config.elevenLabsConfig?.apiKey) {
+    if (config.elevenLabsConfig?.apiKey) {
       enabledProviders.push("elevenlabs");
-      console.log("ElevenLabs is enabled and configured");
+      console.log("ElevenLabs is configured");
     }
 
     // Check Deepgram TTS
-    if (config.ttsConfig?.deepgramTTS?.isEnabled && config.ttsConfig?.deepgramTTS?.apiKey) {
+    if (config.ttsConfig?.deepgramTTS?.apiKey) {
       enabledProviders.push("deepgram");
-      console.log("Deepgram TTS is enabled and configured");
+      console.log("Deepgram TTS is configured");
     }
 
     // Check OpenAI TTS
-    if (config.ttsConfig?.openai?.isEnabled && config.ttsConfig?.openai?.apiKey) {
+    if (
+      config.ttsConfig?.openai?.apiKey ||
+      (config.llmConfig?.providers &&
+        config.llmConfig.providers.find(
+          (p: any) => p.name === "openai" && p.apiKey
+        ))
+    ) {
       enabledProviders.push("openai");
-      console.log("OpenAI TTS is enabled and configured");
+      console.log("OpenAI TTS is configured");
     }
 
     // Check Google TTS
-    if (config.ttsConfig?.google?.isEnabled && config.ttsConfig?.google?.apiKey) {
+    if (
+      config.ttsConfig?.google?.apiKey ||
+      (config.llmConfig?.providers &&
+        config.llmConfig.providers.find(
+          (p: any) => p.name === "google" && p.apiKey
+        ))
+    ) {
       enabledProviders.push("google");
-      console.log("Google TTS is enabled and configured");
+      console.log("Google TTS is configured");
     }
 
     // Check AWS Polly
-    if (config.ttsConfig?.aws?.isEnabled && config.ttsConfig?.aws?.accessKeyId) {
+    if (config.ttsConfig?.aws?.accessKeyId) {
       enabledProviders.push("aws");
-      console.log("AWS Polly is enabled and configured");
+      console.log("AWS Polly is configured");
     }
 
     // Also check the main TTS provider setting from Configuration page
     const mainTTSProvider = config.ttsConfig?.provider;
     if (mainTTSProvider && !enabledProviders.includes(mainTTSProvider)) {
-      console.log("Adding main TTS provider from configuration:", mainTTSProvider);
+      console.log(
+        "Adding main TTS provider from configuration:",
+        mainTTSProvider
+      );
       enabledProviders.push(mainTTSProvider);
+    }
+
+    // Add all providers listed as fallback providers
+    if (
+      config.ttsConfig?.fallbackProviders &&
+      Array.isArray(config.ttsConfig.fallbackProviders)
+    ) {
+      for (const provider of config.ttsConfig.fallbackProviders) {
+        if (!enabledProviders.includes(provider)) {
+          console.log("Adding fallback TTS provider:", provider);
+          enabledProviders.push(provider);
+        }
+      }
     }
 
     // Fallback to showing all available providers if none are explicitly enabled
     if (enabledProviders.length === 0) {
       console.warn("No TTS providers enabled, showing all available providers");
-      const allProviders = ["elevenlabs", "deepgram", "openai", "google", "aws"];
+      const allProviders = [
+        "elevenlabs",
+        "deepgram",
+        "openai",
+        "google",
+        "aws",
+      ];
       setAvailableVoiceProviders(allProviders);
     } else {
       console.log("Enabled TTS providers:", enabledProviders);
@@ -402,6 +527,15 @@ const CampaignForm = ({
     if (mainTTSProvider) {
       await loadVoicesForProvider(mainTTSProvider, config);
     }
+
+    // Also load voices for other providers in the background
+    for (const provider of enabledProviders) {
+      if (provider !== mainTTSProvider) {
+        loadVoicesForProvider(provider, config).catch((error) => {
+          console.warn(`Failed to load voices for ${provider}:`, error);
+        });
+      }
+    }
   };
 
   const loadSystemConfiguration = async () => {
@@ -409,12 +543,12 @@ const CampaignForm = ({
       setIsLoading(true);
       const config = await configApi.getConfiguration();
       setSystemConfig(config);
-      
+
       console.log("Loaded system configuration:", config);
-      
+
       // Load TTS providers and voices
       await loadTTSProvidersAndVoices(config);
-      
+
       // Filter LLM models based on the configured provider
       if (config.llmConfig?.providers) {
         const defaultProvider = config.llmConfig.defaultProvider;
@@ -434,76 +568,109 @@ const CampaignForm = ({
       // Only update form data if not editing an existing campaign
       if (!campaignId) {
         // Determine the best voice provider and voice ID from available options
-        let bestProvider = '';
-        let bestVoiceId = '';
-        
+        let bestProvider = "";
+        let bestVoiceId = "";
+
         // Priority 1: Use the main TTS provider from Configuration page
         if (config.ttsConfig?.provider) {
           bestProvider = config.ttsConfig.provider;
-          console.log("Using main TTS provider from configuration:", bestProvider);
-          
+          console.log(
+            "Using main TTS provider from configuration:",
+            bestProvider
+          );
+
           // Get the voice ID from Configuration page based on provider
-          if (bestProvider === 'deepgram' && config.ttsConfig?.deepgramTTS?.defaultModel) {
+          if (
+            bestProvider === "deepgram" &&
+            config.ttsConfig?.deepgramTTS?.defaultModel
+          ) {
             bestVoiceId = config.ttsConfig.deepgramTTS.defaultModel;
-            console.log("Using Deepgram default model from configuration:", bestVoiceId);
-          } else if (bestProvider === 'elevenlabs' && config.elevenLabsConfig?.selectedVoiceId) {
+            console.log(
+              "Using Deepgram default model from configuration:",
+              bestVoiceId
+            );
+          } else if (
+            bestProvider === "elevenlabs" &&
+            config.elevenLabsConfig?.selectedVoiceId
+          ) {
             bestVoiceId = config.elevenLabsConfig.selectedVoiceId;
-            console.log("Using ElevenLabs selected voice from configuration:", bestVoiceId);
+            console.log(
+              "Using ElevenLabs selected voice from configuration:",
+              bestVoiceId
+            );
           }
         }
-        
+
         // Priority 2: Use the first available provider from our dynamic list
         if (!bestProvider && availableVoiceProviders.length > 0) {
           bestProvider = availableVoiceProviders[0];
           console.log("Using first available provider:", bestProvider);
         }
-        
+
         // Priority 3: Get the first voice for the selected provider
-        if (bestProvider && !bestVoiceId && availableVoices[bestProvider]?.length > 0) {
+        if (
+          bestProvider &&
+          !bestVoiceId &&
+          availableVoices[bestProvider]?.length > 0
+        ) {
           bestVoiceId = availableVoices[bestProvider][0].voiceId;
-          console.log(`Using first available voice: ${availableVoices[bestProvider][0].name} (${bestVoiceId}) from ${bestProvider}`);
+          console.log(
+            `Using first available voice: ${availableVoices[bestProvider][0].name} (${bestVoiceId}) from ${bestProvider}`
+          );
         }
-        
+
         // Fallback to system configuration if still no provider/voice found
         if (!bestProvider || !bestVoiceId) {
           // Priority 4: Use provider-appropriate defaults based on configuration
           if (!bestProvider) {
             bestProvider = config.ttsConfig?.provider || "elevenlabs";
           }
-          
+
           if (!bestVoiceId) {
-            if (bestProvider === 'deepgram') {
-              bestVoiceId = config.ttsConfig?.deepgramTTS?.defaultModel || 'aura-2-thalia-en';
+            if (bestProvider === "deepgram") {
+              bestVoiceId =
+                config.ttsConfig?.deepgramTTS?.defaultModel ||
+                "aura-2-thalia-en";
               console.log("Using Deepgram default model:", bestVoiceId);
-            } else if (bestProvider === 'elevenlabs' && config.elevenLabsConfig?.availableVoices?.length > 0) {
+            } else if (
+              bestProvider === "elevenlabs" &&
+              config.elevenLabsConfig?.availableVoices?.length > 0
+            ) {
               bestVoiceId = config.elevenLabsConfig.availableVoices[0].voiceId;
               console.log("Using first ElevenLabs voice:", bestVoiceId);
             } else if (config.voiceAIConfig?.conversationalAI?.defaultVoiceId) {
-              bestVoiceId = config.voiceAIConfig.conversationalAI.defaultVoiceId;
+              bestVoiceId =
+                config.voiceAIConfig.conversationalAI.defaultVoiceId;
               console.log("Using system default voice ID:", bestVoiceId);
             } else {
               console.warn("No voices available in system configuration");
               if (availableVoiceProviders.length === 0) {
-                showToast("Warning", "No TTS providers configured in system. Please configure TTS providers in the Configuration page.", "destructive");
+                showToast(
+                  "Warning",
+                  "No TTS providers configured in system. Please configure TTS providers in the Configuration page.",
+                  "destructive"
+                );
               }
               bestVoiceId = "";
             }
           }
         }
-        
+
         // Determine best system prompt
-        const bestSystemPrompt = config.llmConfig?.defaultSystemPrompt || 
-                               config.generalSettings?.defaultSystemPrompt ||
-                               'You are an AI assistant making a call on behalf of a company. Be professional, friendly, and helpful.';
-        
+        const bestSystemPrompt =
+          config.llmConfig?.defaultSystemPrompt ||
+          config.generalSettings?.defaultSystemPrompt ||
+          "You are an AI assistant making a call on behalf of a company. Be professional, friendly, and helpful.";
+
         // Determine best LLM model
-        const bestModel = config.llmConfig?.defaultModel || 
-                       (config.llmConfig?.providers?.[0]?.availableModels?.[0]) || 
-                       "gpt-4o";
-        
+        const bestModel =
+          config.llmConfig?.defaultModel ||
+          config.llmConfig?.providers?.[0]?.availableModels?.[0] ||
+          "gpt-4o";
+
         // Ensure we have a valid date
         const today = new Date();
-        
+
         // Set all form data in a single update to avoid race conditions
         setFormData((prev) => ({
           ...prev,
@@ -512,8 +679,11 @@ const CampaignForm = ({
             ...prev.llmConfiguration,
             model: bestModel,
             systemPrompt: bestSystemPrompt,
-            temperature: config.llmConfig?.temperature || prev.llmConfiguration.temperature,
-            maxTokens: config.llmConfig?.maxTokens || prev.llmConfiguration.maxTokens,
+            temperature:
+              config.llmConfig?.temperature ||
+              prev.llmConfiguration.temperature,
+            maxTokens:
+              config.llmConfig?.maxTokens || prev.llmConfiguration.maxTokens,
           },
           voiceConfiguration: {
             ...prev.voiceConfiguration,
@@ -524,23 +694,25 @@ const CampaignForm = ({
           },
           callTiming: {
             ...prev.callTiming,
-            timeZone: config.generalSettings?.defaultTimeZone || prev.callTiming.timeZone,
+            timeZone:
+              config.generalSettings?.defaultTimeZone ||
+              prev.callTiming.timeZone,
           },
         }));
-        
+
         // Log the important values to verify they're set
         console.log("Set required fields from system config:", {
           startDate: today,
           systemPrompt: bestSystemPrompt,
           voiceId: bestVoiceId,
-          model: bestModel
+          model: bestModel,
         });
       }
 
       setIsLoading(false);
     } catch (error) {
       console.error("Error loading system configuration:", error);
-      
+
       // Set fallback values for required fields even if config loading fails
       if (!campaignId) {
         showToast(
@@ -548,20 +720,22 @@ const CampaignForm = ({
           "Failed to load system configuration. Please check your system settings.",
           "destructive"
         );
-        setFormData(prev => ({
+        setFormData((prev) => ({
           ...prev,
           startDate: new Date(),
           llmConfiguration: {
             ...prev.llmConfiguration,
-              systemPrompt: systemConfig?.generalSettings?.defaultSystemPrompt || 'You are an AI assistant making a call on behalf of a company.',
+            systemPrompt:
+              systemConfig?.generalSettings?.defaultSystemPrompt ||
+              "You are an AI assistant making a call on behalf of a company.",
           },
           voiceConfiguration: {
             ...prev.voiceConfiguration,
-            voiceId: '', // Don't use default-voice-id fallback
-          }
+            voiceId: "", // Don't use default-voice-id fallback
+          },
         }));
       }
-      
+
       showToast(
         "Warning",
         "Could not load system configuration. Using default settings.",
@@ -581,11 +755,19 @@ const CampaignForm = ({
     }
   }, [campaignId]);
 
+  // Load voices when selecting a different provider
+  useEffect(() => {
+    const provider = formData.voiceConfiguration.provider;
+    if (provider && systemConfig) {
+      loadVoicesForProvider(provider, systemConfig);
+    }
+  }, [formData.voiceConfiguration.provider]);
+
   // Handle TTS provider change
   const handleTTSProviderChange = async (provider: string) => {
     console.log("TTS provider changed to:", provider);
-    
-    // Update form data
+
+    // Update form data immediately
     setFormData((prev: CampaignFormData) => ({
       ...prev,
       voiceConfiguration: {
@@ -594,22 +776,65 @@ const CampaignForm = ({
         voiceId: "", // Reset voice ID when provider changes
       },
     }));
-    
-    // Load voices for the new provider
-    if (systemConfig) {
-      const voices = await loadVoicesForProvider(provider, systemConfig);
-      
-      // Auto-select first voice if available
-      if (voices.length > 0) {
-        setFormData((prev: CampaignFormData) => ({
-          ...prev,
-          voiceConfiguration: {
-            ...prev.voiceConfiguration,
-            voiceId: voices[0].voiceId,
-          },
-        }));
-        console.log(`Auto-selected first voice: ${voices[0].name} (${voices[0].voiceId})`);
+
+    // Show toast for missing provider configuration
+    if (provider === "elevenlabs" && !systemConfig?.elevenLabsConfig?.apiKey) {
+      toast({
+        title: "Provider Not Configured",
+        description:
+          "ElevenLabs API key is not configured. Please add it in the Configuration page.",
+        variant: "default",
+      });
+    } else if (
+      provider === "deepgram" &&
+      !systemConfig?.ttsConfig?.deepgramTTS?.apiKey
+    ) {
+      toast({
+        title: "Provider Not Configured",
+        description:
+          "Deepgram TTS API key is not configured. Please add it in the Configuration page.",
+        variant: "default",
+      });
+    }
+
+    try {
+      // Load voices for the new provider
+      if (systemConfig) {
+        setLoadingVoices((prev) => ({ ...prev, [provider]: true }));
+        const voices = await loadVoicesForProvider(provider, systemConfig);
+
+        // Auto-select first voice if available
+        if (voices.length > 0) {
+          setFormData((prev: CampaignFormData) => ({
+            ...prev,
+            voiceConfiguration: {
+              ...prev.voiceConfiguration,
+              voiceId: voices[0].voiceId,
+            },
+          }));
+          console.log(
+            `Auto-selected first voice: ${voices[0].name} (${voices[0].voiceId})`
+          );
+        } else {
+          console.warn(`No voices found for provider: ${provider}`);
+
+          // Show toast for no voices found
+          toast({
+            title: "No Voices Available",
+            description: `No voices found for ${provider}. Please enter a voice ID manually or choose another provider.`,
+            variant: "default",
+          });
+        }
       }
+    } catch (error) {
+      console.error(`Error loading voices for ${provider}:`, error);
+      toast({
+        title: "Error Loading Voices",
+        description: `Failed to load voices for ${provider}. Please try again or enter a voice ID manually.`,
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingVoices((prev) => ({ ...prev, [provider]: false }));
     }
   };
 
@@ -758,24 +983,30 @@ const CampaignForm = ({
       }
 
       // Additional validation for required fields
-      if (!formData.voiceConfiguration.voiceId || formData.voiceConfiguration.voiceId === '') {
+      if (
+        !formData.voiceConfiguration.voiceId ||
+        formData.voiceConfiguration.voiceId === ""
+      ) {
         showToast(
           "Voice ID Required",
           "Please select or enter a Voice ID for the campaign.",
           "destructive"
         );
-        setCurrentTab('ai');
+        setCurrentTab("ai");
         setIsLoading(false);
         return;
       }
 
-      if (!formData.llmConfiguration.systemPrompt || formData.llmConfiguration.systemPrompt === '') {
+      if (
+        !formData.llmConfiguration.systemPrompt ||
+        formData.llmConfiguration.systemPrompt === ""
+      ) {
         showToast(
           "System Prompt Required",
           "Please provide a system prompt for the AI model.",
           "destructive"
         );
-        setCurrentTab('ai');
+        setCurrentTab("ai");
         setIsLoading(false);
         return;
       }
@@ -786,7 +1017,7 @@ const CampaignForm = ({
           "Please select a start date for the campaign.",
           "destructive"
         );
-        setCurrentTab('basic');
+        setCurrentTab("basic");
         setIsLoading(false);
         return;
       }
@@ -797,9 +1028,9 @@ const CampaignForm = ({
           {
             name: formData.script.name || "Primary Script",
             content: formData.script.content || "",
-            isActive: true
-          }
-        ]
+            isActive: true,
+          },
+        ],
       };
 
       // Format dates for API submission - ensure all required fields have valid values
@@ -817,12 +1048,14 @@ const CampaignForm = ({
         openingMessage: formData.openingMessage,
         // Explicitly format date fields as strings
         // Explicitly format date fields as strings
-        startDate: formData.startDate instanceof Date 
-          ? formData.startDate.toISOString() 
-          : new Date().toISOString(),
-        endDate: formData.endDate instanceof Date 
-          ? formData.endDate.toISOString() 
-          : null,
+        startDate:
+          formData.startDate instanceof Date
+            ? formData.startDate.toISOString()
+            : new Date().toISOString(),
+        endDate:
+          formData.endDate instanceof Date
+            ? formData.endDate.toISOString()
+            : null,
         callTiming: {
           daysOfWeek: formData.callTiming.daysOfWeek,
           startTime: formData.callTiming.startTime,
@@ -832,7 +1065,8 @@ const CampaignForm = ({
         llmConfiguration: {
           model: formData.llmConfiguration.model || "gpt-4o",
           // Ensure systemPrompt is always provided as a non-empty string
-          systemPrompt: formData.llmConfiguration.systemPrompt || 
+          systemPrompt:
+            formData.llmConfiguration.systemPrompt ||
             "You are an AI assistant making a call on behalf of a company. Be professional, friendly, and helpful.",
           temperature: Number(formData.llmConfiguration.temperature) || 0.7,
           maxTokens: Number(formData.llmConfiguration.maxTokens) || 500,
@@ -840,13 +1074,15 @@ const CampaignForm = ({
         voiceConfiguration: {
           provider: formData.voiceConfiguration.provider || "elevenlabs",
           // Ensure voiceId is always provided as a non-empty string from available voices
-          voiceId: formData.voiceConfiguration.voiceId || 
-            (systemConfig?.elevenLabsConfig?.availableVoices?.[0]?.voiceId || ""),
+          voiceId:
+            formData.voiceConfiguration.voiceId ||
+            systemConfig?.elevenLabsConfig?.availableVoices?.[0]?.voiceId ||
+            "",
           speed: Number(formData.voiceConfiguration.speed) || 1.0,
           pitch: Number(formData.voiceConfiguration.pitch) || 1.0,
         },
       };
-      
+
       // Debug log to verify required fields are present
       console.log("Critical fields check:", {
         startDate: submissionData.startDate,
@@ -859,57 +1095,79 @@ const CampaignForm = ({
         console.error("startDate is still missing after all validations");
         submissionData.startDate = new Date().toISOString();
       }
-      
+
       if (!submissionData.llmConfiguration.systemPrompt) {
         console.error("systemPrompt is still missing after all validations");
-        submissionData.llmConfiguration.systemPrompt = systemConfig?.generalSettings?.defaultSystemPrompt || "You are an AI assistant making a call on behalf of a company.";
+        submissionData.llmConfiguration.systemPrompt =
+          systemConfig?.generalSettings?.defaultSystemPrompt ||
+          "You are an AI assistant making a call on behalf of a company.";
       }
-      
+
       if (!submissionData.voiceConfiguration.voiceId) {
         console.error("voiceId is still missing after all validations");
         // Try to get a voice ID from any available source
-        const fallbackVoiceId = systemConfig?.elevenLabsConfig?.availableVoices?.[0]?.voiceId || 
-                               "default-voice-id";
+        const fallbackVoiceId =
+          systemConfig?.elevenLabsConfig?.availableVoices?.[0]?.voiceId ||
+          "default-voice-id";
         submissionData.voiceConfiguration.voiceId = fallbackVoiceId;
       }
 
       // Explicitly sanitize the submissionData to ensure it has the three required fields
       // These fields must be present as non-empty strings or the server will reject the request
-      
+
       // 1. Ensure startDate is a valid ISO string
-      if (typeof submissionData.startDate !== 'string' || !submissionData.startDate) {
+      if (
+        typeof submissionData.startDate !== "string" ||
+        !submissionData.startDate
+      ) {
         submissionData.startDate = new Date().toISOString();
       }
-      
+
       // 2. Ensure systemPrompt is a non-empty string
       if (!submissionData.llmConfiguration.systemPrompt) {
-        submissionData.llmConfiguration.systemPrompt = 
-          systemConfig?.generalSettings?.defaultSystemPrompt || "You are an AI assistant making a call on behalf of a company.";
+        submissionData.llmConfiguration.systemPrompt =
+          systemConfig?.generalSettings?.defaultSystemPrompt ||
+          "You are an AI assistant making a call on behalf of a company.";
       }
-      
+
       // 3. Ensure voiceId is a non-empty string and is valid
-      if (!submissionData.voiceConfiguration.voiceId || submissionData.voiceConfiguration.voiceId === "default-voice-id") {
-        const availableVoices = systemConfig?.elevenLabsConfig?.availableVoices || [];
+      if (
+        !submissionData.voiceConfiguration.voiceId ||
+        submissionData.voiceConfiguration.voiceId === "default-voice-id"
+      ) {
+        const availableVoices =
+          systemConfig?.elevenLabsConfig?.availableVoices || [];
         if (availableVoices.length > 0) {
-          submissionData.voiceConfiguration.voiceId = availableVoices[0].voiceId;
-          console.log(`Using first available voice: ${availableVoices[0].name} (${availableVoices[0].voiceId})`);
+          submissionData.voiceConfiguration.voiceId =
+            availableVoices[0].voiceId;
+          console.log(
+            `Using first available voice: ${availableVoices[0].name} (${availableVoices[0].voiceId})`
+          );
         } else {
           console.error("No voices available in system configuration");
-          throw new Error("No voices configured in the system. Please configure ElevenLabs voices in system settings.");
+          throw new Error(
+            "No voices configured in the system. Please configure ElevenLabs voices in system settings."
+          );
         }
       }
-      
+
       // Double-check that the required fields are present and log them
       const sanitizationCheck = {
         startDate: !!submissionData.startDate,
         systemPrompt: !!submissionData.llmConfiguration.systemPrompt,
-        voiceId: !!submissionData.voiceConfiguration.voiceId
+        voiceId: !!submissionData.voiceConfiguration.voiceId,
       };
-      
-      console.log("Final sanitization check for required fields:", sanitizationCheck);
+
+      console.log(
+        "Final sanitization check for required fields:",
+        sanitizationCheck
+      );
 
       // Real API call to create or update the campaign
-      console.log("Submitting campaign:", JSON.stringify(submissionData, null, 2));
+      console.log(
+        "Submitting campaign:",
+        JSON.stringify(submissionData, null, 2)
+      );
 
       let response;
       if (campaignId) {
@@ -934,13 +1192,16 @@ const CampaignForm = ({
       if (onClose) onClose();
     } catch (error: any) {
       console.error("Error saving campaign:", error);
-      
+
       // Enhanced error logging to help diagnose the issue
       if (error.response && error.response.data) {
         console.error("Server response data:", error.response.data);
-        
+
         // Show more specific error message if available
-        const errorMessage = error.response.data.error || error.response.data.message || "Failed to save campaign. Please try again.";
+        const errorMessage =
+          error.response.data.error ||
+          error.response.data.message ||
+          "Failed to save campaign. Please try again.";
         showToast("Error", errorMessage, "destructive");
       } else {
         showToast(
@@ -949,14 +1210,14 @@ const CampaignForm = ({
           "destructive"
         );
       }
-      
+
       // Log the current state of the critical fields for debugging
       console.error("Current form data state:", {
         startDate: formData.startDate,
         systemPrompt: formData.llmConfiguration.systemPrompt,
-        voiceId: formData.voiceConfiguration.voiceId
+        voiceId: formData.voiceConfiguration.voiceId,
       });
-      
+
       setIsLoading(false);
     }
   };
@@ -1269,7 +1530,8 @@ const CampaignForm = ({
                           Opening Message
                         </label>
                         <div className="text-xs text-muted-foreground mb-2">
-                          This message will be spoken as soon as the call is answered.
+                          This message will be spoken as soon as the call is
+                          answered.
                         </div>
                         <textarea
                           name="openingMessage"
@@ -1460,27 +1722,29 @@ const CampaignForm = ({
                           <Select
                             value={formData.voiceConfiguration.provider}
                             onValueChange={handleTTSProviderChange}
-                            disabled={systemConfig?.elevenLabsConfig?.isEnabled}
                           >
                             <SelectTrigger className="w-full rounded-xl">
                               <SelectValue placeholder="Select a voice provider" />
                             </SelectTrigger>
                             <SelectContent>
-                              {availableVoiceProviders.map((provider: string) => (
-                                <SelectItem key={provider} value={provider}>
-                                  {provider === "elevenlabs"
-                                    ? "ElevenLabs"
-                                    : provider === "deepgram"
-                                    ? "Deepgram TTS"
-                                    : provider === "openai"
-                                    ? "OpenAI TTS"
-                                    : provider === "google"
-                                    ? "Google TTS"
-                                    : provider === "aws"
-                                    ? "AWS Polly"
-                                    : provider.charAt(0).toUpperCase() + provider.slice(1)}
-                                </SelectItem>
-                              ))}
+                              {availableVoiceProviders.map(
+                                (provider: string) => (
+                                  <SelectItem key={provider} value={provider}>
+                                    {provider === "elevenlabs"
+                                      ? "ElevenLabs"
+                                      : provider === "deepgram"
+                                      ? "Deepgram TTS"
+                                      : provider === "openai"
+                                      ? "OpenAI TTS"
+                                      : provider === "google"
+                                      ? "Google TTS"
+                                      : provider === "aws"
+                                      ? "AWS Polly"
+                                      : provider.charAt(0).toUpperCase() +
+                                        provider.slice(1)}
+                                  </SelectItem>
+                                )
+                              )}
                               {availableVoiceProviders.length === 0 && (
                                 <SelectItem value="" disabled>
                                   No TTS providers configured
@@ -1488,11 +1752,9 @@ const CampaignForm = ({
                               )}
                             </SelectContent>
                           </Select>
-                          {systemConfig?.elevenLabsConfig?.isEnabled && (
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Voice provider is set by system configuration
-                            </p>
-                          )}
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Using providers from system configuration
+                          </p>
                         </div>
                       </div>
 
@@ -1504,7 +1766,11 @@ const CampaignForm = ({
                           name="llmConfiguration.systemPrompt"
                           value={formData.llmConfiguration.systemPrompt}
                           onChange={handleChange}
-                          className={`${textareaStyles} ${!formData.llmConfiguration.systemPrompt ? "border-red-500" : ""}`}
+                          className={`${textareaStyles} ${
+                            !formData.llmConfiguration.systemPrompt
+                              ? "border-red-500"
+                              : ""
+                          }`}
                           placeholder="Instructions for the AI model"
                           required
                         />
@@ -1520,17 +1786,24 @@ const CampaignForm = ({
                           <label className="block text-sm font-medium mb-1">
                             Voice
                           </label>
-                          {loadingVoices[formData.voiceConfiguration.provider] ? (
+                          {loadingVoices[
+                            formData.voiceConfiguration.provider
+                          ] ? (
                             <div className="space-y-2">
                               <div className="w-full h-10 rounded-xl border border-input bg-background px-3 py-2 flex items-center">
                                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
-                                <span className="text-sm text-muted-foreground">Loading voices...</span>
+                                <span className="text-sm text-muted-foreground">
+                                  Loading voices...
+                                </span>
                               </div>
                               <p className="text-xs text-muted-foreground">
-                                Fetching available voices for {formData.voiceConfiguration.provider}
+                                Fetching available voices for{" "}
+                                {formData.voiceConfiguration.provider}
                               </p>
                             </div>
-                          ) : availableVoices[formData.voiceConfiguration.provider]?.length > 0 ? (
+                          ) : availableVoices[
+                              formData.voiceConfiguration.provider
+                            ]?.length > 0 ? (
                             <Select
                               value={formData.voiceConfiguration.voiceId}
                               onValueChange={(value) =>
@@ -1544,20 +1817,26 @@ const CampaignForm = ({
                               }
                               required
                             >
-                              <SelectTrigger className={`w-full rounded-xl ${!formData.voiceConfiguration.voiceId ? "border-red-500" : ""}`}>
+                              <SelectTrigger
+                                className={`w-full rounded-xl ${
+                                  !formData.voiceConfiguration.voiceId
+                                    ? "border-red-500"
+                                    : ""
+                                }`}
+                              >
                                 <SelectValue placeholder="Select a voice" />
                               </SelectTrigger>
                               <SelectContent>
-                                {availableVoices[formData.voiceConfiguration.provider].map(
-                                  (voice: any) => (
-                                    <SelectItem
-                                      key={voice.voiceId}
-                                      value={voice.voiceId}
-                                    >
-                                      {voice.name}
-                                    </SelectItem>
-                                  )
-                                )}
+                                {availableVoices[
+                                  formData.voiceConfiguration.provider
+                                ].map((voice: any) => (
+                                  <SelectItem
+                                    key={voice.voiceId}
+                                    value={voice.voiceId}
+                                  >
+                                    {voice.name}
+                                  </SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           ) : (
@@ -1567,19 +1846,30 @@ const CampaignForm = ({
                                 name="voiceConfiguration.voiceId"
                                 value={formData.voiceConfiguration.voiceId}
                                 onChange={handleChange}
-                                className={!formData.voiceConfiguration.voiceId ? "border-red-500" : ""}
+                                className={
+                                  !formData.voiceConfiguration.voiceId
+                                    ? "border-red-500"
+                                    : ""
+                                }
                                 placeholder="Enter voice ID from provider"
                                 required
                               />
                               <p className="text-xs text-muted-foreground">
-                                No voices loaded for {formData.voiceConfiguration.provider}. 
-                                Check provider configuration or enter voice ID manually.
+                                No voices loaded for{" "}
+                                {formData.voiceConfiguration.provider}. Check
+                                provider configuration or enter voice ID
+                                manually.
                               </p>
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => loadVoicesForProvider(formData.voiceConfiguration.provider, systemConfig)}
+                                onClick={() =>
+                                  loadVoicesForProvider(
+                                    formData.voiceConfiguration.provider,
+                                    systemConfig
+                                  )
+                                }
                                 className="text-xs"
                               >
                                 Load Voices

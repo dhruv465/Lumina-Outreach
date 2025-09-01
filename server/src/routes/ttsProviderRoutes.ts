@@ -104,7 +104,7 @@ router.post('/config', async (req, res) => {
  */
 router.post('/synthesize', async (req, res) => {
   try {
-    const { text, voiceId, model, language, encoding, sampleRate } = req.body;
+    const { text, voiceId, model, language, encoding, sampleRate, provider } = req.body;
 
     if (!text) {
       return res.status(400).json({
@@ -120,7 +120,8 @@ router.post('/synthesize', async (req, res) => {
       model,
       language,
       encoding,
-      sampleRate
+      sampleRate,
+      provider
     });
 
     // Set appropriate headers

@@ -276,7 +276,10 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                                           configuration,
                                           formattedGreeting,
                                           requestedVoiceId,
-                                          campaign.primaryLanguage === 'hi' ? 'hi' : 'en'
+                                          campaign.primaryLanguage === 'hi' ? 'hi' : 'en',
+                                          { 
+                                              provider: campaign.voiceConfiguration?.provider // Pass the campaign's selected provider
+                                          }
                                     );
 
                                     // Check if synthesis was successful
@@ -712,7 +715,10 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                                                 config,
                                                 aiResponse.text,
                                                 requestedVoiceId,
-                                                campaign?.primaryLanguage === 'hi' ? 'hi' : 'en'
+                                                campaign?.primaryLanguage === 'hi' ? 'hi' : 'en',
+                                                {
+                                                    provider: campaign?.voiceConfiguration?.provider // Pass the campaign's selected provider
+                                                }
                                           );
 
                                           // Use TTS synthesized audio in the response

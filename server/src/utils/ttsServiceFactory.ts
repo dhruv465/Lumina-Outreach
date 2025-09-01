@@ -55,10 +55,11 @@ export async function synthesizeSpeechWithProvider(
   text: string,
   voiceId?: string,
   language = 'en',
-  options?: { encoding?: string; sampleRate?: number; model?: string }
+  options?: { encoding?: string; sampleRate?: number; model?: string; provider?: string }
 ): Promise<{ audioContent: Buffer | null; method: 'tts' | 'fallback' }> {
   try {
-    const selectedProvider = configuration?.ttsConfig?.provider || 'elevenlabs';
+    // Use the explicitly provided provider if available, otherwise use the system default
+    const selectedProvider = options?.provider || configuration?.ttsConfig?.provider || 'elevenlabs';
     
     logger.info(`Synthesizing speech with provider: ${selectedProvider}, voice: ${voiceId}`);
     
@@ -70,7 +71,8 @@ export async function synthesizeSpeechWithProvider(
       model: options?.model,
       language,
       encoding: options?.encoding,
-      sampleRate: options?.sampleRate
+      sampleRate: options?.sampleRate,
+      provider: selectedProvider // Explicitly pass the provider
     });
     
     return {

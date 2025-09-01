@@ -98,6 +98,8 @@ export class DeepgramTTSService {
       // Use the exact format from Deepgram documentation
       // Note: sample_rate is not applicable when encoding=mp3
       const encoding = options.encoding || 'mp3';
+      
+      // Make sure we're using the specifically requested model from options if provided
       const defaultOptions = {
         model: options.model || 'aura-2-thalia-en',
         encoding: encoding,
@@ -108,6 +110,8 @@ export class DeepgramTTSService {
 
       logger.info('Synthesizing speech with Deepgram TTS streaming', {
         textLength: text.length,
+        requestedModel: options.model, // Log the specifically requested model
+        actualModel: defaultOptions.model, // Log what we're actually using
         options: defaultOptions,
         hasOutputFile: !!options.outputFile
       });

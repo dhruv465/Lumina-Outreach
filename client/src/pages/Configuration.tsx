@@ -1,4 +1,5 @@
 import { PasswordInput } from "@/components/PasswordInput";
+import RealTimeSTT from "@/components/RealTimeSTT";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -9,6 +10,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -189,6 +198,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
   const [testingVoice, setTestingVoice] = useState(false);
   const [testingCall, setTestingCall] = useState(false);
   const [openTestCallDialog, setOpenTestCallDialog] = useState(false);
+  const [openSTTDialog, setOpenSTTDialog] = useState(false);
   const [testCallNumber, setTestCallNumber] = useState("");
   const [testCallMessage, setTestCallMessage] = useState("");
   const [testingLLMChat, setTestingLLMChat] = useState(false);
@@ -2418,77 +2428,21 @@ Keep the conversation natural and engaging. If they're not interested, politely 
             OpenAI Whisper for speech recognition.
           </div>
           
-          <div className="mt-4">
+          <div className="mt-4 mb-4">
             <Button
               variant="outline"
               size="sm"
-              onClick={async () => {
-                try {
-                  if (!config.deepgramApiKey) {
-                    toast({
-                      title: "API Key Required",
-                      description: "Please enter a valid Deepgram API key before testing.",
-                      variant: "destructive",
-                    });
-                    return;
-                  }
-                  
+              onClick={() => {
+                if (!config.deepgramApiKey) {
                   toast({
-                    title: "Testing Deepgram STT",
-                    description: "Please wait while we verify your Speech-to-Text configuration...",
-                  });
-                  
-                  const response = await configApi.testDeepgramConnection({
-                    apiKey: config.deepgramApiKey
-                  });
-                  
-                  if (response.success) {
-                    toast({
-                      title: "Deepgram STT Test Successful",
-                      description: "Your Speech-to-Text configuration is working correctly.",
-                      variant: "default",
-                    });
-                    
-                    // Update status to verified on successful test
-                    setConfig((prev) => ({
-                      ...prev,
-                      deepgramStatus: "verified",
-                    }));
-                  } else {
-                    toast({
-                      title: "Deepgram STT Test Failed",
-                      description: response.message || "Failed to connect to Deepgram STT service.",
-                      variant: "destructive",
-                    });
-                    
-                    // Update status to failed
-                    setConfig((prev) => ({
-                      ...prev,
-                      deepgramStatus: "failed",
-                    }));
-                  }
-                } catch (error: any) {
-                  console.error("Deepgram STT test error:", error);
-                  
-                  // Check for rate limit errors (429)
-                  const is429Error = error.response?.status === 429 || 
-                    error.message?.includes("429") || 
-                    error.message?.toLowerCase().includes("rate limit");
-                  
-                  toast({
-                    title: "STT Test Failed",
-                    description: is429Error 
-                      ? "Rate limit exceeded. Please try again later." 
-                      : error.message || "An error occurred during the STT test.",
+                    title: "API Key Required",
+                    description: "Please enter a valid Deepgram API key before testing.",
                     variant: "destructive",
                   });
-                  
-                  // Update status to failed
-                  setConfig((prev) => ({
-                    ...prev,
-                    deepgramStatus: "failed",
-                  }));
+                  return;
                 }
+                
+                setOpenSTTDialog(true);
               }}
               className="w-full"
             >
@@ -2496,9 +2450,38 @@ Keep the conversation natural and engaging. If they're not interested, politely 
               Test STT Configuration
             </Button>
             <div className="text-xs text-muted-foreground mt-2 text-center">
-              Test your Deepgram Speech-to-Text configuration
+              Test your Deepgram Speech-to-Text configuration with live transcription
             </div>
           </div>
+          
+          {/* STT Dialog for verification and testing */}
+          <Dialog open={openSTTDialog} onOpenChange={setOpenSTTDialog}>
+            <DialogContent className="sm:max-w-xl">
+              <DialogHeader>
+                <DialogTitle>Deepgram Speech-to-Text Test</DialogTitle>
+                <DialogDescription>
+                  Verify your Deepgram API connection and test real-time voice transcription
+                </DialogDescription>
+              </DialogHeader>
+              <div className="py-4">
+                <RealTimeSTT 
+                  apiKey={config.deepgramApiKey} 
+                  autoStart={true}
+                  onVerificationComplete={(success) => {
+                    if (success) {
+                      setConfig(prev => ({
+                        ...prev,
+                        deepgramStatus: "verified"
+                      }));
+                    }
+                  }}
+                />
+              </div>
+              <DialogFooter>
+                <Button onClick={() => setOpenSTTDialog(false)}>Close</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </CardContent>
       </Card>
 

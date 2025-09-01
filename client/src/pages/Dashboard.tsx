@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { LineChart, PieChart, Phone, Users, Calendar, Clock, CheckCircle, Info } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
-import { Skeleton } from "@/components/ui/Skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import {
   ChartContainer,

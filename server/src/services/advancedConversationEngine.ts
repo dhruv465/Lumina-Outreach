@@ -27,11 +27,14 @@ export interface ConversationState {
 
 export interface IntentAnalysis {
   primary: string;
+  secondary?: string[];
   confidence: number;
   entities: { [key: string]: string };
-  sentiment: 'positive' | 'negative' | 'neutral';
+  sentiment: 'positive' | 'negative' | 'neutral' | 'confused' | 'frustrated' | 'excited';
   urgency: 'low' | 'medium' | 'high';
   decisionIndicators: string[];
+  conversationIndicators: string[];
+  objectionType?: 'price' | 'timing' | 'authority' | 'need' | 'trust' | 'competitor' | 'quality' | 'comparison';
 }
 
 export interface ObjectionType {
@@ -66,42 +69,256 @@ export class AdvancedConversationEngine {
   }
 
   private initializeIntentPatterns(): void {
+    // Enhanced Interest Patterns
     this.intentPatterns.set('interest', [
       /tell me more/i,
       /sounds interesting/i,
       /how does it work/i,
-      /what are the benefits/i
+      /what are the benefits/i,
+      /that's interesting/i,
+      /i'm curious/i,
+      /please explain/i,
+      /can you elaborate/i,
+      /i'd like to know/i,
+      /what exactly/i,
+      /how would that/i,
+      /sounds good/i,
+      /i'm listening/i,
+      /go on/i,
+      /continue/i,
+      /what else/i,
+      /show me/i,
+      /demonstrate/i,
+      /examples/i,
+      /case stud(y|ies)/i,
+      /more details/i,
+      /learn more/i,
+      /find out/i
     ]);
 
+    // Enhanced Price Inquiry Patterns  
     this.intentPatterns.set('price_inquiry', [
       /how much/i,
       /cost/i,
       /price/i,
       /expensive/i,
-      /budget/i
+      /budget/i,
+      /what('s| is) the cost/i,
+      /how much (does|would) (it|this) cost/i,
+      /what('s| is) the price/i,
+      /pricing/i,
+      /what('s| is) the investment/i,
+      /monthly fee/i,
+      /yearly cost/i,
+      /subscription/i,
+      /payment/i,
+      /affordable/i,
+      /cheap/i,
+      /roi/i,
+      /return on investment/i,
+      /worth it/i,
+      /value for money/i,
+      /budget friendly/i,
+      /cost effective/i,
+      /fee structure/i,
+      /what do you charge/i
     ]);
 
+    // Enhanced Objection Patterns with Types
     this.intentPatterns.set('objection', [
       /not interested/i,
       /don't need/i,
       /can't afford/i,
       /not right time/i,
-      /already have/i
+      /already have/i,
+      /no thanks/i,
+      /not for us/i,
+      /too busy/i,
+      /satisfied with current/i,
+      /happy with what we have/i,
+      /not in the market/i,
+      /maybe later/i,
+      /not now/i,
+      /call back/i,
+      /remove from list/i,
+      /stop calling/i,
+      /not ready/i,
+      /thinking about it/i,
+      /need to research/i,
+      /too complicated/i,
+      /doesn't sound right/i
     ]);
 
+    // Enhanced Ready to Buy Patterns
     this.intentPatterns.set('ready_to_buy', [
       /let's do it/i,
       /sign me up/i,
       /when can we start/i,
-      /send me the contract/i
+      /send me the contract/i,
+      /i'm ready/i,
+      /let's proceed/i,
+      /move forward/i,
+      /next steps/i,
+      /get started/i,
+      /sign up/i,
+      /purchase/i,
+      /buy/i,
+      /order/i,
+      /take it/i,
+      /yes, i want/i,
+      /sounds perfect/i,
+      /exactly what we need/i,
+      /where do i sign/i,
+      /let's make it happen/i,
+      /count me in/i,
+      /i'm in/i,
+      /done deal/i
     ]);
 
+    // Enhanced Authority Patterns
     this.intentPatterns.set('need_authority', [
       /need to ask/i,
       /check with/i,
       /not my decision/i,
       /boss/i,
-      /manager/i
+      /manager/i,
+      /supervisor/i,
+      /team/i,
+      /committee/i,
+      /board/i,
+      /owner/i,
+      /partner/i,
+      /spouse/i,
+      /need approval/i,
+      /run it by/i,
+      /discuss with/i,
+      /talk to/i,
+      /consult/i,
+      /decision maker/i,
+      /not authorized/i,
+      /can't decide alone/i,
+      /need permission/i,
+      /get back to you/i,
+      /joint decision/i
+    ]);
+
+    // New Intent: Clarification/Confusion
+    this.intentPatterns.set('clarification', [
+      /what do you mean/i,
+      /i don't understand/i,
+      /confused/i,
+      /unclear/i,
+      /explain again/i,
+      /repeat that/i,
+      /can you clarify/i,
+      /not following/i,
+      /lost me/i,
+      /what exactly/i,
+      /how so/i,
+      /what does that mean/i,
+      /i'm not sure/i,
+      /could you rephrase/i,
+      /break it down/i,
+      /simpler terms/i,
+      /give me an example/i
+    ]);
+
+    // New Intent: Urgency
+    this.intentPatterns.set('urgency', [
+      /urgent/i,
+      /asap/i,
+      /immediately/i,
+      /right away/i,
+      /as soon as possible/i,
+      /quickly/i,
+      /fast/i,
+      /emergency/i,
+      /critical/i,
+      /time sensitive/i,
+      /deadline/i,
+      /today/i,
+      /this week/i,
+      /rushing/i,
+      /hurry/i
+    ]);
+
+    // New Intent: Comparison/Competition
+    this.intentPatterns.set('comparison', [
+      /compared to/i,
+      /versus/i,
+      /vs/i,
+      /competition/i,
+      /competitor/i,
+      /alternative/i,
+      /other options/i,
+      /similar products/i,
+      /better than/i,
+      /different from/i,
+      /what makes you/i,
+      /how are you different/i,
+      /why should i choose/i,
+      /advantages over/i,
+      /looking at other/i,
+      /comparing/i,
+      /evaluating/i
+    ]);
+
+    // New Intent: Technical/Features
+    this.intentPatterns.set('technical', [
+      /how does it work/i,
+      /technical/i,
+      /features/i,
+      /functionality/i,
+      /capabilities/i,
+      /specifications/i,
+      /integration/i,
+      /compatibility/i,
+      /requirements/i,
+      /platform/i,
+      /system/i,
+      /technology/i,
+      /api/i,
+      /setup/i,
+      /implementation/i,
+      /customization/i
+    ]);
+
+    // New Intent: Timeline/Process  
+    this.intentPatterns.set('timeline', [
+      /how long/i,
+      /timeline/i,
+      /when/i,
+      /schedule/i,
+      /timeframe/i,
+      /duration/i,
+      /quick/i,
+      /fast/i,
+      /soon/i,
+      /process/i,
+      /steps/i,
+      /implementation/i,
+      /onboarding/i,
+      /setup time/i,
+      /delivery/i,
+      /launch/i
+    ]);
+
+    // New Intent: Support/Service
+    this.intentPatterns.set('support', [
+      /support/i,
+      /help/i,
+      /service/i,
+      /assistance/i,
+      /training/i,
+      /onboarding/i,
+      /customer service/i,
+      /maintenance/i,
+      /updates/i,
+      /backup/i,
+      /reliability/i,
+      /uptime/i,
+      /available/i,
+      /responsive/i
     ]);
   }
 
@@ -190,40 +407,70 @@ export class AdvancedConversationEngine {
   async analyzeIntent(customerInput: string): Promise<IntentAnalysis> {
     try {
       let primaryIntent = 'unknown';
+      let secondaryIntents: string[] = [];
       let confidence = 0;
       
-      // Pattern matching for quick intent detection
+      // Enhanced pattern matching for multiple intent detection
+      const intentMatches: Array<{intent: string, confidence: number}> = [];
+      
       for (const [intent, patterns] of this.intentPatterns.entries()) {
+        let matchCount = 0;
         for (const pattern of patterns) {
           if (pattern.test(customerInput)) {
-            primaryIntent = intent;
-            confidence = 0.8;
-            break;
+            matchCount++;
           }
         }
-        if (confidence > 0) break;
+        
+        if (matchCount > 0) {
+          const intentConfidence = Math.min(0.9, 0.6 + (matchCount * 0.1));
+          intentMatches.push({ intent, confidence: intentConfidence });
+        }
+      }
+      
+      // Sort by confidence and assign primary/secondary intents
+      intentMatches.sort((a, b) => b.confidence - a.confidence);
+      
+      if (intentMatches.length > 0) {
+        primaryIntent = intentMatches[0].intent;
+        confidence = intentMatches[0].confidence;
+        
+        // Extract secondary intents with confidence > 0.6
+        secondaryIntents = intentMatches
+          .slice(1)
+          .filter(match => match.confidence >= 0.6)
+          .map(match => match.intent);
       }
 
-      // Enhanced intent analysis using LLM
+      // Enhanced intent analysis using LLM if confidence is still low
       if (confidence < 0.7) {
         const llmAnalysis = await this.performLLMIntentAnalysis(customerInput);
         primaryIntent = llmAnalysis.intent;
         confidence = llmAnalysis.confidence;
       }
 
-      // Extract entities and sentiment
+      // Extract entities and enhanced sentiment analysis
       const entities = await this.extractEntities(customerInput);
       const sentiment = await this.analyzeSentiment(customerInput);
       const urgency = this.determineUrgency(customerInput);
       const decisionIndicators = this.extractDecisionIndicators(customerInput);
+      const conversationIndicators = this.extractConversationIndicators(customerInput);
+      
+      // Detect objection type if primary intent is objection
+      let objectionType: 'price' | 'timing' | 'authority' | 'need' | 'trust' | 'competitor' | 'quality' | 'comparison' | undefined;
+      if (primaryIntent === 'objection') {
+        objectionType = this.detectObjectionType(customerInput);
+      }
 
       return {
         primary: primaryIntent,
+        secondary: secondaryIntents.length > 0 ? secondaryIntents : undefined,
         confidence,
         entities,
         sentiment,
         urgency,
-        decisionIndicators
+        decisionIndicators,
+        conversationIndicators,
+        objectionType
       };
     } catch (error) {
       logger.error('Error analyzing intent:', error);
@@ -233,7 +480,8 @@ export class AdvancedConversationEngine {
         entities: {},
         sentiment: 'neutral',
         urgency: 'low',
-        decisionIndicators: []
+        decisionIndicators: [],
+        conversationIndicators: []
       };
     }
   }
@@ -244,7 +492,21 @@ export class AdvancedConversationEngine {
       
       Customer: "${input}"
       
-      Possible intents: interest, price_inquiry, objection, ready_to_buy, need_authority, clarification, negative_response
+      Possible intents: interest, price_inquiry, objection, ready_to_buy, need_authority, clarification, 
+      urgency, comparison, technical, timeline, support, negative_response, confusion, frustration
+      
+      Consider these categories:
+      - interest: Shows curiosity or desire to learn more
+      - price_inquiry: Asking about cost, pricing, or budget
+      - objection: Expressing resistance or concerns
+      - ready_to_buy: Ready to proceed or purchase
+      - need_authority: Need approval from someone else
+      - clarification: Confused or need clarification
+      - urgency: Time-sensitive or urgent needs
+      - comparison: Comparing with alternatives or competitors
+      - technical: Asking about features, functionality, or specifications
+      - timeline: Asking about timing, process, or implementation
+      - support: Asking about service, help, or maintenance
       
       Respond with JSON: {"intent": "detected_intent", "confidence": 0.0-1.0}
     `;
@@ -296,22 +558,45 @@ export class AdvancedConversationEngine {
     return entities;
   }
 
-  private async analyzeSentiment(input: string): Promise<'positive' | 'negative' | 'neutral'> {
-    const positiveWords = ['great', 'excellent', 'good', 'interested', 'yes', 'sure', 'definitely'];
-    const negativeWords = ['no', 'not', 'bad', 'terrible', 'never', 'stop', 'don\'t'];
+  private async analyzeSentiment(input: string): Promise<'positive' | 'negative' | 'neutral' | 'confused' | 'frustrated' | 'excited'> {
+    const sentimentWords = {
+      positive: ['great', 'excellent', 'good', 'interested', 'yes', 'sure', 'definitely', 'love', 'like', 
+                'amazing', 'fantastic', 'wonderful', 'perfect', 'awesome', 'brilliant', 'pleased', 'happy',
+                'satisfied', 'impressed', 'excited', 'thrilled', 'delighted'],
+      negative: ['no', 'not', 'bad', 'terrible', 'never', 'stop', 'don\'t', 'won\'t', 'can\'t', 'hate', 
+                'dislike', 'awful', 'horrible', 'disappointing', 'unsatisfied', 'unhappy', 'annoyed',
+                'frustrated', 'angry', 'upset', 'worried', 'concerned'],
+      confused: ['confused', 'unsure', 'don\'t understand', 'unclear', 'what do you mean', 'lost', 
+                'not following', 'puzzled', 'perplexed', 'baffled', 'mystified', 'bewildered'],
+      frustrated: ['frustrated', 'annoying', 'irritating', 'fed up', 'sick of', 'tired of', 'enough',
+                  'difficult', 'complicated', 'overwhelming', 'stressful', 'pain', 'hassle'],
+      excited: ['excited', 'thrilled', 'eager', 'enthusiastic', 'pumped', 'motivated', 'energized',
+               'passionate', 'keen', 'anxious to start', 'can\'t wait', 'looking forward']
+    };
     
     const words = input.toLowerCase().split(/\s+/);
-    let positiveCount = 0;
-    let negativeCount = 0;
+    const sentimentScores = {
+      positive: 0,
+      negative: 0,
+      confused: 0,
+      frustrated: 0,
+      excited: 0
+    };
     
     words.forEach(word => {
-      if (positiveWords.includes(word)) positiveCount++;
-      if (negativeWords.includes(word)) negativeCount++;
+      Object.entries(sentimentWords).forEach(([sentiment, wordList]) => {
+        if (wordList.some(sw => word.includes(sw) || sw.includes(word))) {
+          sentimentScores[sentiment as keyof typeof sentimentScores]++;
+        }
+      });
     });
     
-    if (positiveCount > negativeCount) return 'positive';
-    if (negativeCount > positiveCount) return 'negative';
-    return 'neutral';
+    // Find the highest scoring sentiment
+    const maxScore = Math.max(...Object.values(sentimentScores));
+    if (maxScore === 0) return 'neutral';
+    
+    const topSentiment = Object.entries(sentimentScores).find(([_, score]) => score === maxScore)?.[0];
+    return topSentiment as 'positive' | 'negative' | 'neutral' | 'confused' | 'frustrated' | 'excited' || 'neutral';
   }
 
   private determineUrgency(input: string): 'low' | 'medium' | 'high' {
@@ -326,20 +611,131 @@ export class AdvancedConversationEngine {
   }
 
   private extractDecisionIndicators(input: string): string[] {
-    const indicators = [];
-    const buyingSignals = [
-      'how much', 'when can we start', 'what\'s the process', 
-      'send me information', 'let\'s do it', 'sounds good'
-    ];
+    const indicators: string[] = [];
+    const decisionSignals = {
+      buyingSignals: [
+        'how much', 'when can we start', 'what\'s the process', 'send me information', 
+        'let\'s do it', 'sounds good', 'next steps', 'move forward', 'get started',
+        'sign up', 'purchase', 'buy', 'order', 'ready to proceed', 'where do i sign'
+      ],
+      considerationSignals: [
+        'thinking about it', 'considering', 'evaluating', 'looking into', 'exploring options',
+        'need to research', 'want to learn more', 'interested in', 'might be good'
+      ],
+      urgencySignals: [
+        'urgent', 'asap', 'immediately', 'quickly', 'soon', 'today', 'this week',
+        'deadline', 'time sensitive', 'rushing', 'emergency'
+      ],
+      authoritySignals: [
+        'need approval', 'ask my boss', 'check with team', 'run it by', 'decision maker',
+        'not my call', 'need permission', 'consult with', 'discuss internally'
+      ],
+      objectionSignals: [
+        'too expensive', 'can\'t afford', 'not interested', 'already have', 'satisfied with current',
+        'not right time', 'too busy', 'need to think', 'maybe later'
+      ],
+      engagementSignals: [
+        'tell me more', 'how does it work', 'show me', 'demonstrate', 'examples',
+        'case studies', 'more details', 'explain', 'elaborate'
+      ]
+    };
     
     const lowerInput = input.toLowerCase();
-    buyingSignals.forEach(signal => {
-      if (lowerInput.includes(signal)) {
-        indicators.push(signal);
-      }
+    
+    Object.entries(decisionSignals).forEach(([category, signals]) => {
+      signals.forEach(signal => {
+        if (lowerInput.includes(signal)) {
+          indicators.push(`${category}:${signal}`);
+        }
+      });
     });
     
     return indicators;
+  }
+
+  private extractConversationIndicators(input: string): string[] {
+    const indicators: string[] = [];
+    const conversationSignals = {
+      engagement: [
+        'interesting', 'tell me more', 'go on', 'continue', 'elaborate', 'explain',
+        'show me', 'demonstrate', 'examples', 'how so', 'really'
+      ],
+      resistance: [
+        'but', 'however', 'although', 'not sure', 'skeptical', 'doubtful',
+        'concerned', 'worried', 'hesitant', 'unsure'
+      ],
+      timeConstraints: [
+        'busy', 'no time', 'quick', 'brief', 'short', 'hurry', 'rush',
+        'tight schedule', 'limited time', 'in a meeting'
+      ],
+      informationSeeking: [
+        'details', 'information', 'specifics', 'documentation', 'brochure',
+        'website', 'references', 'testimonials', 'reviews'
+      ],
+      comparisonMode: [
+        'compared to', 'versus', 'alternative', 'options', 'competitors',
+        'similar', 'different', 'better', 'worse', 'evaluating'
+      ]
+    };
+    
+    const lowerInput = input.toLowerCase();
+    
+    Object.entries(conversationSignals).forEach(([category, signals]) => {
+      signals.forEach(signal => {
+        if (lowerInput.includes(signal)) {
+          indicators.push(`${category}:${signal}`);
+        }
+      });
+    });
+    
+    return indicators;
+  }
+
+  private detectObjectionType(input: string): 'price' | 'timing' | 'authority' | 'need' | 'trust' | 'competitor' | 'quality' | 'comparison' | undefined {
+    const objectionTypes = {
+      price: [
+        'too expensive', 'can\'t afford', 'out of budget', 'costs too much', 'price',
+        'cheap', 'cost', 'money', 'budget', 'expensive', 'affordable', 'investment'
+      ],
+      timing: [
+        'not right time', 'too busy', 'maybe later', 'call back', 'not now',
+        'busy', 'time', 'schedule', 'later', 'timing', 'when'
+      ],
+      authority: [
+        'not my decision', 'ask my boss', 'need approval', 'boss', 'manager',
+        'supervisor', 'team', 'committee', 'owner', 'decision maker'
+      ],
+      need: [
+        'don\'t need', 'already have', 'not interested', 'satisfied with current',
+        'happy with what we have', 'no need', 'unnecessary'
+      ],
+      trust: [
+        'don\'t know you', 'sounds too good', 'scam', 'suspicious', 'doubt',
+        'skeptical', 'trust', 'reliable', 'credible', 'legitimate'
+      ],
+      competitor: [
+        'using competitor', 'happy with current', 'already working with',
+        'current provider', 'existing solution', 'competitor', 'alternative'
+      ],
+      quality: [
+        'not good enough', 'poor quality', 'doesn\'t work', 'unreliable',
+        'problems', 'issues', 'concerns', 'quality', 'performance'
+      ],
+      comparison: [
+        'comparing options', 'evaluating alternatives', 'looking at others',
+        'shopping around', 'other vendors', 'competitors', 'alternatives'
+      ]
+    };
+    
+    const lowerInput = input.toLowerCase();
+    
+    for (const [type, keywords] of Object.entries(objectionTypes)) {
+      if (keywords.some(keyword => lowerInput.includes(keyword))) {
+        return type as 'price' | 'timing' | 'authority' | 'need' | 'trust' | 'competitor' | 'quality' | 'comparison';
+      }
+    }
+    
+    return undefined;
   }
 
   // Objection Handling

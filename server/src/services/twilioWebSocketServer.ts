@@ -219,7 +219,7 @@ export class TwilioWebSocketServer {
           ws.on('message', (data: RawData) => {
             try {
               const text = data.toString('utf8');
-              logger.debug('Received WebSocket message', { 
+              logger.debug('Received WebSocket message from Twilio', { 
                 callId, 
                 conversationId, 
                 messageLength: text.length,
@@ -228,6 +228,15 @@ export class TwilioWebSocketServer {
               
               const msg = JSON.parse(text);
               const ev = msg?.event;
+
+              logger.debug('Parsed Twilio message', { 
+                callId, 
+                conversationId, 
+                event: ev,
+                messageType: typeof msg,
+                hasStreamSid: !!msg?.streamSid,
+                hasStart: !!msg?.start
+              });
 
               if (ev === 'connected') {
                 // Find or create connection state
@@ -302,10 +311,30 @@ export class TwilioWebSocketServer {
                 }
                 
                 const streamSid = msg?.start?.streamSid || msg?.streamSid;
-                logger.info('Twilio start event', { callId, conversationId, streamSid });
+                logger.info('Twilio start event received', { callId, conversationId, streamSid });
 
                 // Store streamSid on WebSocket connection for sendMediaChunks usage
                 (ws as any).streamSid = streamSid;
+
+                // Send required "connected" acknowledgment to Twilio after processing start event
+                // This is the critical message that Twilio expects to complete the protocol handshake
+                try {
+                  const acknowledgment = { event: 'connected' };
+                  originalSend(JSON.stringify(acknowledgment));
+                  logger.info('Sent connected acknowledgment to Twilio', { callId, conversationId, streamSid });
+                  
+                  // Mark connection as connected after successful acknowledgment
+                  if (state) {
+                    state.gotConnected = true;
+                  }
+                } catch (ackErr: any) {
+                  logger.error('Failed to send connected acknowledgment to Twilio', { 
+                    error: ackErr?.message, 
+                    callId, 
+                    conversationId, 
+                    streamSid 
+                  });
+                }
 
                 // Flush any queued sends and allow outbound
                 outboundReady = true;
@@ -369,7 +398,12 @@ export class TwilioWebSocketServer {
               conversationId,
               gotConnected: state?.gotConnected,
               gotStart: state?.gotStart,
-              streamSid: state?.streamSid
+              streamSid: state?.streamSid,
+              protocolState: {
+                receivedStart: state?.gotStart || false,
+                sentConnectedAck: state?.gotConnected || false,
+                hasStreamSid: !!state?.streamSid
+              }
             });
             
             // Log specific close codes for debugging

@@ -286,17 +286,12 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
       return success;
     };
 
-    // Send immediate success response to acknowledge connection
+    // Initialize the enhanced WebSocket manager without sending any messages to Twilio
+    // Do NOT send "connected" events to Twilio as this violates the protocol
     try {
-      const connectionMessage = {
-        event: 'connected',
-        timestamp: Date.now().toString(),
-        status: 'ready'
-      };
-      twilioManager.sendTwilioMessage(connectionMessage);
       logger.info(`Enhanced Twilio WebSocket manager initialized for call ${callId}`);
     } catch (initError) {
-      logger.error(`Failed to send connection acknowledgment for call ${callId}:`, initError);
+      logger.error(`Failed to initialize WebSocket manager for call ${callId}:`, initError);
     }
 
     // Set up session event handlers with resilience service integration

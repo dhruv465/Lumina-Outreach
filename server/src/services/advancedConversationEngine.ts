@@ -935,6 +935,22 @@ export class AdvancedConversationEngine {
   }
 
   private async handleObjectionInConversation(conversation: ConversationState, intent: IntentAnalysis): Promise<any> {
+    // Use the enhanced objection type detection from intent analysis
+    if (intent.objectionType) {
+      try {
+        const response = await this.generateObjectionResponse(intent.objectionType, intent.entities.concern || '');
+        return {
+          text: response,
+          action: 'gather',
+          nextState: conversation.phase,
+          objectionHandled: intent.objectionType
+        };
+      } catch (error) {
+        logger.error('Error handling categorized objection:', error);
+      }
+    }
+    
+    // Fallback to legacy objection identification if objectionType not detected
     const objection = await this.identifyObjection(intent.entities.concern || '');
     
     if (objection) {
@@ -967,19 +983,61 @@ export class AdvancedConversationEngine {
     intent: IntentAnalysis
   ): Promise<void> {
     // Update engagement level based on responses
-    if (intent.primary === 'interest') {
+    if (intent.primary === 'interest' || intent.secondary?.includes('interest')) {
       conversation.customerProfile.engagementLevel = Math.min(1, conversation.customerProfile.engagementLevel + 0.2);
     } else if (intent.primary === 'objection') {
       conversation.customerProfile.engagementLevel = Math.max(0, conversation.customerProfile.engagementLevel - 0.1);
     }
+    
+    // Enhance engagement based on secondary intents
+    if (intent.secondary?.includes('technical') || intent.secondary?.includes('timeline')) {
+      conversation.customerProfile.engagementLevel = Math.min(1, conversation.customerProfile.engagementLevel + 0.1);
+    }
+    
+    // Update engagement based on sentiment
+    switch (intent.sentiment) {
+      case 'excited':
+        conversation.customerProfile.engagementLevel = Math.min(1, conversation.customerProfile.engagementLevel + 0.3);
+        break;
+      case 'frustrated':
+        conversation.customerProfile.engagementLevel = Math.max(0, conversation.customerProfile.engagementLevel - 0.2);
+        break;
+      case 'confused':
+        // Neutral impact but indicates need for clarification
+        if (!conversation.customerProfile.interests.includes('needs_clarification')) {
+          conversation.customerProfile.interests.push('needs_clarification');
+        }
+        break;
+    }
+    
+    // Extract interests from conversation indicators
+    intent.conversationIndicators.forEach(indicator => {
+      const [category, signal] = indicator.split(':');
+      if (category === 'engagement' && !conversation.customerProfile.interests.includes('engaged')) {
+        conversation.customerProfile.interests.push('engaged');
+      } else if (category === 'informationSeeking' && !conversation.customerProfile.interests.includes('wants_details')) {
+        conversation.customerProfile.interests.push('wants_details');
+      } else if (category === 'comparisonMode' && !conversation.customerProfile.interests.includes('comparing_options')) {
+        conversation.customerProfile.interests.push('comparing_options');
+      }
+    });
 
-    // Extract and store pain points
+    // Extract and store pain points from entities
     if (intent.entities && Object.keys(intent.entities).length > 0) {
       Object.values(intent.entities).forEach(entity => {
         if (!conversation.customerProfile.painPoints.includes(entity)) {
           conversation.customerProfile.painPoints.push(entity);
         }
       });
+    }
+    
+    // Update decision making style based on patterns
+    if (intent.primary === 'need_authority' || intent.secondary?.includes('need_authority')) {
+      conversation.customerProfile.decisionMakingStyle = 'consensus';
+    } else if (intent.primary === 'ready_to_buy' && conversation.customerProfile.engagementLevel > 0.7) {
+      conversation.customerProfile.decisionMakingStyle = 'decisive';
+    } else if (intent.primary === 'comparison' || intent.secondary?.includes('comparison')) {
+      conversation.customerProfile.decisionMakingStyle = 'analytical';
     }
   }
 
@@ -1004,12 +1062,46 @@ export class AdvancedConversationEngine {
     
     if (response.objectionHandled) {
       actions.push('follow_up_objection', 'continue_presentation');
-    } else if (intent?.primary === 'interest') {
+    } else if (intent?.primary === 'interest' || intent?.secondary?.includes('interest')) {
       actions.push('provide_details', 'ask_qualifying_questions');
     } else if (intent?.primary === 'ready_to_buy') {
       actions.push('close_deal', 'schedule_follow_up');
+    } else if (intent?.primary === 'clarification') {
+      actions.push('clarify_explanation', 'provide_examples');
+    } else if (intent?.primary === 'comparison' || intent?.secondary?.includes('comparison')) {
+      actions.push('competitive_comparison', 'highlight_differentiators');
+    } else if (intent?.primary === 'technical' || intent?.secondary?.includes('technical')) {
+      actions.push('technical_deep_dive', 'feature_demonstration');
+    } else if (intent?.primary === 'timeline' || intent?.secondary?.includes('timeline')) {
+      actions.push('explain_process', 'set_expectations');
+    } else if (intent?.sentiment === 'frustrated') {
+      actions.push('address_concerns', 'empathetic_response');
+    } else if (intent?.sentiment === 'confused') {
+      actions.push('simplify_explanation', 'break_down_concepts');
+    } else if (intent?.sentiment === 'excited') {
+      actions.push('capitalize_enthusiasm', 'accelerate_process');
+    } else if (intent?.urgency === 'high') {
+      actions.push('fast_track_process', 'immediate_next_steps');
     } else {
       actions.push('clarify', 'provide_value');
+    }
+    
+    // Add context-based actions from conversation indicators
+    if (intent?.conversationIndicators) {
+      intent.conversationIndicators.forEach(indicator => {
+        const [category] = indicator.split(':');
+        switch (category) {
+          case 'timeConstraints':
+            if (!actions.includes('brief_summary')) actions.push('brief_summary');
+            break;
+          case 'informationSeeking':
+            if (!actions.includes('provide_documentation')) actions.push('provide_documentation');
+            break;
+          case 'resistance':
+            if (!actions.includes('address_concerns')) actions.push('address_concerns');
+            break;
+        }
+      });
     }
     
     return actions;

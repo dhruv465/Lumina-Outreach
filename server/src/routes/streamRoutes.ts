@@ -9,8 +9,9 @@ const router = express.Router();
 // Enable WebSocket support on this router
 const wsRouter = expressWs(router as any).app;
 
-// WebSocket streaming endpoint - not authenticated
-wsRouter.ws('/voice/stream', handleVoiceStream);
+// WebSocket streaming endpoint - now handled by TwilioWebSocketServer for better reliability
+// Commented out to prevent conflicts with dedicated TwilioWebSocketServer
+// wsRouter.ws('/voice/stream', handleVoiceStream);
 
 // WebSocket streaming endpoint for ElevenLabs Conversational AI
 wsRouter.ws('/voice/conversational-ai', handleConversationalAIStream);
@@ -21,8 +22,8 @@ wsRouter.ws('/voice/conversational-ai', handleConversationalAIStream);
 // wsRouter.ws('/voice/optimized-stream', handleOptimizedVoiceStream);
 // wsRouter.ws('/voice/optimized-stream/:callId/:conversationId', handleOptimizedVoiceStream);
 
-// Handle Twilio stream webhook (keep this for backward compatibility)
-// Legacy route - consider migrating to dedicated TwilioWebSocketServer
+// Legacy route - kept for backward compatibility with existing integrations
+// but consider migrating to dedicated TwilioWebSocketServer for better reliability
 wsRouter.ws('/stream', handleTwilioStreamWebhook);
 
 export default router;

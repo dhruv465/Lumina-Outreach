@@ -66,69 +66,7 @@ export class TwilioWebSocketServer {
       clientTracking: true,
     });
 
-    // Handle upgrade events manually to prevent Express interference
-    server.on("upgrade", (request, socket, head) => {
-      const pathname = url.parse(request.url || "").pathname || "";
-
-      // Handle both with and without .websocket suffix
-      const normalizedPathname = pathname.replace(/\/\.websocket$/, "");
-
-      // Determine whether this upgrade request is targeting a supported Twilio media stream endpoint.
-      // Include legacy paths (optimized-stream/low-latency) as well as the new simplified path (/voice/stream).
-      const isValidPath =
-        normalizedPathname.startsWith("/voice/optimized-stream") ||
-        normalizedPathname.startsWith("/voice/low-latency") ||
-        normalizedPathname.startsWith("/voice/stream") || // simplified streaming path
-        normalizedPathname.startsWith("/stream") ||
-        pathname.includes(".websocket") ||
-        pathname.includes("project-call-stream");
-
-      // Verify WebSocket upgrade headers
-      const hasValidHeaders =
-        request.headers.upgrade === "websocket" &&
-        request.headers.connection &&
-        request.headers.connection.toLowerCase().includes("upgrade");
-
-      logger.info("WebSocket upgrade request intercepted", {
-        url: request.url,
-        pathname,
-        normalizedPathname,
-        isValidPath,
-        hasValidHeaders,
-        userAgent: request.headers["user-agent"],
-        upgradeHeader: request.headers.upgrade,
-        connectionHeader: request.headers.connection,
-      });
-
-      // Only handle Twilio-specific paths, let other WebSocket connections (like Socket.IO) pass through
-      if (isValidPath && hasValidHeaders) {
-        // Handle the upgrade for Twilio WebSocket connections
-        this.wss.handleUpgrade(request, socket, head, (ws) => {
-          this.wss.emit("connection", ws, request);
-        });
-      } else if (isValidPath) {
-        // Reject only if it's a Twilio path but with invalid headers
-        logger.warn(
-          "Rejecting WebSocket upgrade for invalid headers on Twilio path",
-          {
-            pathname,
-            isValidPath,
-            hasValidHeaders,
-          }
-        );
-        socket.destroy();
-      }
-      // For non-Twilio paths (like Socket.IO), let them be handled by other servers
-      // No action needed - the request will continue to other handlers
-    });
-
-    this.setupEventHandlers();
-    logger.info("Twilio WebSocket server initialized", {
-      serverCreated: !!this.wss,
-      mode: "noServer",
-    });
-    
-    // Bind to HTTP upgrade
+    // Single consolidated upgrade handler to prevent duplicate processing
     this.server.on('upgrade', (request, socket, head) => {
       try {
         const upgradeHeader = (request.headers['upgrade'] || '').toString().toLowerCase();
@@ -136,55 +74,76 @@ export class TwilioWebSocketServer {
         const urlPath = request.url || '/';
         const { pathname } = parseUrl(urlPath);
 
+        // Handle both with and without .websocket suffix
+        const normalizedPathname = pathname ? pathname.replace(/\/\.websocket$/, "") : "";
+
         const isWs = upgradeHeader === 'websocket' && connectionHeader.includes('upgrade');
-        const isValidPath = !!pathname && pathname.startsWith(this.pathPrefix);
+        
+        // Determine whether this upgrade request is targeting a supported Twilio media stream endpoint.
+        // Include legacy paths (optimized-stream/low-latency) as well as the new simplified path (/voice/stream).
+        const isValidPath = normalizedPathname && (
+          normalizedPathname.startsWith("/voice/optimized-stream") ||
+          normalizedPathname.startsWith("/voice/low-latency") ||
+          normalizedPathname.startsWith("/voice/stream") || // simplified streaming path
+          normalizedPathname.startsWith("/stream") ||
+          pathname?.includes(".websocket") ||
+          pathname?.includes("project-call-stream")
+        );
 
         logger.info('WebSocket upgrade request intercepted', {
           upgradeHeader,
           connectionHeader,
           url: urlPath,
           pathname,
+          normalizedPathname,
           isValidPath,
+          userAgent: request.headers["user-agent"],
         });
 
-        // Only handle requests for our specific path prefix
+        // Only handle WebSocket requests for valid Twilio paths
         if (!isWs || !isValidPath) {
           // Don't handle this request - let other WebSocket servers handle it
           return;
         }
 
-        // Expected pattern: /voice/stream/:callId/:conversationId
-        const parts = pathname!.split('/').filter(Boolean); // ['voice','stream', callId, conversationId]
-        if (parts.length !== 4 || parts[0] !== 'voice' || parts[1] !== 'stream') {
-          logger.warn('Rejecting WS: unexpected path segments', { 
-            pathname, 
-            parts,
-            expected: '/voice/stream/:callId/:conversationId'
-          });
-          socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
-          socket.destroy();
-          return;
+        // For specific /voice/stream/:callId/:conversationId pattern, extract parameters
+        let callId: string | undefined;
+        let conversationId: string | undefined;
+
+        if (normalizedPathname.startsWith('/voice/stream/')) {
+          // Expected pattern: /voice/stream/:callId/:conversationId
+          const parts = normalizedPathname.split('/').filter(Boolean); // ['voice','stream', callId, conversationId]
+          if (parts.length === 4 && parts[0] === 'voice' && parts[1] === 'stream') {
+            callId = parts[2];
+            conversationId = parts[3];
+          } else {
+            logger.warn('Rejecting WS: unexpected path segments for /voice/stream', { 
+              pathname: normalizedPathname, 
+              parts,
+              expected: '/voice/stream/:callId/:conversationId'
+            });
+            socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+            socket.destroy();
+            return;
+          }
         }
 
-        const callId = parts[2];
-        const conversationId = parts[3];
-
         this.wss.handleUpgrade(request, socket, head, (ws) => {
-          // Build connection state first
-          const connectionKey = `${callId}:${conversationId}`;
-          const state: ConnectionState = {
-            callId,
-            conversationId,
-            ws,
-            createdAt: Date.now(),
-            gotConnected: false,
-            gotStart: false,
-          };
-          this.active.set(connectionKey, state);
-          this.activeConnections.set(connectionKey, ws);
-
-          // Initialize audio chunk buffer for this connection
-          this.audioChunkBuffers.set(connectionKey, []);
+          // For paths with callId/conversationId in URL, set up connection state immediately
+          if (callId && conversationId) {
+            const connectionKey = `${callId}:${conversationId}`;
+            const state: ConnectionState = {
+              callId,
+              conversationId,
+              ws,
+              createdAt: Date.now(),
+              gotConnected: false,
+              gotStart: false,
+            };
+            this.active.set(connectionKey, state);
+            this.activeConnections.set(connectionKey, ws);
+            this.audioChunkBuffers.set(connectionKey, []);
+          }
 
           // Wrap ws.send so we gate all server->Twilio sends until 'start'
           const originalSend = ws.send.bind(ws) as any;
@@ -259,7 +218,14 @@ export class TwilioWebSocketServer {
               const ev = msg?.event;
 
               if (ev === 'connected') {
-                state.gotConnected = true;
+                // Find or create connection state
+                let connectionKey = callId && conversationId ? `${callId}:${conversationId}` : undefined;
+                let state = connectionKey ? this.active.get(connectionKey) : undefined;
+                
+                if (state) {
+                  state.gotConnected = true;
+                }
+                
                 logger.info('Twilio connected event', { callId, conversationId });
                 
                 // Send acknowledgment back to Twilio
@@ -269,9 +235,66 @@ export class TwilioWebSocketServer {
                   logger.error('Failed to send connected acknowledgment', { error: sendErr });
                 }
               } else if (ev === 'start') {
-                state.gotStart = true;
-                state.streamSid = msg?.start?.streamSid || msg?.streamSid;
-                logger.info('Twilio start event', { callId, conversationId, streamSid: state.streamSid });
+                // Extract callId and conversationId from start event if not already available
+                let effectiveCallId = callId;
+                let effectiveConversationId = conversationId;
+                
+                if (!effectiveCallId || !effectiveConversationId) {
+                  // Try to extract from custom parameters in start event
+                  if (msg.start?.customParameters) {
+                    effectiveCallId = effectiveCallId || msg.start.customParameters.callId;
+                    effectiveConversationId = effectiveConversationId || msg.start.customParameters.conversationId;
+                  }
+                  
+                  // Try to extract from URL path or query parameters
+                  if (!effectiveCallId || !effectiveConversationId) {
+                    const urlPath = request.url || '';
+                    const pathMatch = urlPath.match(/\/voice\/(?:optimized-stream|low-latency|stream)\/([^\/]+)\/([^\/\?]+)/);
+                    if (pathMatch) {
+                      effectiveCallId = effectiveCallId || pathMatch[1];
+                      effectiveConversationId = effectiveConversationId || pathMatch[2];
+                    } else {
+                      // Try query parameters
+                      try {
+                        const parsed = new URL(urlPath, 'ws://placeholder');
+                        effectiveCallId = effectiveCallId || parsed.searchParams.get('callId') || undefined;
+                        effectiveConversationId = effectiveConversationId || parsed.searchParams.get('conversationId') || undefined;
+                      } catch {}
+                    }
+                  }
+                }
+                
+                // Update the variables for use in later handlers
+                callId = effectiveCallId;
+                conversationId = effectiveConversationId;
+                
+                // Create or get connection state
+                let state: ConnectionState | undefined;
+                if (callId && conversationId) {
+                  const connectionKey = `${callId}:${conversationId}`;
+                  state = this.active.get(connectionKey);
+                  if (!state) {
+                    state = {
+                      callId,
+                      conversationId,
+                      ws,
+                      createdAt: Date.now(),
+                      gotConnected: false,
+                      gotStart: false,
+                    };
+                    this.active.set(connectionKey, state);
+                    this.activeConnections.set(connectionKey, ws);
+                    this.audioChunkBuffers.set(connectionKey, []);
+                  }
+                }
+                
+                if (state) {
+                  state.gotStart = true;
+                  state.streamSid = msg?.start?.streamSid || msg?.streamSid;
+                }
+                
+                const streamSid = msg?.start?.streamSid || msg?.streamSid;
+                logger.info('Twilio start event', { callId, conversationId, streamSid });
 
                 // Flush any queued sends and allow outbound
                 outboundReady = true;
@@ -281,8 +304,6 @@ export class TwilioWebSocketServer {
                 }
               } else if (ev === 'media') {
                 // Inbound 20ms media frame (base64 PCM µ-law).
-                // You can forward to Deepgram here.
-                // msg.media.payload (base64)
                 logger.debug('Received media frame', { 
                   callId, 
                   conversationId, 
@@ -291,7 +312,7 @@ export class TwilioWebSocketServer {
                 
                 // Handle audio data
                 const audioPayload = msg.media?.payload;
-                if (audioPayload) {
+                if (audioPayload && callId && conversationId) {
                   this.handleAudioChunk(
                     callId,
                     conversationId,
@@ -321,7 +342,12 @@ export class TwilioWebSocketServer {
 
           ws.on('close', (code: number, reason: Buffer) => {
             const reasonStr = reason?.toString?.() || '';
-            const duration = Date.now() - state.createdAt;
+            const startTime = Date.now();
+            
+            // Find connection state if it exists
+            const connectionKey = callId && conversationId ? `${callId}:${conversationId}` : undefined;
+            const state = connectionKey ? this.active.get(connectionKey) : undefined;
+            const duration = state ? startTime - state.createdAt : 0;
             
             logger.info('WebSocket connection closed', {
               code,
@@ -330,9 +356,9 @@ export class TwilioWebSocketServer {
               connectionKey,
               callId,
               conversationId,
-              gotConnected: state.gotConnected,
-              gotStart: state.gotStart,
-              streamSid: state.streamSid
+              gotConnected: state?.gotConnected,
+              gotStart: state?.gotStart,
+              streamSid: state?.streamSid
             });
             
             // Log specific close codes for debugging
@@ -341,8 +367,8 @@ export class TwilioWebSocketServer {
                 callId,
                 conversationId,
                 duration,
-                gotConnected: state.gotConnected,
-                gotStart: state.gotStart
+                gotConnected: state?.gotConnected,
+                gotStart: state?.gotStart
               });
             } else if (code === 1002) {
               logger.error('WebSocket closed due to protocol error (1002)', {
@@ -352,9 +378,12 @@ export class TwilioWebSocketServer {
               });
             }
             
-            this.active.delete(connectionKey);
-            this.activeConnections.delete(connectionKey);
-            this.audioChunkBuffers.delete(connectionKey);
+            // Clean up connection state if it exists
+            if (connectionKey) {
+              this.active.delete(connectionKey);
+              this.activeConnections.delete(connectionKey);
+              this.audioChunkBuffers.delete(connectionKey);
+            }
           });
 
           ws.on('error', (err: any) => {
@@ -366,13 +395,16 @@ export class TwilioWebSocketServer {
             });
           });
           
-          // Set up keep-alive and connection health monitoring
-          this.setupConnectionKeepAlive(connectionKey, ws);
-          this.setupConnectionHealthCheck(connectionKey, ws);
+          // Set up keep-alive and connection health monitoring if we have connection info
+          if (callId && conversationId) {
+            const connectionKey = `${callId}:${conversationId}`;
+            this.setupConnectionKeepAlive(connectionKey, ws);
+            this.setupConnectionHealthCheck(connectionKey, ws);
+          }
           
           // Send a small keepalive to ensure connection stays open
           setTimeout(() => {
-            if (ws.readyState === WebSocket.OPEN && !state.gotConnected) {
+            if (ws.readyState === WebSocket.OPEN) {
               logger.debug('Sending keepalive ping to maintain connection', { callId, conversationId });
               try {
                 ws.ping();

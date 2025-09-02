@@ -286,17 +286,12 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
       return success;
     };
 
-    // Send immediate success response to acknowledge connection
+    // Initialize the enhanced WebSocket manager without sending any messages to Twilio
+    // Do NOT send "connected" events to Twilio as this violates the protocol
     try {
-      const connectionMessage = {
-        event: 'connected',
-        timestamp: Date.now().toString(),
-        status: 'ready'
-      };
-      twilioManager.sendTwilioMessage(connectionMessage);
       logger.info(`Enhanced Twilio WebSocket manager initialized for call ${callId}`);
     } catch (initError) {
-      logger.error(`Failed to send connection acknowledgment for call ${callId}:`, initError);
+      logger.error(`Failed to initialize WebSocket manager for call ${callId}:`, initError);
     }
 
     // Set up session event handlers with resilience service integration
@@ -662,16 +657,9 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
         logger.info(`Opening message sent for call ${callId}, estimated duration: ${estimatedDuration}ms, transitioning to listening state after completion`);
         
         setTimeout(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            const listeningMessage = {
-              event: 'listening',
-              type: 'listening',
-              conversationId,
-              streamSid: streamSid
-            };
-            twilioManager.sendTwilioMessage(listeningMessage);
-            logger.info(`Transitioned to listening state after opening message for call ${callId}, conversation ${conversationId}`);
-          }
+          // Simply transition to listening state internally - no need to notify Twilio
+          // Twilio doesn't expect or need "listening" event messages from us
+          logger.info(`Transitioned to listening state after opening message for call ${callId}, conversation ${conversationId}`);
         }, estimatedDuration);
         
       } catch (e) { 
@@ -707,28 +695,10 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
               logger.info(`Media stream started for call ${callId}, conv ${conversationId}, streamSid: ${streamSid}`);
               await sendPendingOpeningMessage();
 
-              // Send a connected event to acknowledge the start message
-              // This is REQUIRED by Twilio Media Streams protocol
-              if (ws.readyState === WebSocket.OPEN) {
-                const connectedMessage = {
-                  event: 'connected',
-                  protocol: 'v2',
-                  streamSid: streamSid
-                };
-                logger.debug(`Sending connected message: ${JSON.stringify(connectedMessage)}`);
-                twilioManager.sendTwilioMessage(connectedMessage);
-
-                // Also send a mark event to confirm the connection is working
-                const markMessage = {
-                  event: 'mark',
-                  streamSid: streamSid,
-                  mark: {
-                    name: 'connection-established'
-                  }
-                };
-                logger.debug(`Sending mark message: ${JSON.stringify(markMessage)}`);
-                twilioManager.sendTwilioMessage(markMessage);
-              }
+              // Do NOT send acknowledgment back to Twilio for 'start' event
+              // The 'connected' event is something Twilio sends TO us, not something we send back
+              // Sending this back causes protocol violations (Twilio error 31924)
+              // Simply receiving and processing the start message is sufficient acknowledgment
 
               return; // Don't process as audio data
             }

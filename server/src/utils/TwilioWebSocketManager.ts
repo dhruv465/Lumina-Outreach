@@ -467,12 +467,13 @@ export class TwilioWebSocketManager {
         return false;
       }
 
-      // Send as a single, non-fragmented frame with strict protocol compliance
+      // Send as a single, non-fragmented frame with strict protocol compliance  
+      // Note: Using minimal options to ensure maximum compatibility with Twilio
       this.ws.send(jsonMessage, { 
         binary: false,
         compress: false, // Disable compression to prevent fragmentation
-        fin: true, // Ensure this is sent as a complete frame
-        mask: false // Server-to-client messages should not be masked
+        fin: true // Ensure this is sent as a complete frame
+        // mask option omitted - let the WebSocket library handle masking automatically
       });
 
       // Log success (periodically to avoid spam)

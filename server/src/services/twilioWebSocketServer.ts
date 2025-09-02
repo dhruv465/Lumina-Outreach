@@ -74,20 +74,20 @@ export class TwilioWebSocketServer {
         const urlPath = request.url || '/';
         const { pathname } = parseUrl(urlPath);
 
-        // Handle both with and without .websocket suffix
-        const normalizedPathname = pathname ? pathname.replace(/\/\.websocket$/, "") : "";
+        // Handle both with and without .websocket suffix - normalize to prevent duplication
+        const normalizedPathname = pathname ? pathname.replace(/\/\.websocket$/, "").replace(/\.websocket$/, "") : "";
 
         const isWs = upgradeHeader === 'websocket' && connectionHeader.includes('upgrade');
         
         // Determine whether this upgrade request is targeting a supported Twilio media stream endpoint.
         // Include legacy paths (optimized-stream/low-latency) as well as the new simplified path (/voice/stream).
+        // Note: We check normalizedPathname to avoid issues with duplicated .websocket paths that cause Twilio error 31924
         const isValidPath = normalizedPathname && (
           normalizedPathname.startsWith("/voice/optimized-stream") ||
           normalizedPathname.startsWith("/voice/low-latency") ||
           normalizedPathname.startsWith("/voice/stream") || // simplified streaming path
           normalizedPathname.startsWith("/stream") ||
-          pathname?.includes(".websocket") ||
-          pathname?.includes("project-call-stream")
+          normalizedPathname.includes("project-call-stream")
         );
 
         logger.info('WebSocket upgrade request intercepted', {
@@ -129,6 +129,16 @@ export class TwilioWebSocketServer {
         }
 
         this.wss.handleUpgrade(request, socket, head, (ws) => {
+          logger.info('WebSocket upgrade completed successfully', {
+            url: pathname,
+            normalizedPathname,
+            callId,
+            conversationId,
+            readyState: ws.readyState,
+            protocol: ws.protocol,
+            extensions: ws.extensions
+          });
+
           // For paths with callId/conversationId in URL, set up connection state immediately
           if (callId && conversationId) {
             const connectionKey = `${callId}:${conversationId}`;
@@ -143,6 +153,8 @@ export class TwilioWebSocketServer {
             this.active.set(connectionKey, state);
             this.activeConnections.set(connectionKey, ws);
             this.audioChunkBuffers.set(connectionKey, []);
+            
+            logger.info('Connection state created', { connectionKey, readyState: ws.readyState });
           }
 
           // Wrap ws.send so we gate all server->Twilio sends until 'start'
@@ -226,14 +238,10 @@ export class TwilioWebSocketServer {
                   state.gotConnected = true;
                 }
                 
-                logger.info('Twilio connected event', { callId, conversationId });
+                logger.info('Twilio connected event received', { callId, conversationId });
                 
-                // Send acknowledgment back to Twilio
-                try {
-                  ws.send(JSON.stringify({ event: 'connected' }));
-                } catch (sendErr) {
-                  logger.error('Failed to send connected acknowledgment', { error: sendErr });
-                }
+                // Do NOT send acknowledgment back to Twilio for 'connected' event
+                // Echoing the connected event can cause protocol violations (Twilio error 31924)
               } else if (ev === 'start') {
                 // Extract callId and conversationId from start event if not already available
                 let effectiveCallId = callId;
@@ -295,6 +303,9 @@ export class TwilioWebSocketServer {
                 
                 const streamSid = msg?.start?.streamSid || msg?.streamSid;
                 logger.info('Twilio start event', { callId, conversationId, streamSid });
+
+                // Store streamSid on WebSocket connection for sendMediaChunks usage
+                (ws as any).streamSid = streamSid;
 
                 // Flush any queued sends and allow outbound
                 outboundReady = true;
@@ -554,11 +565,14 @@ export class TwilioWebSocketServer {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       logger.warn('Cannot send media chunks: WebSocket is not open', {
         readyState: ws?.readyState,
-        streamSid
+        streamSid: streamSid
       });
       return;
     }
 
+    // Get the real Twilio streamSid from the WebSocket connection  
+    const streamSid = (ws as any).streamSid || streamSid;
+    
     const sock: any = ws as any;
     if (typeof sock.sequenceNumber !== 'number') sock.sequenceNumber = 0;
     let offset = 0;
@@ -568,7 +582,7 @@ export class TwilioWebSocketServer {
       const slice = audioData.slice(offset, end);
       const message = {
         event: 'media',
-        streamSid,
+        streamSid: streamSid,
         media: {
           track: 'outbound',
           chunk: (++sock.sequenceNumber).toString(),

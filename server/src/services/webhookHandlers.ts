@@ -1009,9 +1009,9 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
 
                   logger.info(`Media stream started for call ${callId}, conv ${conversationId}, streamSid: ${streamSid}`);
 
-                  // Do NOT send acknowledgment back to Twilio for 'start' event
-                  // The 'connected' event is something Twilio sends TO us, not something we send back
-                  // Sending this back causes protocol violations (Twilio error 31924)
+                  // Note: This is a legacy handler. The main implementation in TwilioWebSocketServer
+                  // now correctly sends the required "connected" acknowledgment after the start event.
+                  // This legacy handler maintains old behavior for compatibility.
                   return;
             }
             

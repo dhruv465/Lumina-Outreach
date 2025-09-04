@@ -25,6 +25,7 @@ import { checkTelephonyConfiguration, ConfigurationStatus } from '../../utils/co
 import { callsApi } from '../../services/callsApi';
 import api from '../../services/api';
 import ErrorBoundary from '../common/ErrorBoundary';
+import LoadingSpinner from '../common/LoadingSpinner';
 
 // Define Campaign interface
 interface Campaign {
@@ -67,66 +68,95 @@ const CallLeadSheet = ({
   const [configStatus, setConfigStatus] = useState<ConfigurationStatus | null>(null);
   const [, setSystemConfig] = useState<any>(null);
 
-  // Load campaigns when component mounts
+  // Load campaigns when component mounts with improved error handling
   useEffect(() => {
+    let isMounted = true;
+    let timeoutId: NodeJS.Timeout;
+
     const loadCampaigns = async () => {
-      setIsLoadingCampaigns(true);
-      try {
-        const response = await api.get('/campaigns');
-        console.log('Campaigns API response:', response.data);
-        
-        // Normalize the response data structure
-        let campaignsArray;
-        if (Array.isArray(response.data)) {
-          // If response is directly an array
-          campaignsArray = response.data;
-        } else if (response.data && response.data.campaigns && Array.isArray(response.data.campaigns)) {
-          // If response has a campaigns property that is an array
-          campaignsArray = response.data.campaigns;
-        } else {
-          // Fallback to empty array if data structure is unexpected
-          console.warn('Unexpected campaigns data structure:', response.data);
-          campaignsArray = [];
+      if (!open) return;
+      
+      // Add a small delay to prevent rapid successive calls
+      timeoutId = setTimeout(async () => {
+        if (!isMounted || !open) return;
+
+        setIsLoadingCampaigns(true);
+        try {
+          console.log('Loading campaigns for call sheet...');
+          const response = await api.get('/campaigns');
+          
+          if (!isMounted || !open) return;
+
+          console.log('Campaigns API response:', response.data);
+          
+          // Normalize the response data structure
+          let campaignsArray;
+          if (Array.isArray(response.data)) {
+            campaignsArray = response.data;
+          } else if (response.data && response.data.campaigns && Array.isArray(response.data.campaigns)) {
+            campaignsArray = response.data.campaigns;
+          } else {
+            console.warn('Unexpected campaigns data structure:', response.data);
+            campaignsArray = [];
+          }
+          
+          // Filter to only active or draft campaigns
+          const activeCampaigns = campaignsArray.filter((campaign: Campaign) => 
+            campaign.status === 'Active' || campaign.status === 'Draft'
+          );
+          
+          console.log('Active campaigns loaded:', activeCampaigns.length);
+          
+          if (!isMounted || !open) return;
+          
+          setCampaigns(activeCampaigns);
+          
+          // Auto-select the first active campaign if available and none is selected
+          if (activeCampaigns.length > 0 && !selectedCampaign) {
+            setSelectedCampaign(activeCampaigns[0]._id);
+            console.log('Auto-selected campaign:', activeCampaigns[0].name);
+          } else if (activeCampaigns.length === 0) {
+            console.log('No active campaigns found, creating default campaign...');
+            await createDefaultCampaign();
+          }
+        } catch (error: any) {
+          if (!isMounted || !open) return;
+
+          console.error('Error loading campaigns:', error);
+          toast({
+            title: "Error Loading Campaigns",
+            description: error.message || "Failed to load campaigns. Creating a default campaign.",
+            variant: "destructive",
+          });
+          
+          // Try to create a default campaign on error
+          try {
+            await createDefaultCampaign();
+          } catch (createError) {
+            console.error('Failed to create default campaign:', createError);
+          }
+        } finally {
+          if (isMounted && open) {
+            setIsLoadingCampaigns(false);
+          }
         }
-        
-        // Filter to only active or draft campaigns
-        const activeCampaigns = campaignsArray.filter((campaign: Campaign) => 
-          campaign.status === 'Active' || campaign.status === 'Draft'
-        );
-        
-        console.log('Active campaigns:', activeCampaigns);
-        setCampaigns(activeCampaigns);
-        
-        // Auto-select the first active campaign if available
-        if (activeCampaigns.length > 0) {
-          setSelectedCampaign(activeCampaigns[0]._id);
-        } else {
-          console.log('No active campaigns found, creating default campaign...');
-          // Create a default campaign if none exist
-          await createDefaultCampaign();
-        }
-      } catch (error) {
-        console.error('Error loading campaigns:', error);
-        toast({
-          title: "Error Loading Campaigns",
-          description: "Failed to load campaigns. Creating a default campaign.",
-          variant: "destructive",
-        });
-        // If campaigns fail to load, create a default one
-        await createDefaultCampaign();
-      } finally {
-        setIsLoadingCampaigns(false);
-      }
+      }, 200); // 200ms delay to prevent rapid calls
     };
 
     const checkConfig = async () => {
-      const status = await checkTelephonyConfiguration();
-      setConfigStatus(status);
+      if (!open) return;
       
-      // Fetch system configuration for defaultSystemPrompt
       try {
+        const status = await checkTelephonyConfiguration();
+        if (isMounted && open) {
+          setConfigStatus(status);
+        }
+        
+        // Fetch system configuration for defaultSystemPrompt
         const configResponse = await api.get('/configuration');
-        setSystemConfig(configResponse.data);
+        if (isMounted && open) {
+          setSystemConfig(configResponse.data);
+        }
       } catch (error) {
         console.error('Error loading system configuration:', error);
       }
@@ -137,19 +167,32 @@ const CallLeadSheet = ({
       loadCampaigns();
     }
     
-    // Cleanup function to reset state when component unmounts or closes
     return () => {
-      if (!open) {
-        // Reset all state when sheet is closed to prevent issues on reopen
+      isMounted = false;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [open, selectedCampaign, toast]);
+
+  // Cleanup function to reset state when component unmounts or closes
+  useEffect(() => {
+    if (!open) {
+      const resetTimeout = setTimeout(() => {
         setCampaigns([]);
         setSelectedCampaign('');
         setCallStatus('idle');
         setNotes('');
         setSelectedLanguage(lead.languagePreference || 'English');
         setIsLoadingCampaigns(false);
-      }
-    };
-  }, [open]);
+        setIsCallingInProgress(false);
+        setConfigStatus(null);
+        setSystemConfig(null);
+      }, 100);
+
+      return () => clearTimeout(resetTimeout);
+    }
+  }, [open, lead.languagePreference]);
 
   // Create a default campaign if none exist
   const createDefaultCampaign = async () => {
@@ -430,8 +473,7 @@ const CallLeadSheet = ({
             <Label htmlFor="campaign">Campaign</Label>
             {isLoadingCampaigns ? (
               <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                <div className="animate-spin h-4 w-4 border-2 border-gray-300 border-t-black rounded-full"></div>
-                <span>Loading campaigns...</span>
+                <LoadingSpinner size="sm" text="Loading campaigns..." />
               </div>
             ) : (
               <ErrorBoundary>

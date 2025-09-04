@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from '@/components/ui/sonner';
 import { useAuth } from '@/hooks/useAuth';
+import ConnectionStatus from '@/components/common/ConnectionStatus';
 
 // Layouts
 import DashboardLayout from '@/layouts/DashboardLayout';
@@ -75,6 +76,7 @@ function App() {
       </Routes>
 
       <Toaster />
+      <ConnectionStatus />
     </>
   );
 }

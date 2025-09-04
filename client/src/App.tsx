@@ -16,7 +16,6 @@ import Analytics from '@/pages/Analytics';
 import Configuration from '@/pages/Configuration';
 import KnowledgeManagement from '@/pages/KnowledgeManagement';
 import DocumentDetail from '@/pages/DocumentDetail';
-// import CallSimulator from '@/pages/DeepgramTest';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import NotFound from '@/pages/NotFound';

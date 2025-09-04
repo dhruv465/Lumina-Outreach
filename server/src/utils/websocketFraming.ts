@@ -1,10 +1,7 @@
 import * as WebSocket from 'ws';
 import logger from './logger';
 
-/**
- * Enhanced WebSocket message handling with proper framing
- * Addresses Twilio's WebSocket protocol requirements
- */
+
 export class WebSocketFrameHandler {
   private messageBuffer: Buffer[] = [];
   private isProcessing = false;

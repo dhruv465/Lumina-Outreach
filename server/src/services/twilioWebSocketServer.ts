@@ -11,6 +11,29 @@ interface ExtendedWebSocket extends WebSocket {
   isAlive?: boolean;
 }
 
+// Protocol state interface to explicitly track handshake status
+export interface ProtocolState {
+  // Handshake sequence tracking
+  receivedConnected: boolean;
+  receivedStart: boolean;
+  sentConnectedAck: boolean;
+  hasStreamSid: boolean;
+  
+  // Message sequence tracking
+  messageCount: number;
+  lastMessageTimestamp: number;
+  
+  // Protocol validation
+  protocolCompliant: boolean;
+  protocolErrors: string[];
+  
+  // Timing information
+  connectionStartTime: number;
+  connectedEventTime?: number;
+  startEventTime?: number;
+  connectedAckTime?: number;
+}
+
 type ConnectionState = {
   callId: string;
   conversationId: string;
@@ -19,6 +42,7 @@ type ConnectionState = {
   gotConnected: boolean;
   gotStart: boolean;
   streamSid?: string;
+  protocolState: ProtocolState;
 };
 
 // Simple logger shim if a project-level logger isn't available
@@ -149,12 +173,29 @@ export class TwilioWebSocketServer {
               createdAt: Date.now(),
               gotConnected: false,
               gotStart: false,
+              protocolState: {
+                receivedConnected: false,
+                receivedStart: false,
+                sentConnectedAck: false,
+                hasStreamSid: false,
+                messageCount: 0,
+                lastMessageTimestamp: Date.now(),
+                protocolCompliant: true,
+                protocolErrors: [],
+                connectionStartTime: Date.now()
+              }
             };
             this.active.set(connectionKey, state);
             this.activeConnections.set(connectionKey, ws);
             this.audioChunkBuffers.set(connectionKey, []);
             
             logger.info('Connection state created', { connectionKey, readyState: ws.readyState });
+            
+            // Set up WebSocket event handlers immediately after upgrade
+            this.setupWebSocketEventHandlers(ws, state);
+          } else {
+            // Set up basic event handlers even without connection state
+            this.setupWebSocketEventHandlers(ws, null);
           }
 
           // Wrap ws.send so we gate all server->Twilio sends until 'start'
@@ -206,17 +247,23 @@ export class TwilioWebSocketServer {
 
           // Set up ping/pong to keep connection alive
           (ws as ExtendedWebSocket).isAlive = true;
-          ws.on('pong', () => {
-            (ws as ExtendedWebSocket).isAlive = true;
-          });
-
-          // Handle WebSocket open event
-          ws.on('open', () => {
-            logger.info('WebSocket connection opened', { callId, conversationId });
-          });
-
-          // Wire up events
+          
+          // Send a small keepalive to ensure connection stays open
+          setTimeout(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              logger.debug('Sending keepalive ping to maintain connection', { callId, conversationId });
+              try {
+                ws.ping();
+              } catch (pingErr) {
+                logger.warn('Failed to send keepalive ping', { error: pingErr, callId, conversationId });
+              }
+            }
+          }, 1000);
           ws.on('message', (data: RawData) => {
+            // Get or find connection state - declare once at the top of the entire handler
+            let connectionKey = callId && conversationId ? `${callId}:${conversationId}` : undefined;
+            let state = connectionKey ? this.active.get(connectionKey) : undefined;
+            
             try {
               const text = data.toString('utf8');
               logger.debug('Received WebSocket message from Twilio', { 
@@ -239,15 +286,19 @@ export class TwilioWebSocketServer {
               });
 
               if (ev === 'connected') {
-                // Find or create connection state
-                let connectionKey = callId && conversationId ? `${callId}:${conversationId}` : undefined;
-                let state = connectionKey ? this.active.get(connectionKey) : undefined;
-                
                 if (state) {
                   state.gotConnected = true;
+                  state.protocolState.receivedConnected = true;
+                  state.protocolState.connectedEventTime = Date.now();
+                  state.protocolState.messageCount++;
+                  state.protocolState.lastMessageTimestamp = Date.now();
                 }
                 
-                logger.info('Twilio connected event received', { callId, conversationId });
+                logger.info('Twilio connected event received', { 
+                  callId, 
+                  conversationId,
+                  protocolState: state?.protocolState
+                });
                 
                 // Do NOT send acknowledgment back to Twilio for 'connected' event
                 // Echoing the connected event can cause protocol violations (Twilio error 31924)
@@ -285,11 +336,10 @@ export class TwilioWebSocketServer {
                 callId = effectiveCallId;
                 conversationId = effectiveConversationId;
                 
-                // Create or get connection state
-                let state: ConnectionState | undefined;
-                if (callId && conversationId) {
-                  const connectionKey = `${callId}:${conversationId}`;
-                  state = this.active.get(connectionKey);
+                // Update connection key and get/create connection state
+                connectionKey = callId && conversationId ? `${callId}:${conversationId}` : undefined;
+                state = connectionKey ? this.active.get(connectionKey) : undefined;
+                if (callId && conversationId && connectionKey) {
                   if (!state) {
                     state = {
                       callId,
@@ -298,6 +348,17 @@ export class TwilioWebSocketServer {
                       createdAt: Date.now(),
                       gotConnected: false,
                       gotStart: false,
+                      protocolState: {
+                        receivedConnected: false,
+                        receivedStart: false,
+                        sentConnectedAck: false,
+                        hasStreamSid: false,
+                        messageCount: 0,
+                        lastMessageTimestamp: Date.now(),
+                        protocolCompliant: true,
+                        protocolErrors: [],
+                        connectionStartTime: Date.now()
+                      }
                     };
                     this.active.set(connectionKey, state);
                     this.activeConnections.set(connectionKey, ws);
@@ -308,10 +369,20 @@ export class TwilioWebSocketServer {
                 if (state) {
                   state.gotStart = true;
                   state.streamSid = msg?.start?.streamSid || msg?.streamSid;
+                  state.protocolState.receivedStart = true;
+                  state.protocolState.startEventTime = Date.now();
+                  state.protocolState.hasStreamSid = !!(msg?.start?.streamSid || msg?.streamSid);
+                  state.protocolState.messageCount++;
+                  state.protocolState.lastMessageTimestamp = Date.now();
                 }
                 
                 const streamSid = msg?.start?.streamSid || msg?.streamSid;
-                logger.info('Twilio start event received', { callId, conversationId, streamSid });
+                logger.info('Twilio start event received', { 
+                  callId, 
+                  conversationId, 
+                  streamSid,
+                  protocolState: state?.protocolState
+                });
 
                 // Store streamSid on WebSocket connection for sendMediaChunks usage
                 (ws as any).streamSid = streamSid;
@@ -321,18 +392,33 @@ export class TwilioWebSocketServer {
                 try {
                   const acknowledgment = { event: 'connected' };
                   originalSend(JSON.stringify(acknowledgment));
-                  logger.info('Sent connected acknowledgment to Twilio', { callId, conversationId, streamSid });
                   
-                  // Mark connection as connected after successful acknowledgment
+                  // Update protocol state
                   if (state) {
                     state.gotConnected = true;
+                    state.protocolState.sentConnectedAck = true;
+                    state.protocolState.connectedAckTime = Date.now();
                   }
+                  
+                  logger.info('Sent connected acknowledgment to Twilio', { 
+                    callId, 
+                    conversationId, 
+                    streamSid,
+                    protocolState: state?.protocolState
+                  });
                 } catch (ackErr: any) {
+                  // Log protocol error
+                  if (state) {
+                    state.protocolState.protocolCompliant = false;
+                    state.protocolState.protocolErrors.push(`Failed to send connected acknowledgment: ${ackErr?.message}`);
+                  }
+                  
                   logger.error('Failed to send connected acknowledgment to Twilio', { 
                     error: ackErr?.message, 
                     callId, 
                     conversationId, 
-                    streamSid 
+                    streamSid,
+                    protocolState: state?.protocolState
                   });
                 }
 
@@ -344,10 +430,17 @@ export class TwilioWebSocketServer {
                 }
               } else if (ev === 'media') {
                 // Inbound 20ms media frame (base64 PCM µ-law).
+                // Update protocol state for message tracking
+                if (state) {
+                  state.protocolState.messageCount++;
+                  state.protocolState.lastMessageTimestamp = Date.now();
+                }
+                
                 logger.debug('Received media frame', { 
                   callId, 
                   conversationId, 
-                  payloadLength: msg?.media?.payload?.length || 0 
+                  payloadLength: msg?.media?.payload?.length || 0,
+                  messageCount: state?.protocolState?.messageCount
                 });
                 
                 // Handle audio data
@@ -362,82 +455,55 @@ export class TwilioWebSocketServer {
                 }
               } else if (ev === 'mark') {
                 // optional marker
-                logger.debug('Received mark event', { callId, conversationId, mark: msg?.mark });
+                if (state) {
+                  state.protocolState.messageCount++;
+                  state.protocolState.lastMessageTimestamp = Date.now();
+                }
+                logger.debug('Received mark event', { 
+                  callId, 
+                  conversationId, 
+                  mark: msg?.mark,
+                  messageCount: state?.protocolState?.messageCount
+                });
               } else if (ev === 'stop') {
-                logger.info('Twilio stop event', { callId, conversationId });
+                if (state) {
+                  state.protocolState.messageCount++;
+                  state.protocolState.lastMessageTimestamp = Date.now();
+                }
+                logger.info('Twilio stop event', { 
+                  callId, 
+                  conversationId,
+                  protocolState: state?.protocolState
+                });
                 ws.close();
               } else {
                 // Unknown or app-specific event
-                logger.debug('Unhandled Twilio WS event', { ev, callId, conversationId });
+                if (state) {
+                  state.protocolState.messageCount++;
+                  state.protocolState.lastMessageTimestamp = Date.now();
+                }
+                logger.debug('Unhandled Twilio WS event', { 
+                  ev, 
+                  callId, 
+                  conversationId,
+                  messageCount: state?.protocolState?.messageCount
+                });
               }
             } catch (err: any) {
+              // Update protocol state for parsing errors
+              if (state) {
+                state.protocolState.protocolCompliant = false;
+                state.protocolState.protocolErrors.push(`Message parsing error: ${err?.message}`);
+              }
+              
               logger.error('Failed to parse Twilio WS message', { 
                 error: err?.message, 
                 callId, 
                 conversationId,
-                rawData: data.toString('utf8').substring(0, 200)
+                rawData: data.toString('utf8').substring(0, 200),
+                protocolState: state?.protocolState
               });
             }
-          });
-
-          ws.on('close', (code: number, reason: Buffer) => {
-            const reasonStr = reason?.toString?.() || '';
-            const startTime = Date.now();
-            
-            // Find connection state if it exists
-            const connectionKey = callId && conversationId ? `${callId}:${conversationId}` : undefined;
-            const state = connectionKey ? this.active.get(connectionKey) : undefined;
-            const duration = state ? startTime - state.createdAt : 0;
-            
-            logger.info('WebSocket connection closed', {
-              code,
-              reason: reasonStr,
-              connectionDuration: duration,
-              connectionKey,
-              callId,
-              conversationId,
-              gotConnected: state?.gotConnected,
-              gotStart: state?.gotStart,
-              streamSid: state?.streamSid,
-              protocolState: {
-                receivedStart: state?.gotStart || false,
-                sentConnectedAck: state?.gotConnected || false,
-                hasStreamSid: !!state?.streamSid
-              }
-            });
-            
-            // Log specific close codes for debugging
-            if (code === 1006) {
-              logger.warn('WebSocket closed abnormally (1006) - possible network issue or protocol violation', {
-                callId,
-                conversationId,
-                duration,
-                gotConnected: state?.gotConnected,
-                gotStart: state?.gotStart
-              });
-            } else if (code === 1002) {
-              logger.error('WebSocket closed due to protocol error (1002)', {
-                callId,
-                conversationId,
-                reason: reasonStr
-              });
-            }
-            
-            // Clean up connection state if it exists
-            if (connectionKey) {
-              this.active.delete(connectionKey);
-              this.activeConnections.delete(connectionKey);
-              this.audioChunkBuffers.delete(connectionKey);
-            }
-          });
-
-          ws.on('error', (err: any) => {
-            logger.error('Twilio WS error', { 
-              message: (err && err.message) || String(err),
-              callId,
-              conversationId,
-              error: err
-            });
           });
           
           // Set up keep-alive and connection health monitoring if we have connection info
@@ -483,9 +549,117 @@ export class TwilioWebSocketServer {
     logger.info('Twilio WebSocket server initialized', { mode: 'noServer', serverCreated: true });
   }
 
-  private setupEventHandlers(): void {
-    this.wss.on('connection', (ws, request) => {
-      // Default handlers can go here
+  /**
+   * Set up WebSocket event handlers immediately after upgrade
+   * This method ensures proper event handling sequence for Twilio Media Streams
+   */
+  private setupWebSocketEventHandlers(ws: WebSocket, state: ConnectionState | null): void {
+    const callId = state?.callId;
+    const conversationId = state?.conversationId;
+    
+    // Enhanced error handling with protocol state information
+    ws.on('error', (err: any) => {
+      const errorInfo = {
+        message: (err && err.message) || String(err),
+        callId,
+        conversationId,
+        error: err,
+        protocolState: state?.protocolState,
+        connectionDuration: state ? Date.now() - state.createdAt : 0
+      };
+      
+      // Update protocol state if available
+      if (state) {
+        state.protocolState.protocolCompliant = false;
+        state.protocolState.protocolErrors.push(`WebSocket error: ${err?.message || String(err)}`);
+      }
+      
+      logger.error('Twilio WebSocket error with protocol state', errorInfo);
+    });
+    
+    // Enhanced close handling with protocol state logging
+    ws.on('close', (code: number, reason: Buffer) => {
+      const reasonStr = reason?.toString?.() || '';
+      const now = Date.now();
+      const duration = state ? now - state.createdAt : 0;
+      
+      // Calculate protocol timing metrics
+      const protocolMetrics = state?.protocolState ? {
+        timeToConnected: state.protocolState.connectedEventTime ? 
+          state.protocolState.connectedEventTime - state.protocolState.connectionStartTime : undefined,
+        timeToStart: state.protocolState.startEventTime ? 
+          state.protocolState.startEventTime - state.protocolState.connectionStartTime : undefined,
+        timeToConnectedAck: state.protocolState.connectedAckTime ? 
+          state.protocolState.connectedAckTime - state.protocolState.connectionStartTime : undefined,
+        handshakeComplete: state.protocolState.receivedStart && state.protocolState.sentConnectedAck
+      } : {};
+      
+      const closeInfo = {
+        code,
+        reason: reasonStr,
+        connectionDuration: duration,
+        callId,
+        conversationId,
+        protocolState: state?.protocolState,
+        protocolMetrics,
+        // Enhanced protocol validation
+        protocolValidation: {
+          receivedConnected: state?.protocolState?.receivedConnected || false,
+          receivedStart: state?.protocolState?.receivedStart || false,
+          sentConnectedAck: state?.protocolState?.sentConnectedAck || false,
+          hasStreamSid: state?.protocolState?.hasStreamSid || false,
+          isCompliant: state?.protocolState?.protocolCompliant || false,
+          errorCount: state?.protocolState?.protocolErrors?.length || 0
+        }
+      };
+      
+      logger.info('WebSocket connection closed with enhanced protocol state', closeInfo);
+      
+      // Log specific close codes with protocol context
+      if (code === 1006) {
+        logger.warn('WebSocket closed abnormally (1006) - analyzing protocol state', {
+          ...closeInfo,
+          protocolAnalysis: {
+            likelyPrematureClose: duration < 1000,
+            handshakeIncomplete: !state?.protocolState?.receivedStart || !state?.protocolState?.sentConnectedAck,
+            messageCount: state?.protocolState?.messageCount || 0
+          }
+        });
+      } else if (code === 1002) {
+        logger.error('WebSocket closed due to protocol error (1002)', {
+          ...closeInfo,
+          protocolErrors: state?.protocolState?.protocolErrors || []
+        });
+      }
+      
+      // Clean up connection state
+      if (state && callId && conversationId) {
+        const connectionKey = `${callId}:${conversationId}`;
+        this.active.delete(connectionKey);
+        this.activeConnections.delete(connectionKey);
+        this.audioChunkBuffers.delete(connectionKey);
+      }
+    });
+    
+    // Protocol state aware ping/pong handling
+    ws.on('pong', () => {
+      (ws as ExtendedWebSocket).isAlive = true;
+      if (state) {
+        state.protocolState.lastMessageTimestamp = Date.now();
+      }
+      logger.debug('Received pong - connection alive', { callId, conversationId });
+    });
+    
+    // Enhanced open event logging
+    ws.on('open', () => {
+      if (state) {
+        state.protocolState.lastMessageTimestamp = Date.now();
+      }
+      logger.info('WebSocket connection opened with protocol tracking', { 
+        callId, 
+        conversationId,
+        protocolState: state?.protocolState
+      });
     });
   }
 

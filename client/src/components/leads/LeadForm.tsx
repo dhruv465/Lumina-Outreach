@@ -103,25 +103,13 @@ const LeadForm = ({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const isEditMode = !!leadId;
 
-  // Fetch lead data if in edit mode with improved loading and error handling
+  // Fetch lead data if in edit mode
   useEffect(() => {
-    let isMounted = true; // Track if component is still mounted
-    let timeoutId: NodeJS.Timeout;
-
     const fetchLead = async () => {
-      if (!leadId || !open) return;
-
-      // Add a small delay to prevent rapid successive calls
-      timeoutId = setTimeout(async () => {
-        if (!isMounted) return;
-
+      if (leadId && open) {
         setIsLoading(true);
         try {
-          console.log(`Fetching lead data for ID: ${leadId}`);
           const lead = await leadsApi.getLeadById(leadId);
-          
-          if (!isMounted) return; // Check again after async operation
-
           setFormData({
             name: lead.name || '',
             company: lead.company || '',
@@ -132,48 +120,28 @@ const LeadForm = ({
             languagePreference: lead.languagePreference || 'English',
             notes: lead.notes || ''
           });
-          
-          console.log(`Successfully loaded lead data for ID: ${leadId}`);
-        } catch (error: any) {
-          if (!isMounted) return;
-
+        } catch (error) {
           console.error('Error fetching lead:', error);
           toast({
-            title: "Error Loading Lead",
-            description: error.message || "Failed to fetch lead data. Please try again.",
+            title: "Error",
+            description: "Failed to fetch lead data.",
             variant: "destructive",
           });
-          
-          // Don't close the dialog automatically on error, let user decide
+          onOpenChange(false);
         } finally {
-          if (isMounted) {
-            setIsLoading(false);
-          }
+          setIsLoading(false);
         }
-      }, 100); // 100ms delay to prevent rapid calls
+      }
     };
 
     fetchLead();
+  }, [leadId, open, toast, onOpenChange]);
 
-    return () => {
-      isMounted = false;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    };
-  }, [leadId, open, toast]);
-
-  // Reset form when dialog closes with proper cleanup
+  // Reset form when dialog closes
   useEffect(() => {
     if (!open) {
-      // Use a timeout to ensure proper cleanup
-      const resetTimeout = setTimeout(() => {
-        setFormData(defaultFormData);
-        setErrors({});
-        setIsLoading(false);
-      }, 100);
-
-      return () => clearTimeout(resetTimeout);
+      setFormData(defaultFormData);
+      setErrors({});
     }
   }, [open]);
 

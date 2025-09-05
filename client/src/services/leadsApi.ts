@@ -1,5 +1,5 @@
 import api from './api';
-import { throttleAPI, apiCache, requestDeduplicator } from '../utils/apiUtils';
+import { throttleAPI, apiCache } from '../utils/apiUtils';
 
 // Types
 interface LeadParams {
@@ -35,122 +35,61 @@ interface ExportLeadsParams {
 export const leadsApi = {
   // Get leads with optional filters
   getLeads: async (params: LeadParams = {}) => {
-    const cacheKey = `leads_${JSON.stringify(params)}`;
-    
-    // Check cache first
-    const cachedData = apiCache.get(cacheKey);
-    if (cachedData) {
-      console.log('Using cached leads data');
-      return cachedData;
-    }
-
-    // Use request deduplication to prevent multiple simultaneous requests
-    return requestDeduplicator.deduplicate(cacheKey, async () => {
-      const response = await api.get('/leads', { params });
-      
-      // Cache the response
-      apiCache.set(cacheKey, response.data);
-      
-      return response.data;
-    });
+    const response = await api.get('/leads', { params });
+    return response.data;
   },
 
-  // Get a specific lead by ID with enhanced error handling and deduplication
+  // Get a specific lead by ID
   getLeadById: async (id: string) => {
-    if (!id) {
-      throw new Error('Lead ID is required');
-    }
-
+    // Create a cache key
     const cacheKey = `lead_${id}`;
-    const endpoint = `/leads/${id}`;
     
-    // Check cache first
+    // Check if we have a cached response
     const cachedData = apiCache.get(cacheKey);
     if (cachedData) {
       console.log('Using cached lead data for ID:', id);
       return cachedData;
     }
-
-    // Check throttling before making request
-    if (!throttleAPI(endpoint)) {
+    
+    // Check if we should throttle this request
+    if (!throttleAPI(`/leads/${id}`)) {
       console.log('Throttling lead request for ID:', id);
-      
-      // If we have cached data (even if expired), return it instead of failing
-      const expiredCache = apiCache.get(`${cacheKey}_expired`);
-      if (expiredCache) {
-        console.log('Returning expired cache data due to throttling for ID:', id);
-        return expiredCache;
-      }
-      
-      // If no cache available, wait a short time and try once more
-      await new Promise(resolve => setTimeout(resolve, 500));
-      if (!throttleAPI(endpoint)) {
-        throw new Error('Request throttled. Please wait before trying again.');
-      }
+      // If we need to throttle but have no cached data, we'll still make the request
+      // but log a warning - in a real app you might want to handle this differently
+      console.warn('Rapid request detected for lead:', id);
     }
-
-    // Use request deduplication to prevent multiple simultaneous requests
-    return requestDeduplicator.deduplicate(cacheKey, async () => {
-      try {
-        const response = await api.get(endpoint);
-        
-        // Cache the response
-        apiCache.set(cacheKey, response.data);
-        // Also cache as "expired" backup
-        apiCache.set(`${cacheKey}_expired`, response.data);
-        
-        return response.data;
-      } catch (error: any) {
-        console.error('Error fetching lead:', error);
-        
-        // Return expired cache if available on error
-        const expiredCache = apiCache.get(`${cacheKey}_expired`);
-        if (expiredCache) {
-          console.log('Returning expired cache data due to error for ID:', id);
-          return expiredCache;
-        }
-        
-        throw error;
-      }
-    });
+    
+    // Make the API request
+    const response = await api.get(`/leads/${id}`);
+    
+    // Cache the response
+    apiCache.set(cacheKey, response.data);
+    
+    return response.data;
   },
 
   // Create a new lead
   createLead: async (leadData: LeadData) => {
     const response = await api.post('/leads', leadData);
-    
-    // Invalidate cache after creating
-    apiCache.invalidate('leads_');
-    
     return response.data;
   },
 
   // Update an existing lead
   updateLead: async (id: string, leadData: Partial<LeadData>) => {
-    if (!id) {
-      throw new Error('Lead ID is required for update');
-    }
-
     const response = await api.put(`/leads/${id}`, leadData);
     
-    // Invalidate specific lead cache and general leads cache
-    apiCache.invalidate(`lead_${id}`);
-    apiCache.invalidate('leads_');
+    // Invalidate the cache
+    apiCache.set(`lead_${id}`, null);
     
     return response.data;
   },
 
   // Delete a lead
   deleteLead: async (id: string) => {
-    if (!id) {
-      throw new Error('Lead ID is required for deletion');
-    }
-
     const response = await api.delete(`/leads/${id}`);
     
-    // Invalidate specific lead cache and general leads cache
-    apiCache.invalidate(`lead_${id}`);
-    apiCache.invalidate('leads_');
+    // Invalidate the cache
+    apiCache.set(`lead_${id}`, null);
     
     return response.data;
   },
@@ -158,10 +97,6 @@ export const leadsApi = {
   // Bulk upload leads
   bulkUploadLeads: async (leads: LeadData[]) => {
     const response = await api.post('/leads', { leads });
-    
-    // Invalidate cache after bulk upload
-    apiCache.invalidate('leads_');
-    
     return response.data;
   },
 
@@ -175,9 +110,6 @@ export const leadsApi = {
         'Content-Type': 'multipart/form-data'
       }
     });
-    
-    // Invalidate cache after import
-    apiCache.invalidate('leads_');
     
     return response.data;
   },

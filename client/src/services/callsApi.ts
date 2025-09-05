@@ -46,42 +46,17 @@ export const callsApi = {
     return response.data;
   },
 
-  // Initiate a new call with enhanced error handling
+  // Initiate a new call
   initiateCall: async (callData: CallData) => {
     try {
       console.log('Calling initiateCall API with data:', callData);
-      
-      // Validate required fields
-      if (!callData.leadId) {
-        throw new Error('Lead ID is required to initiate a call');
-      }
-      if (!callData.campaignId) {
-        throw new Error('Campaign ID is required to initiate a call');
-      }
-      
       const response = await api.post('/calls/initiate', callData);
       console.log('API response:', response.data);
-      
-      if (!response.data) {
-        throw new Error('No response data received from server');
-      }
-      
       return response.data;
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error in initiateCall API:', error);
-      
-      // Provide more specific error messages
-      if (error.response?.status === 400) {
-        throw new Error(error.response.data?.message || 'Invalid call parameters');
-      } else if (error.response?.status === 404) {
-        throw new Error('Lead or campaign not found');
-      } else if (error.response?.status === 500) {
-        throw new Error('Server error occurred while initiating call. Please try again.');
-      } else if (error.message) {
-        throw new Error(error.message);
-      } else {
-        throw new Error('Failed to initiate call. Please check your connection and try again.');
-      }
+      // Rethrow the error to be handled by the component
+      throw error;
     }
   },
 

@@ -97,13 +97,11 @@ const io = new SocketIOServer(server, {
     methods: ["GET", "POST"],
     credentials: true,
   },
-  pingTimeout: parseInt(process.env.WS_PING_TIMEOUT || "60000"), // Reduced from 120s to 60s
-  pingInterval: parseInt(process.env.WS_PING_INTERVAL || "25000"), // Increased from 15s to 25s for better stability
-  connectTimeout: parseInt(process.env.WS_CONNECT_TIMEOUT || "45000"), // Reduced from 60s to 45s
-  maxHttpBufferSize: 1e6, // 1MB buffer size (reduced from 100MB for better stability)
-  transports: ["polling", "websocket"], // Try polling first for better compatibility
-  allowEIO3: true, // Allow Engine.IO v3 clients for better compatibility
-  upgradeTimeout: 30000, // 30 seconds for transport upgrade
+  pingTimeout: parseInt(process.env.WS_PING_TIMEOUT || "120000"), // Use environment variable or default to 120 seconds
+  pingInterval: parseInt(process.env.WS_PING_INTERVAL || "15000"), // Use environment variable or default to 15 seconds
+  connectTimeout: parseInt(process.env.WS_CONNECT_TIMEOUT || "60000"), // Use environment variable or default to 60 seconds
+  maxHttpBufferSize: 1e8, // 100MB max buffer size for larger audio chunks
+  transports: ["websocket", "polling"], // Prefer WebSocket, fallback to polling
 });
 
 // WebSocket handlers setup removed

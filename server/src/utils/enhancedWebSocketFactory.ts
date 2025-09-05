@@ -127,7 +127,7 @@ export class EnhancedWebSocketFactory {
   public async createPlainWebSocket(
     url: string, 
     options: EnhancedWebSocketOptions = {}
-  ): Promise<WebSocket> {
+  ): Promise<CompatibleWebSocket> {
     const manager = await this.createConnection(url, options);
     const ws = manager.getWebSocket();
     
@@ -189,6 +189,6 @@ export async function createEnhancedWebSocket(
 export async function createPlainWebSocket(
   url: string, 
   options: EnhancedWebSocketOptions = {}
-): Promise<WebSocket> {
+): Promise<CompatibleWebSocket> {
   return enhancedWebSocketFactory.createPlainWebSocket(url, options);
 }

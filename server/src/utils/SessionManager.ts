@@ -12,6 +12,7 @@ import * as WebSocket from 'ws';
 import { TwilioWebSocketManager } from './TwilioWebSocketManager';
 import { AdaptiveHeartbeatManager } from './AdaptiveHeartbeatManager';
 import logger from './logger';
+import { CompatibleWebSocket } from './websocketCompatibility';
 
 export interface SessionConfig {
   sessionId: string;
@@ -67,7 +68,7 @@ export interface SessionHealthReport {
 export class Session extends EventEmitter {
   public readonly config: SessionConfig;
   public readonly createdAt: Date;
-  private ws: WebSocket;
+  private ws: CompatibleWebSocket;
   private twilioManager: TwilioWebSocketManager;
   private lastActivity: Date;
   private messageCount: number = 0;
@@ -81,7 +82,7 @@ export class Session extends EventEmitter {
   private maxDurationTimer?: NodeJS.Timeout;
   private healthCheckTimer?: NodeJS.Timeout;
 
-  constructor(ws: WebSocket, config: SessionConfig) {
+  constructor(ws: CompatibleWebSocket, config: SessionConfig) {
     super();
     this.ws = ws;
     this.config = config;
@@ -495,7 +496,7 @@ export class SessionManager extends EventEmitter {
   /**
    * Create a new session
    */
-  public createSession(ws: WebSocket, config: SessionConfig): Session {
+  public createSession(ws: CompatibleWebSocket, config: SessionConfig): Session {
     if (this.sessions.has(config.sessionId)) {
       throw new Error(`Session ${config.sessionId} already exists`);
     }
@@ -757,7 +758,21 @@ export class SessionManager extends EventEmitter {
       const session = new Session(ws, config);
 
       // Register the session
-      this.addSession(session);
+      this.sessions.set(config.sessionId, session);
+      
+      // Index by call ID
+      if (!this.sessionsByCall.has(config.callId)) {
+        this.sessionsByCall.set(config.callId, new Set());
+      }
+      this.sessionsByCall.get(config.callId)!.add(config.sessionId);
+      
+      // Index by user ID if provided
+      if (config.userId) {
+        if (!this.sessionsByUser.has(config.userId)) {
+          this.sessionsByUser.set(config.userId, new Set());
+        }
+        this.sessionsByUser.get(config.userId)!.add(config.sessionId);
+      }
 
       logger.info(`Enhanced session ${config.sessionId} created successfully`);
       return session;

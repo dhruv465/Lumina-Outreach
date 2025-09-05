@@ -10,20 +10,20 @@ console.log('📝 Test 1: Verifying enhanced WebSocket manager imports...');
 
 try {
   // Test core enhanced WebSocket manager
-  const enhancedManager = require('./src/utils/enhancedWebSocketManager');
+  const enhancedManager = require('./dist/utils/enhancedWebSocketManager');
   console.log('✅ EnhancedWebSocketManager imported successfully');
   console.log(`   - Class: ${typeof enhancedManager.EnhancedWebSocketManager}`);
   console.log(`   - Default export: ${typeof enhancedManager.default}`);
   
   // Test factory
-  const factory = require('./src/utils/enhancedWebSocketFactory');
+  const factory = require('./dist/utils/enhancedWebSocketFactory');
   console.log('✅ EnhancedWebSocketFactory imported successfully');
   console.log(`   - Factory class: ${typeof factory.EnhancedWebSocketFactory}`);
   console.log(`   - Factory instance: ${typeof factory.enhancedWebSocketFactory}`);
   console.log(`   - Create function: ${typeof factory.createEnhancedWebSocket}`);
   
   // Test Twilio integration
-  const twilioManager = require('./src/utils/TwilioWebSocketManager');
+  const twilioManager = require('./dist/utils/TwilioWebSocketManager');
   console.log('✅ TwilioWebSocketManager imported successfully');
   console.log(`   - Class: ${typeof twilioManager.TwilioWebSocketManager}`);
   console.log(`   - Enhanced factory method: ${typeof twilioManager.TwilioWebSocketManager.createEnhancedConnection}`);
@@ -37,7 +37,7 @@ try {
 console.log('\n📝 Test 2: Verifying configuration structure...');
 
 try {
-  const enhancedManager = require('./src/utils/enhancedWebSocketManager');
+  const enhancedManager = require('./dist/utils/enhancedWebSocketManager');
   
   // Test creating an instance (without connecting)
   const testInstance = new enhancedManager.EnhancedWebSocketManager(
@@ -82,18 +82,18 @@ console.log('\n📝 Test 4: Verifying service integration points...');
 
 try {
   // Check ElevenLabs service has enhanced imports
-  const elevenLabsService = require('./src/services/elevenLabsConversationalService');
+  const elevenLabsService = require('./dist/services/elevenLabsConversationalService');
   console.log('✅ ElevenLabs Conversational Service loads successfully');
   console.log('   - Enhanced WebSocket factory integration verified');
   
   // Check SessionManager has enhanced methods
-  const sessionManager = require('./src/utils/SessionManager');
+  const sessionManager = require('./dist/utils/SessionManager');
   const sessionManagerClass = sessionManager.SessionManager;
   const hasEnhancedMethod = sessionManagerClass.prototype.hasOwnProperty('createEnhancedSession');
   console.log(`✅ SessionManager enhanced method available: ${hasEnhancedMethod}`);
   
   // Check TwilioWebSocketServer has cleanup integration
-  const twilioWSServer = require('./src/services/twilioWebSocketServer');
+  const twilioWSServer = require('./dist/services/twilioWebSocketServer');
   console.log('✅ TwilioWebSocketServer loads successfully');
   console.log('   - Enhanced cleanup integration verified');
   

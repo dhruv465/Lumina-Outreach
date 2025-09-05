@@ -15,6 +15,7 @@ import { getCallMonitoringService } from '../services/callMonitoringService';
 import { getFallbackTTSService } from '../services/fallbackTTSService';
 import { v4 as uuidv4 } from 'uuid';
 import express from 'express';
+import { enhanceWebSocket } from '../utils/websocketCompatibility';
 // Common greeting phrases for pre-caching
 const COMMON_GREETINGS = [
   "Hello, how are you today?",
@@ -220,8 +221,9 @@ export const handleOptimizedVoiceStream = async (ws: WebSocket, req: Request): P
       healthCheckInterval: 10000 // 10 seconds health check for faster issue detection
     };
 
-    // Create session with integrated WebSocket management
-    const sessionInstance = globalSessionManager.createSession(ws, sessionConfig);
+    // Create session with integrated WebSocket management (enhanced WebSocket)
+    const enhancedWs = enhanceWebSocket(ws);
+    const sessionInstance = globalSessionManager.createSession(enhancedWs, sessionConfig);
     twilioManager = sessionInstance.getTwilioManager();
 
     // Initialize resilience services

@@ -17,6 +17,7 @@ import { VoicePersonality } from './voiceAIService';
 import ElevenLabs from 'elevenlabs-node';
 // Import enhanced WebSocket factory
 import { createPlainWebSocket } from '../utils/enhancedWebSocketFactory';
+import { CompatibleWebSocket } from '../utils/websocketCompatibility';
 
 // Define Language type locally if not available from types
 type Language = 'English' | 'Hindi' | 'Spanish' | 'French' | 'German';
@@ -79,7 +80,7 @@ export class ElevenLabsConversationalService extends EventEmitter {
   private apiUrl: string = 'https://api.elevenlabs.io/v1';
   private wsUrl: string = 'wss://api.elevenlabs.io/v1/conversation';
   private conversations: Map<string, ConversationState> = new Map();
-  private activeConnections: Map<string, WebSocket> = new Map();
+  private activeConnections: Map<string, CompatibleWebSocket> = new Map();
   private openAIApiKey: string;
 
   /**

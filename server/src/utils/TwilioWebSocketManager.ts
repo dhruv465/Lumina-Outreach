@@ -7,6 +7,7 @@
  * - Handles Twilio-specific error codes
  * - Implements proper connection lifecycle management
  * - Integrates comprehensive health monitoring
+ * - Uses EnhancedWebSocketManager for robust connection handling
  */
 
 import * as WebSocket from 'ws';
@@ -17,6 +18,7 @@ import { RealTimeHealthAssessment, ReconnectionDecision } from './RealTimeHealth
 import { HeartbeatService } from './HeartbeatService';
 import { AdaptiveHeartbeatManager, IntensiveOperation } from './AdaptiveHeartbeatManager';
 import { ReconnectionService } from '../services/ReconnectionService';
+import { EnhancedWebSocketManager } from './enhancedWebSocketManager';
 
 interface TwilioMessage {
   event: string;
@@ -123,6 +125,73 @@ export class TwilioWebSocketManager {
     
     this.setupConnectionMonitoring();
     this.setupEventHandlers();
+  }
+
+  /**
+   * Create an enhanced WebSocket connection for outbound Twilio connections
+   * This method creates a new WebSocket using the EnhancedWebSocketManager for robust connection handling
+   */
+  public static async createEnhancedConnection(
+    callId: string, 
+    url: string, 
+    connectionId?: string
+  ): Promise<TwilioWebSocketManager> {
+    logger.info(`Creating enhanced Twilio WebSocket connection for call ${callId}`, { url, connectionId });
+
+    // Create an enhanced WebSocket manager with Twilio-specific configuration
+    const enhancedManager = new EnhancedWebSocketManager(callId, url, {
+      maxReconnectAttempts: 5,
+      reconnectDelay: 1000,
+      heartbeatInterval: 15000, // More frequent heartbeats for real-time audio
+      connectionTimeout: 10000,
+      maxHeartbeatMisses: 3,
+      pingInterval: 20000,
+      pongTimeout: 5000
+    });
+
+    try {
+      // Connect using the enhanced manager
+      await enhancedManager.connect();
+
+      // Get the underlying WebSocket
+      const ws = enhancedManager.getWebSocket();
+      if (!ws) {
+        throw new Error('Enhanced WebSocket manager failed to establish connection');
+      }
+
+      // Create TwilioWebSocketManager with the enhanced WebSocket
+      const twilioManager = new TwilioWebSocketManager(ws, connectionId);
+
+      // Set up enhanced manager event forwarding
+      enhancedManager.on('connected', () => {
+        logger.info(`Enhanced WebSocket connected for call ${callId}`);
+      });
+
+      enhancedManager.on('disconnected', (code, reason) => {
+        logger.warn(`Enhanced WebSocket disconnected for call ${callId}`, { code, reason });
+      });
+
+      enhancedManager.on('reconnecting', (attempt) => {
+        logger.info(`Enhanced WebSocket reconnecting for call ${callId}`, { attempt });
+      });
+
+      enhancedManager.on('error', (error) => {
+        logger.error(`Enhanced WebSocket error for call ${callId}`, { error: error.message });
+      });
+
+      // Store reference to enhanced manager for cleanup
+      (twilioManager as any).enhancedManager = enhancedManager;
+
+      logger.info(`Enhanced Twilio WebSocket connection established for call ${callId}`);
+      return twilioManager;
+
+    } catch (error) {
+      logger.error(`Failed to create enhanced Twilio WebSocket connection for call ${callId}`, {
+        error: error.message,
+        stack: error.stack
+      });
+      throw error;
+    }
   }
 
   /**
@@ -750,6 +819,18 @@ export class TwilioWebSocketManager {
    * Clean up resources and intervals
    */
   public cleanup(): void {
+    // Clean up enhanced manager if it exists
+    const enhancedManager = (this as any).enhancedManager;
+    if (enhancedManager) {
+      logger.info('Cleaning up enhanced WebSocket manager');
+      try {
+        enhancedManager.close();
+      } catch (error) {
+        logger.error('Error closing enhanced WebSocket manager', { error: error.message });
+      }
+      delete (this as any).enhancedManager;
+    }
+
     // Stop heartbeat services
     this.heartbeatService.stop();
     this.adaptiveHeartbeatManager.stop();

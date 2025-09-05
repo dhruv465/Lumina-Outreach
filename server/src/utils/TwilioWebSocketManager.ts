@@ -41,7 +41,7 @@ interface ConnectionHealth {
 }
 
 export class TwilioWebSocketManager {
-  private ws: WebSocket;
+  private enhancedManager: EnhancedWebSocketManager;
   private connectionHealth: ConnectionHealth;
   private healthMonitor: ConnectionHealthMonitor;
   private circuitBreaker: ConnectionCircuitBreaker;
@@ -61,8 +61,8 @@ export class TwilioWebSocketManager {
   private static readonly PING_INTERVAL = 30000; // 30 seconds
   private static readonly HEALTH_CHECK_INTERVAL = 5000; // 5 seconds
 
-  constructor(ws: WebSocket, connectionId?: string) {
-    this.ws = ws;
+  constructor(enhancedManager: EnhancedWebSocketManager, connectionId?: string) {
+    this.enhancedManager = enhancedManager;
     this.connectionHealth = {
       isHealthy: true,
       latency: 0,
@@ -80,7 +80,13 @@ export class TwilioWebSocketManager {
       connId
     );
     
-    // Initialize enhanced heartbeat service
+    // Get the underlying WebSocket for services that need it
+    const ws = enhancedManager.getWebSocket();
+    if (!ws) {
+      throw new Error('Enhanced WebSocket Manager does not have an active connection');
+    }
+    
+    // Initialize enhanced heartbeat service using the underlying WebSocket
     this.heartbeatService = new HeartbeatService(ws, connId, {
       pingInterval: 30000,        // 30 seconds
       pongTimeout: 10000,         // 10 seconds
@@ -153,14 +159,8 @@ export class TwilioWebSocketManager {
       // Connect using the enhanced manager
       await enhancedManager.connect();
 
-      // Get the underlying WebSocket
-      const ws = enhancedManager.getWebSocket();
-      if (!ws) {
-        throw new Error('Enhanced WebSocket manager failed to establish connection');
-      }
-
-      // Create TwilioWebSocketManager with the enhanced WebSocket
-      const twilioManager = new TwilioWebSocketManager(ws, connectionId);
+      // Create TwilioWebSocketManager with the enhanced manager
+      const twilioManager = new TwilioWebSocketManager(enhancedManager, connectionId);
 
       // Set up enhanced manager event forwarding
       enhancedManager.on('connected', () => {
@@ -178,9 +178,6 @@ export class TwilioWebSocketManager {
       enhancedManager.on('error', (error) => {
         logger.error(`Enhanced WebSocket error for call ${callId}`, { error: error.message });
       });
-
-      // Store reference to enhanced manager for cleanup
-      (twilioManager as any).enhancedManager = enhancedManager;
 
       logger.info(`Enhanced Twilio WebSocket connection established for call ${callId}`);
       return twilioManager;
@@ -217,14 +214,15 @@ export class TwilioWebSocketManager {
   }
 
   /**
-   * Set up WebSocket event handlers with Twilio-specific error handling
+   * Set up enhanced manager event handlers with Twilio-specific error handling
    */
   private setupEventHandlers(): void {
-    this.ws.on('error', (error) => {
+    // Use enhanced manager events instead of raw WebSocket events
+    this.enhancedManager.on('error', (error) => {
       this.handleConnectionError(error);
     });
 
-    this.ws.on('close', (code, reason) => {
+    this.enhancedManager.on('disconnected', (code, reason) => {
       this.handleConnectionClose(code, reason);
     });
 
@@ -528,22 +526,33 @@ export class TwilioWebSocketManager {
       }
 
       // Check WebSocket state before sending
-      if (this.ws.readyState !== WebSocket.OPEN) {
-        logger.error('Cannot send message: WebSocket not in OPEN state', {
-          readyState: this.ws.readyState,
+      if (!this.enhancedManager.isConnected()) {
+        logger.error('Cannot send message: Enhanced WebSocket manager not connected', {
           messageType: message.event
         });
         return false;
       }
 
-      // Send as a single, non-fragmented frame with strict protocol compliance  
-      // Note: Using minimal options to ensure maximum compatibility with Twilio
-      this.ws.send(jsonMessage, { 
-        binary: false,
-        compress: false, // Disable compression to prevent fragmentation
-        fin: true // Ensure this is sent as a complete frame
-        // mask option omitted - let the WebSocket library handle masking automatically
-      });
+      // Send through enhanced manager's Twilio-specific method
+      const success = this.enhancedManager.sendTwilioMessage(jsonMessage);
+      
+      if (!success) {
+        this.connectionHealth.errorCount++;
+        
+        // Record send error in real-time assessment
+        this.realTimeAssessment.recordConnectionError({
+          type: 'network',
+          code: 'SEND_FAILED',
+          message: 'Failed to send message through enhanced manager',
+          timestamp: new Date(),
+          severity: 'medium',
+          context: { 
+            messageType: message.event
+          }
+        });
+        
+        return false;
+      }
 
       // Log success (periodically to avoid spam)
       if (message.event === 'media' && this.sequenceNumber % 20 === 0) {
@@ -560,7 +569,7 @@ export class TwilioWebSocketManager {
       logger.error('Failed to send message to Twilio:', {
         error: errorMessage,
         messageType: message.event,
-        wsState: this.ws.readyState
+        connected: this.enhancedManager.isConnected()
       });
       
       this.connectionHealth.errorCount++;
@@ -575,7 +584,7 @@ export class TwilioWebSocketManager {
         severity: 'medium',
         context: { 
           messageType: message.event,
-          wsState: this.ws.readyState
+          connected: this.enhancedManager.isConnected()
         }
       });
       
@@ -778,7 +787,7 @@ export class TwilioWebSocketManager {
       severity,
       context: {
         connectionHealth: this.connectionHealth,
-        wsState: this.ws.readyState
+        connected: this.enhancedManager.isConnected()
       }
     });
   }
@@ -805,7 +814,7 @@ export class TwilioWebSocketManager {
    * Check if connection is ready for sending messages
    */
   private isConnectionReady(): boolean {
-    return this.ws.readyState === WebSocket.OPEN && this.connectionHealth.isHealthy;
+    return this.enhancedManager.isConnected() && this.connectionHealth.isHealthy;
   }
 
   /**
@@ -1103,11 +1112,46 @@ export class TwilioWebSocketManager {
   public forceHeartbeatAdaptation(condition: any, reason: string): void {
     this.adaptiveHeartbeatManager.forceAdaptation(condition, reason);
   }
+
+  /**
+   * Get the underlying enhanced WebSocket manager
+   * Provides access to enhanced capabilities for advanced use cases
+   */
+  public getEnhancedManager(): EnhancedWebSocketManager {
+    return this.enhancedManager;
+  }
+
+  /**
+   * Create a TwilioWebSocketManager from a raw WebSocket (legacy compatibility)
+   * @param ws Raw WebSocket instance
+   * @param connectionId Optional connection ID
+   * @deprecated Use createEnhancedConnection for full enhanced capabilities
+   */
+  public static fromWebSocket(ws: WebSocket, connectionId?: string): TwilioWebSocketManager {
+    // Create a minimal enhanced wrapper for backward compatibility
+    const callId = connectionId || `legacy-${Date.now()}`;
+    const enhancedManager = new EnhancedWebSocketManager(callId, '', {
+      maxReconnectAttempts: 3,
+      reconnectDelay: 1000,
+      heartbeatInterval: 30000,
+      connectionTimeout: 10000
+    });
+    
+    // Override the WebSocket in the enhanced manager for backward compatibility
+    (enhancedManager as any).ws = ws;
+    (enhancedManager as any).metrics.activeConnections = 1;
+    (enhancedManager as any).metrics.totalConnections = 1;
+    
+    return new TwilioWebSocketManager(enhancedManager, connectionId);
+  }
 }
 
 /**
- * Factory function to create a Twilio WebSocket manager
+ * Factory function to create a Twilio WebSocket manager with backward compatibility
+ * @param ws Raw WebSocket instance
+ * @param connectionId Optional connection ID
+ * @deprecated Use TwilioWebSocketManager.createEnhancedConnection for full enhanced capabilities
  */
 export function createTwilioWebSocketManager(ws: WebSocket, connectionId?: string): TwilioWebSocketManager {
-  return new TwilioWebSocketManager(ws, connectionId);
+  return TwilioWebSocketManager.fromWebSocket(ws, connectionId);
 }

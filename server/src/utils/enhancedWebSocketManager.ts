@@ -18,6 +18,14 @@ export interface ConnectionConfig {
   maxHeartbeatMisses: number;
   pingInterval: number;
   pongTimeout: number;
+  // RFC 6455 compliance options
+  enableFrameValidation: boolean;
+  strictProtocolCompliance: boolean;
+  maxFrameSize: number;
+  maxMessageSize: number;
+  // Enhanced error handling
+  errorClassificationEnabled: boolean;
+  retryOnProtocolErrors: boolean;
 }
 
 export interface ConnectionMetrics {
@@ -30,6 +38,21 @@ export interface ConnectionMetrics {
   latency: number;
   errorCount: number;
   messagesSent: number;
+  // Enhanced metrics for production monitoring
+  messagesReceived: number;
+  bytesSent: number;
+  bytesReceived: number;
+  protocolErrors: number;
+  networkErrors: number;
+  applicationErrors: number;
+  frameValidationErrors: number;
+  compressionErrors: number;
+  fragmentationErrors: number;
+  avgReconnectionDelay: number;
+  connectionUptime: number;
+  lastConnectionTime: Date | null;
+  lastDisconnectionTime: Date | null;
+  disconnectionReason: string | null;
 }
 
 export interface BufferStats {
@@ -37,6 +60,43 @@ export interface BufferStats {
   maxSize: number;
   overflowCount: number;
   lastCleared: Date;
+  // Enhanced buffer management metrics
+  totalBufferedMessages: number;
+  averageMessageSize: number;
+  memoryPressure: 'low' | 'medium' | 'high' | 'critical';
+  cleanupCycles: number;
+  adaptiveCleanupEnabled: boolean;
+}
+
+// RFC 6455 Frame Types and Opcodes
+export enum WebSocketOpcode {
+  CONTINUATION = 0x0,
+  TEXT = 0x1,
+  BINARY = 0x2,
+  CLOSE = 0x8,
+  PING = 0x9,
+  PONG = 0xa
+}
+
+// Error classification for better recovery strategies  
+export enum ErrorType {
+  NETWORK = 'network',
+  PROTOCOL = 'protocol', 
+  APPLICATION = 'application',
+  BUFFER_OVERFLOW = 'buffer_overflow',
+  TIMEOUT = 'timeout',
+  AUTHENTICATION = 'authentication',
+  TWILIO_SPECIFIC = 'twilio_specific'
+}
+
+export interface ClassifiedError {
+  type: ErrorType;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  message: string;
+  originalError: Error;
+  timestamp: Date;
+  recoverable: boolean;
+  retryCount: number;
 }
 
 export class EnhancedWebSocketManager extends EventEmitter {
@@ -66,6 +126,19 @@ export class EnhancedWebSocketManager extends EventEmitter {
   private readonly BUFFER_CLEANUP_THRESHOLD = 20 * 1024 * 1024; // Reduced from 40MB to 20MB
   private readonly AGGRESSIVE_CLEANUP_THRESHOLD = 25 * 1024 * 1024; // New: 25MB for more aggressive cleanup
   
+  // Enhanced error tracking and classification
+  private errorHistory: ClassifiedError[] = [];
+  private readonly MAX_ERROR_HISTORY = 100;
+  
+  // Frame validation and protocol compliance
+  private frameBuffer: Buffer = Buffer.alloc(0);
+  private expectedContinuationFrames = 0;
+  private readonly TWILIO_ERROR_CODES = [31924, 31951, 31003, 53400, 53401];
+  
+  // Connection quality tracking
+  private connectionStartTime: Date | null = null;
+  private lastQualityCheck: Date = new Date();
+  
   constructor(callId: string, url: string, config: Partial<ConnectionConfig> = {}) {
     super();
     
@@ -80,6 +153,14 @@ export class EnhancedWebSocketManager extends EventEmitter {
       maxHeartbeatMisses: 2, // Reduced from 3 for faster failure detection
       pingInterval: 10000, // Reduced from 15000 for more frequent pings
       pongTimeout: 3000, // Reduced from 5000 for faster pong timeout
+      // RFC 6455 compliance defaults
+      enableFrameValidation: true,
+      strictProtocolCompliance: true,
+      maxFrameSize: 64 * 1024, // 64KB max frame size for Twilio compatibility
+      maxMessageSize: 1024 * 1024, // 1MB max message size
+      // Enhanced error handling defaults
+      errorClassificationEnabled: true,
+      retryOnProtocolErrors: false, // Don't retry protocol errors by default
       ...config
     };
     
@@ -92,14 +173,35 @@ export class EnhancedWebSocketManager extends EventEmitter {
       connectionQuality: 'excellent',
       latency: 0,
       errorCount: 0,
-      messagesSent: 0
+      messagesSent: 0,
+      // Enhanced metrics initialization
+      messagesReceived: 0,
+      bytesSent: 0,
+      bytesReceived: 0,
+      protocolErrors: 0,
+      networkErrors: 0,
+      applicationErrors: 0,
+      frameValidationErrors: 0,
+      compressionErrors: 0,
+      fragmentationErrors: 0,
+      avgReconnectionDelay: 0,
+      connectionUptime: 0,
+      lastConnectionTime: null,
+      lastDisconnectionTime: null,
+      disconnectionReason: null
     };
     
     this.bufferStats = {
       size: 0,
       maxSize: this.MAX_BUFFER_SIZE,
       overflowCount: 0,
-      lastCleared: new Date()
+      lastCleared: new Date(),
+      // Enhanced buffer stats initialization
+      totalBufferedMessages: 0,
+      averageMessageSize: 0,
+      memoryPressure: 'low',
+      cleanupCycles: 0,
+      adaptiveCleanupEnabled: true
     };
   }
   
@@ -179,6 +281,8 @@ export class EnhancedWebSocketManager extends EventEmitter {
     this.metrics.activeConnections = 1;
     this.reconnectAttempts = 0;
     this.isReconnecting = false;
+    this.connectionStartTime = new Date();
+    this.metrics.lastConnectionTime = this.connectionStartTime;
     
     // Update connection quality
     this.updateConnectionQuality('excellent');
@@ -192,6 +296,10 @@ export class EnhancedWebSocketManager extends EventEmitter {
       this.reconnectTimer = null;
     }
     
+    // Reset frame buffer for RFC compliance
+    this.frameBuffer = Buffer.alloc(0);
+    this.expectedContinuationFrames = 0;
+    
     // Register with resilience service
     const resilienceService = getCallResilienceService();
     resilienceService.registerCall(this.callId);
@@ -203,10 +311,26 @@ export class EnhancedWebSocketManager extends EventEmitter {
    * Handle connection close
    */
   private onConnectionClose(code: number, reason: string): void {
+    this.metrics.lastDisconnectionTime = new Date();
+    this.metrics.disconnectionReason = `Code: ${code}, Reason: ${reason}`;
+    
+    // Update connection uptime
+    if (this.connectionStartTime) {
+      this.metrics.connectionUptime += Date.now() - this.connectionStartTime.getTime();
+      this.connectionStartTime = null;
+    }
+    
     logger.warn(`WebSocket closed for call ${this.callId}`, { code, reason });
     
     this.metrics.activeConnections = 0;
+    this.updateConnectionQuality('failed');
     this.stopHealthMonitoring();
+    
+    // Classify the close reason for better error handling
+    const error = this.classifyCloseCode(code, reason);
+    if (error) {
+      this.recordClassifiedError(error);
+    }
     
     const resilienceService = getCallResilienceService();
     resilienceService.reportError(
@@ -215,8 +339,8 @@ export class EnhancedWebSocketManager extends EventEmitter {
       'websocket'
     );
     
-    // Attempt reconnection if appropriate
-    if (this.shouldReconnect && code !== 1000) { // 1000 = normal closure
+    // Attempt reconnection based on close code and error classification
+    if (this.shouldReconnect && this.shouldAttemptReconnection(code, error)) {
       this.scheduleReconnect();
     }
     
@@ -230,12 +354,21 @@ export class EnhancedWebSocketManager extends EventEmitter {
     logger.error(`WebSocket error for call ${this.callId}:`, error);
     
     this.metrics.errorCount++;
-    this.updateConnectionQuality('failed');
+    
+    // Classify the error for better handling and recovery
+    const classifiedError = this.classifyError(error);
+    this.recordClassifiedError(classifiedError);
+    
+    // Update metrics based on error type
+    this.updateMetricsForError(classifiedError);
+    
+    // Update connection quality based on error severity
+    this.updateConnectionQualityFromError(classifiedError);
     
     const resilienceService = getCallResilienceService();
     resilienceService.reportError(this.callId, error, 'websocket');
     
-    this.emit('error', error);
+    this.emit('error', { original: error, classified: classifiedError });
   }
   
   /**
@@ -243,9 +376,29 @@ export class EnhancedWebSocketManager extends EventEmitter {
    */
   private onMessage(data: WebSocket.Data): void {
     try {
-      // Update heartbeat
+      // Update heartbeat and metrics
       this.metrics.lastHeartbeat = new Date();
       this.metrics.heartbeatMisses = 0;
+      this.metrics.messagesReceived++;
+      
+      // Calculate bytes received
+      const messageSize = Buffer.isBuffer(data) ? data.length : Buffer.byteLength(data.toString(), 'utf8');
+      this.metrics.bytesReceived += messageSize;
+      
+      // Validate frame if RFC compliance is enabled
+      if (this.config.enableFrameValidation) {
+        const validationResult = this.validateIncomingFrame(data, messageSize);
+        if (!validationResult.valid) {
+          this.metrics.frameValidationErrors++;
+          const error = this.classifyError(new Error(`Frame validation failed: ${validationResult.reason}`));
+          this.recordClassifiedError(error);
+          
+          if (this.config.strictProtocolCompliance) {
+            logger.error(`Frame validation failed for call ${this.callId}: ${validationResult.reason}`);
+            return; // Drop invalid frames in strict mode
+          }
+        }
+      }
       
       const resilienceService = getCallResilienceService();
       resilienceService.updateHeartbeat(this.callId);
@@ -267,16 +420,17 @@ export class EnhancedWebSocketManager extends EventEmitter {
    * Handle binary messages (audio data)
    */
   private handleBinaryMessage(data: Buffer): void {
-    // Add to audio buffer
+    // Add to audio buffer with enhanced metrics
     this.audioBuffer.push(data);
+    this.bufferStats.totalBufferedMessages++;
     this.updateBufferStats();
     
-    // Progressive cleanup strategy for better buffer management
-    if (this.bufferStats.size > this.AGGRESSIVE_CLEANUP_THRESHOLD) {
-      this.aggressiveCleanupAudioBuffer();
-    } else if (this.bufferStats.size > this.BUFFER_CLEANUP_THRESHOLD) {
-      this.cleanupAudioBuffer();
-    }
+    // Calculate memory pressure level
+    this.updateMemoryPressureLevel();
+    
+    // Adaptive cleanup strategy based on memory pressure and connection quality
+    const cleanupStrategy = this.determineCleanupStrategy();
+    this.executeCleanupStrategy(cleanupStrategy);
     
     // Emit buffer overflow warning if we're near the limit
     if (this.bufferStats.size > this.MAX_BUFFER_SIZE * 0.9) {
@@ -354,42 +508,72 @@ export class EnhancedWebSocketManager extends EventEmitter {
       let messageSize = 0;
       
       if (typeof data === 'string') {
-        // For text messages, validate JSON format
+        // For text messages, validate JSON format and Twilio-specific fields
         try {
           const parsed = JSON.parse(data);
+          
+          // Validate Twilio message structure
+          if (!this.validateTwilioMessageStructure(parsed)) {
+            logger.error(`Invalid Twilio message structure for call ${this.callId}`);
+            return false;
+          }
+          
           // Re-stringify to ensure consistent formatting and remove unnecessary whitespace
           messageData = JSON.stringify(parsed);
           messageSize = Buffer.byteLength(messageData, 'utf8');
         } catch (error) {
           logger.error(`Invalid JSON message for call ${this.callId}:`, error);
+          this.metrics.protocolErrors++;
           return false;
         }
       } else {
         messageData = data;
         messageSize = data.length;
+        
+        // Validate binary frame if configured
+        if (this.config.enableFrameValidation) {
+          const validation = this.validateOutgoingFrame(messageData, messageSize);
+          if (!validation.valid) {
+            logger.error(`Frame validation failed for call ${this.callId}: ${validation.reason}`);
+            this.metrics.frameValidationErrors++;
+            return false;
+          }
+        }
       }
 
-      // Validate message size - Twilio has limits on message sizes
-      const MAX_TWILIO_MESSAGE_SIZE = 64 * 1024; // 64KB
-      if (messageSize > MAX_TWILIO_MESSAGE_SIZE) {
-        logger.error(`Message too large for Twilio protocol: ${messageSize} bytes (max: ${MAX_TWILIO_MESSAGE_SIZE}) for call ${this.callId}`);
+      // Enhanced size validation with Twilio-specific limits
+      const maxSize = Math.min(this.config.maxMessageSize, 64 * 1024); // 64KB Twilio limit
+      if (messageSize > maxSize) {
+        logger.error(`Message too large for Twilio protocol: ${messageSize} bytes (max: ${maxSize}) for call ${this.callId}`);
+        this.metrics.protocolErrors++;
         return false;
       }
 
-      // Send with Twilio-specific options to ensure protocol compliance
+      // Send with RFC 6455 compliant options for Twilio
       this.ws.send(messageData, {
         binary: Buffer.isBuffer(messageData),
         compress: false, // Disable compression to prevent fragmentation issues
-        fin: true, // Ensure message is sent as a complete frame (no fragmentation)
-        mask: undefined // Let WebSocket library handle masking automatically for client connections
+        fin: true, // Ensure message is sent as a complete frame (RFC 6455 requirement)
+        mask: undefined // Let WebSocket library handle masking automatically
       });
 
-      // Update metrics
+      // Update enhanced metrics
       this.metrics.messagesSent++;
+      this.metrics.bytesSent += messageSize;
+      
+      // Update buffer stats for message tracking
+      this.bufferStats.averageMessageSize = 
+        (this.bufferStats.averageMessageSize * (this.metrics.messagesSent - 1) + messageSize) / this.metrics.messagesSent;
       
       return true;
     } catch (error) {
       logger.error(`Failed to send Twilio message for call ${this.callId}:`, error);
+      
+      // Classify and handle the error
+      const classifiedError = this.classifyError(error as Error);
+      this.recordClassifiedError(classifiedError);
+      this.updateMetricsForError(classifiedError);
+      
       this.handleConnectionError(error as Error);
       return false;
     }
@@ -545,10 +729,15 @@ export class EnhancedWebSocketManager extends EventEmitter {
   }
   
   /**
-   * Update buffer statistics
+   * Enhanced update buffer statistics with average calculations
    */
   private updateBufferStats(): void {
     this.bufferStats.size = this.audioBuffer.reduce((total, buffer) => total + buffer.length, 0);
+    
+    // Update average message size
+    if (this.bufferStats.totalBufferedMessages > 0) {
+      this.bufferStats.averageMessageSize = this.bufferStats.size / this.audioBuffer.length;
+    }
     
     const resilienceService = getCallResilienceService();
     resilienceService.updateAudioBufferSize(this.callId, this.bufferStats.size);
@@ -629,6 +818,403 @@ export class EnhancedWebSocketManager extends EventEmitter {
    */
   public getWebSocket(): WebSocket | null {
     return this.ws;
+  }
+
+  // ==================== Enhanced Error Classification Methods ====================
+
+  /**
+   * Classify error based on type and content for better recovery strategies
+   */
+  private classifyError(error: Error): ClassifiedError {
+    const errorMessage = error.message.toLowerCase();
+    let type: ErrorType = ErrorType.APPLICATION;
+    let severity: 'low' | 'medium' | 'high' | 'critical' = 'medium';
+    let recoverable = true;
+
+    // Network-related errors
+    if (errorMessage.includes('econnrefused') || errorMessage.includes('enotfound') ||
+        errorMessage.includes('timeout') || errorMessage.includes('network') ||
+        errorMessage.includes('connection') || errorMessage.includes('econnreset')) {
+      type = ErrorType.NETWORK;
+      severity = 'high';
+      recoverable = true;
+    }
+    // Protocol errors (RFC 6455 violations)
+    else if (errorMessage.includes('protocol') || errorMessage.includes('frame') ||
+             errorMessage.includes('opcode') || errorMessage.includes('fragmentation') ||
+             errorMessage.includes('close code') || errorMessage.includes('invalid')) {
+      type = ErrorType.PROTOCOL;
+      severity = 'critical';
+      recoverable = this.config.retryOnProtocolErrors;
+    }
+    // Twilio-specific errors
+    else if (this.TWILIO_ERROR_CODES.some(code => errorMessage.includes(code.toString())) ||
+             errorMessage.includes('twilio') || errorMessage.includes('malformed') ||
+             errorMessage.includes('31924') || errorMessage.includes('31951')) {
+      type = ErrorType.TWILIO_SPECIFIC;
+      severity = 'critical';
+      recoverable = true; // Twilio errors are often recoverable with reconnection
+    }
+    // Buffer overflow errors
+    else if (errorMessage.includes('buffer') || errorMessage.includes('overflow') ||
+             errorMessage.includes('memory')) {
+      type = ErrorType.BUFFER_OVERFLOW;
+      severity = 'high';
+      recoverable = true;
+    }
+    // Timeout errors
+    else if (errorMessage.includes('timeout') || errorMessage.includes('pong') ||
+             errorMessage.includes('heartbeat')) {
+      type = ErrorType.TIMEOUT;
+      severity = 'medium';
+      recoverable = true;
+    }
+    // Authentication errors
+    else if (errorMessage.includes('auth') || errorMessage.includes('unauthorized') ||
+             errorMessage.includes('forbidden') || errorMessage.includes('401') ||
+             errorMessage.includes('403')) {
+      type = ErrorType.AUTHENTICATION;
+      severity = 'critical';
+      recoverable = false;
+    }
+
+    return {
+      type,
+      severity,
+      message: error.message,
+      originalError: error,
+      timestamp: new Date(),
+      recoverable,
+      retryCount: 0
+    };
+  }
+
+  /**
+   * Classify WebSocket close codes for better error handling
+   */
+  private classifyCloseCode(code: number, reason: string): ClassifiedError | null {
+    let type: ErrorType = ErrorType.NETWORK;
+    let severity: 'low' | 'medium' | 'high' | 'critical' = 'medium';
+    let recoverable = true;
+
+    switch (code) {
+      case 1000: // Normal closure
+        return null; // Not an error
+      case 1001: // Going away
+        type = ErrorType.NETWORK;
+        severity = 'low';
+        recoverable = true;
+        break;
+      case 1002: // Protocol error
+      case 1007: // Invalid frame payload data
+      case 1010: // Mandatory extension
+        type = ErrorType.PROTOCOL;
+        severity = 'critical';
+        recoverable = this.config.retryOnProtocolErrors;
+        break;
+      case 1003: // Unsupported data
+        type = ErrorType.APPLICATION;
+        severity = 'high';
+        recoverable = false;
+        break;
+      case 1006: // Abnormal closure
+      case 1015: // TLS handshake failure
+        type = ErrorType.NETWORK;
+        severity = 'high';
+        recoverable = true;
+        break;
+      case 1011: // Internal server error
+        type = ErrorType.APPLICATION;
+        severity = 'critical';
+        recoverable = true;
+        break;
+      default:
+        if (code >= 4000 && code <= 4999) {
+          // Twilio-specific codes
+          type = ErrorType.TWILIO_SPECIFIC;
+          severity = 'critical';
+          recoverable = true;
+        }
+    }
+
+    return {
+      type,
+      severity,
+      message: `WebSocket closed with code ${code}: ${reason}`,
+      originalError: new Error(`WebSocket close code ${code}`),
+      timestamp: new Date(),
+      recoverable,
+      retryCount: 0
+    };
+  }
+
+  /**
+   * Record classified error in history for analysis
+   */
+  private recordClassifiedError(error: ClassifiedError): void {
+    this.errorHistory.push(error);
+    
+    // Keep only recent errors
+    if (this.errorHistory.length > this.MAX_ERROR_HISTORY) {
+      this.errorHistory = this.errorHistory.slice(-this.MAX_ERROR_HISTORY);
+    }
+
+    // Log error with classification
+    logger.error(`Classified error for call ${this.callId}`, {
+      type: error.type,
+      severity: error.severity,
+      recoverable: error.recoverable,
+      message: error.message
+    });
+  }
+
+  /**
+   * Update metrics based on error type
+   */
+  private updateMetricsForError(error: ClassifiedError): void {
+    switch (error.type) {
+      case ErrorType.NETWORK:
+        this.metrics.networkErrors++;
+        break;
+      case ErrorType.PROTOCOL:
+        this.metrics.protocolErrors++;
+        break;
+      case ErrorType.APPLICATION:
+        this.metrics.applicationErrors++;
+        break;
+      case ErrorType.TWILIO_SPECIFIC:
+        this.metrics.protocolErrors++; // Twilio errors are protocol-related
+        break;
+    }
+  }
+
+  /**
+   * Update connection quality based on error severity
+   */
+  private updateConnectionQualityFromError(error: ClassifiedError): void {
+    switch (error.severity) {
+      case 'critical':
+        this.updateConnectionQuality('failed');
+        break;
+      case 'high':
+        this.updateConnectionQuality('poor');
+        break;
+      case 'medium':
+        if (this.metrics.connectionQuality === 'excellent') {
+          this.updateConnectionQuality('good');
+        }
+        break;
+      // 'low' severity doesn't change quality
+    }
+  }
+
+  // ==================== RFC 6455 Frame Validation Methods ====================
+
+  /**
+   * Validate incoming WebSocket frame for RFC 6455 compliance
+   */
+  private validateIncomingFrame(data: WebSocket.Data, size: number): { valid: boolean; reason?: string } {
+    // Basic size validation
+    if (size > this.config.maxFrameSize) {
+      return { valid: false, reason: `Frame size ${size} exceeds maximum ${this.config.maxFrameSize}` };
+    }
+
+    // For binary frames, check if it's a valid audio format (basic check)
+    if (Buffer.isBuffer(data)) {
+      // Audio frames should have minimum size for valid audio data
+      if (size < 32 && size > 0) {
+        return { valid: false, reason: 'Binary frame too small to be valid audio data' };
+      }
+    } else {
+      // Text frames should be valid UTF-8 and proper JSON for Twilio
+      try {
+        const textData = data.toString();
+        if (textData.trim()) {
+          JSON.parse(textData);
+        }
+      } catch (error) {
+        return { valid: false, reason: 'Text frame contains invalid JSON' };
+      }
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Validate outgoing WebSocket frame for RFC 6455 compliance
+   */
+  private validateOutgoingFrame(data: string | Buffer, size: number): { valid: boolean; reason?: string } {
+    // Basic size validation
+    if (size > this.config.maxFrameSize) {
+      return { valid: false, reason: `Frame size ${size} exceeds maximum ${this.config.maxFrameSize}` };
+    }
+
+    if (size === 0) {
+      return { valid: false, reason: 'Empty frame not allowed' };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Validate Twilio message structure for protocol compliance
+   */
+  private validateTwilioMessageStructure(message: any): boolean {
+    if (!message || typeof message !== 'object') {
+      return false;
+    }
+
+    // Check for required Twilio fields based on message type
+    if (message.event) {
+      // Control messages should have event field
+      return typeof message.event === 'string';
+    } else if (message.media) {
+      // Media messages should have media field with payload
+      return message.media.payload && typeof message.media.payload === 'string';
+    }
+
+    // Allow other message types but ensure they're objects
+    return true;
+  }
+
+  // ==================== Enhanced Buffer Management Methods ====================
+
+  /**
+   * Update memory pressure level based on current buffer state
+   */
+  private updateMemoryPressureLevel(): void {
+    const pressureRatio = this.bufferStats.size / this.MAX_BUFFER_SIZE;
+    
+    if (pressureRatio >= 0.9) {
+      this.bufferStats.memoryPressure = 'critical';
+    } else if (pressureRatio >= 0.7) {
+      this.bufferStats.memoryPressure = 'high';
+    } else if (pressureRatio >= 0.4) {
+      this.bufferStats.memoryPressure = 'medium';
+    } else {
+      this.bufferStats.memoryPressure = 'low';
+    }
+  }
+
+  /**
+   * Determine cleanup strategy based on memory pressure and connection quality
+   */
+  private determineCleanupStrategy(): 'none' | 'gentle' | 'moderate' | 'aggressive' | 'critical' {
+    const pressureLevel = this.bufferStats.memoryPressure;
+    const quality = this.metrics.connectionQuality;
+    
+    // Critical pressure always requires aggressive cleanup
+    if (pressureLevel === 'critical') {
+      return 'critical';
+    }
+    
+    // High pressure with poor connection requires aggressive cleanup
+    if (pressureLevel === 'high' && (quality === 'poor' || quality === 'failed')) {
+      return 'aggressive';
+    }
+    
+    // High pressure with good connection uses moderate cleanup
+    if (pressureLevel === 'high') {
+      return 'moderate';
+    }
+    
+    // Medium pressure with poor connection uses gentle cleanup
+    if (pressureLevel === 'medium' && quality === 'poor') {
+      return 'gentle';
+    }
+    
+    return 'none';
+  }
+
+  /**
+   * Execute cleanup strategy based on determined approach
+   */
+  private executeCleanupStrategy(strategy: 'none' | 'gentle' | 'moderate' | 'aggressive' | 'critical'): void {
+    switch (strategy) {
+      case 'gentle':
+        this.gentleCleanupAudioBuffer(0.8); // Keep 80%
+        break;
+      case 'moderate':
+        this.cleanupAudioBuffer(); // Keep 25% (existing method)
+        break;
+      case 'aggressive':
+        this.aggressiveCleanupAudioBuffer(); // Keep 10% (existing method)
+        break;
+      case 'critical':
+        this.criticalCleanupAudioBuffer(); // Keep 5%
+        break;
+      case 'none':
+      default:
+        // No cleanup needed
+        break;
+    }
+  }
+
+  /**
+   * Gentle cleanup - keeps more data for high-quality connections
+   */
+  private gentleCleanupAudioBuffer(keepRatio = 0.8): void {
+    const keepCount = Math.floor(this.audioBuffer.length * keepRatio);
+    this.audioBuffer = this.audioBuffer.slice(-keepCount);
+    
+    this.updateBufferStats();
+    this.bufferStats.lastCleared = new Date();
+    this.bufferStats.cleanupCycles++;
+    
+    logger.debug(`Gentle audio buffer cleanup performed for call ${this.callId}, kept ${keepRatio * 100}%, size: ${this.bufferStats.size}`);
+  }
+
+  /**
+   * Critical cleanup for emergency situations
+   */
+  private criticalCleanupAudioBuffer(): void {
+    // Keep only the last 5% of the buffer in critical mode
+    const keepCount = Math.floor(this.audioBuffer.length * 0.05);
+    this.audioBuffer = this.audioBuffer.slice(-keepCount);
+    
+    this.updateBufferStats();
+    this.bufferStats.lastCleared = new Date();
+    this.bufferStats.overflowCount++;
+    this.bufferStats.cleanupCycles++;
+    
+    logger.error(`Critical audio buffer cleanup performed for call ${this.callId}, size: ${this.bufferStats.size}, overflow count: ${this.bufferStats.overflowCount}`);
+    
+    // Report to resilience service
+    const resilienceService = getCallResilienceService();
+    resilienceService.reportError(
+      this.callId,
+      new Error(`Critical audio buffer overflow requiring emergency cleanup`),
+      'buffer_management'
+    );
+  }
+
+  // ==================== Enhanced Reconnection Logic ====================
+
+  /**
+   * Determine if reconnection should be attempted based on error classification
+   */
+  private shouldAttemptReconnection(code: number, error: ClassifiedError | null): boolean {
+    // Normal closure - no reconnection
+    if (code === 1000) {
+      return false;
+    }
+
+    // Authentication errors - no reconnection
+    if (error?.type === ErrorType.AUTHENTICATION) {
+      return false;
+    }
+
+    // Protocol errors - only if configured to retry
+    if (error?.type === ErrorType.PROTOCOL && !this.config.retryOnProtocolErrors) {
+      return false;
+    }
+
+    // Check if we've hit the retry limit for this error type
+    if (error && !error.recoverable) {
+      return false;
+    }
+
+    return true;
   }
 
 

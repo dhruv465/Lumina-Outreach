@@ -727,6 +727,51 @@ export class SessionManager extends EventEmitter {
     logger.debug(`Removed session ${sessionId} from session manager`);
   }
 
+  /**
+   * Create a new session with enhanced WebSocket connection
+   * This method creates a session using the EnhancedWebSocketManager for better connection handling
+   */
+  public async createEnhancedSession(
+    url: string,
+    config: SessionConfig
+  ): Promise<Session> {
+    logger.info(`Creating enhanced session ${config.sessionId} for call ${config.callId}`);
+
+    try {
+      // Import enhanced WebSocket factory
+      const { createPlainWebSocket } = await import('./enhancedWebSocketFactory');
+
+      // Create enhanced WebSocket connection
+      const ws = await createPlainWebSocket(url, {
+        callId: config.callId,
+        connectionId: config.sessionId,
+        serviceName: 'session-manager',
+        // Session-specific optimizations
+        heartbeatInterval: 20000, // 20 seconds for session management
+        connectionTimeout: 12000,
+        maxReconnectAttempts: 5,
+        reconnectDelay: 1500
+      });
+
+      // Create session with enhanced WebSocket
+      const session = new Session(ws, config);
+
+      // Register the session
+      this.addSession(session);
+
+      logger.info(`Enhanced session ${config.sessionId} created successfully`);
+      return session;
+
+    } catch (error) {
+      logger.error(`Failed to create enhanced session ${config.sessionId}`, {
+        error: error.message,
+        callId: config.callId,
+        url
+      });
+      throw error;
+    }
+  }
+
   private startCleanupTimer(): void {
     this.cleanupInterval = setInterval(() => {
       this.cleanup();

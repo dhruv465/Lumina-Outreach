@@ -565,6 +565,28 @@ export class EnhancedWebSocketManager extends EventEmitter {
   }
   
   /**
+   * Get the underlying WebSocket instance
+   * Used for integration with other WebSocket managers
+   */
+  public getWebSocket(): WebSocket | null {
+    return this.ws;
+  }
+
+  /**
+   * Get connection status
+   */
+  public isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  /**
+   * Get connection metrics
+   */
+  public getMetrics(): ConnectionMetrics {
+    return { ...this.metrics };
+  }
+
+  /**
    * Gracefully close connection
    */
   public close(): void {

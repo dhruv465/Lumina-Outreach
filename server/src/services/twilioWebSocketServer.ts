@@ -5,6 +5,7 @@ import url from 'url';
 import { Request } from 'express';
 import { ParamsDictionary } from 'express-serve-static-core';
 import { ParsedQs } from 'qs';
+import { enhancedWebSocketFactory } from '../utils/enhancedWebSocketFactory';
 
 // Extend WebSocket interface to include isAlive property
 interface ExtendedWebSocket extends WebSocket {
@@ -814,6 +815,8 @@ export class TwilioWebSocketServer {
 
   /** Cleanup method to stop heartbeat and close connections */
   public cleanup(): void {
+    logger.info('Starting TwilioWebSocketServer cleanup');
+    
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = undefined;
@@ -826,9 +829,19 @@ export class TwilioWebSocketServer {
       }
     });
     this.active.clear();
+
+    // Clean up any enhanced WebSocket connections
+    try {
+      enhancedWebSocketFactory.closeAllConnections();
+      logger.info('Enhanced WebSocket connections cleaned up');
+    } catch (error) {
+      logger.error('Error cleaning up enhanced WebSocket connections', { error: error.message });
+    }
     
     // Close the WebSocket server
     this.wss.close();
+    
+    logger.info('TwilioWebSocketServer cleanup completed');
   }
 }
 

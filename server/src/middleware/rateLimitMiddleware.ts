@@ -19,17 +19,17 @@ interface RateLimiterResponse {
 
 // Rate limiter configurations
 const apiLimiter = new RateLimiterMemory({
-  points: 100,              // Number of points
+  points: process.env.NODE_ENV === 'development' ? 1000 : 100, // Significantly more points in development
   duration: 60,             // Per 60 seconds
-  blockDuration: 60 * 2     // Block for 2 minutes if exceeded
+  blockDuration: process.env.NODE_ENV === 'development' ? 10 : 60 * 2 // Much shorter block time in development
 });
 
 // Web call limiter removed
 
 const authLimiter = new RateLimiterMemory({
-  points: 5,                // Number of points
+  points: process.env.NODE_ENV === 'development' ? 50 : 5, // 10x more points in development
   duration: 60,             // Per 60 seconds
-  blockDuration: 60 * 15    // Block for 15 minutes if exceeded
+  blockDuration: process.env.NODE_ENV === 'development' ? 30 : 60 * 15 // Much shorter block time in development
 });
 
 /**

@@ -223,7 +223,11 @@ if (isProduction) {
 const rateLimitWindowMs = parseInt(
   process.env.RATE_LIMIT_WINDOW_MS || "900000"
 ); // 15 minutes
-const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "100");
+const rateLimitMax = parseInt(
+  process.env.NODE_ENV === "development" 
+    ? "5000" // Much higher limit for development
+    : process.env.RATE_LIMIT_MAX_REQUESTS || "100"
+);
 
 // Global rate limiter
 const globalLimiter = rateLimit({
@@ -254,7 +258,11 @@ app.use(globalLimiter);
 const authLimitWindowMs = parseInt(
   process.env.AUTH_RATE_LIMIT_WINDOW_MS || "900000"
 ); // 15 minutes
-const authLimitMax = parseInt(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || "15"); // Increased default to 15
+const authLimitMax = parseInt(
+  process.env.NODE_ENV === "development"
+    ? "100" // Much higher limit for development
+    : process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || "15"
+); // Increased default to 15
 
 const authLimiter = rateLimit({
   windowMs: authLimitWindowMs,
@@ -269,9 +277,9 @@ const authLimiter = rateLimit({
 
 // Advanced rate limiter for API abuse prevention
 const apiAbuseProtection = new RateLimiterMemory({
-  points: process.env.NODE_ENV === "development" ? 200 : 50, // Increased for development
+  points: process.env.NODE_ENV === "development" ? 1000 : 50, // Significantly increased for development
   duration: 60, // Per 60 seconds
-  blockDuration: process.env.NODE_ENV === "development" ? 60 : 300, // Reduced for development
+  blockDuration: process.env.NODE_ENV === "development" ? 5 : 300, // Significantly reduced for development
 });
 
 // Middleware for API abuse protection

@@ -1,5 +1,3 @@
-// WebSocketConnectionManager.ts
-// This utility provides reliable WebSocket connection management with fallback mechanisms
 
 /**
  * Attempts to establish a WebSocket connection with fallback options

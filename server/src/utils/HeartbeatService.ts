@@ -10,6 +10,7 @@
 import { EventEmitter } from 'events';
 import * as WebSocket from 'ws';
 import logger from './logger';
+import { CompatibleWebSocket } from './websocketCompatibility';
 
 export interface HeartbeatConfig {
   pingInterval: number;           // Interval between ping messages (ms)
@@ -45,7 +46,7 @@ export interface HeartbeatEvent {
 }
 
 export class HeartbeatService extends EventEmitter {
-  private ws: WebSocket;
+  private ws: CompatibleWebSocket;
   private config: HeartbeatConfig;
   private connectionId: string;
   
@@ -82,7 +83,7 @@ export class HeartbeatService extends EventEmitter {
     latencyThreshold: 500       // 500ms latency threshold
   };
 
-  constructor(ws: WebSocket, connectionId: string, config?: Partial<HeartbeatConfig>) {
+  constructor(ws: CompatibleWebSocket, connectionId: string, config?: Partial<HeartbeatConfig>) {
     super();
     this.ws = ws;
     this.connectionId = connectionId;

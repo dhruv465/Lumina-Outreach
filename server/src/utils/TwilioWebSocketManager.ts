@@ -19,6 +19,12 @@ import { HeartbeatService } from './HeartbeatService';
 import { AdaptiveHeartbeatManager, IntensiveOperation } from './AdaptiveHeartbeatManager';
 import { ReconnectionService } from '../services/ReconnectionService';
 import { EnhancedWebSocketManager } from './enhancedWebSocketManager';
+import { 
+  CompatibleWebSocket, 
+  enhanceWebSocket, 
+  validateTwilioMessage,
+  WebSocketCompatibilityManager 
+} from './websocketCompatibility';
 
 interface TwilioMessage {
   event: string;
@@ -41,7 +47,7 @@ interface ConnectionHealth {
 }
 
 export class TwilioWebSocketManager {
-  private ws: WebSocket;
+  private ws: CompatibleWebSocket;
   private connectionHealth: ConnectionHealth;
   private healthMonitor: ConnectionHealthMonitor;
   private circuitBreaker: ConnectionCircuitBreaker;
@@ -61,8 +67,9 @@ export class TwilioWebSocketManager {
   private static readonly PING_INTERVAL = 30000; // 30 seconds
   private static readonly HEALTH_CHECK_INTERVAL = 5000; // 5 seconds
 
-  constructor(ws: WebSocket, connectionId?: string) {
-    this.ws = ws;
+  constructor(ws: any, connectionId?: string) {
+    // Enhance WebSocket with compatibility features
+    this.ws = enhanceWebSocket(ws);
     this.connectionHealth = {
       isHealthy: true,
       latency: 0,
@@ -81,7 +88,7 @@ export class TwilioWebSocketManager {
     );
     
     // Initialize enhanced heartbeat service
-    this.heartbeatService = new HeartbeatService(ws, connId, {
+    this.heartbeatService = new HeartbeatService(this.ws, connId, {
       pingInterval: 30000,        // 30 seconds
       pongTimeout: 10000,         // 10 seconds
       maxMissedHeartbeats: 3,     // 3 missed = dead
@@ -538,12 +545,7 @@ export class TwilioWebSocketManager {
 
       // Send as a single, non-fragmented frame with strict protocol compliance  
       // Note: Using minimal options to ensure maximum compatibility with Twilio
-      this.ws.send(jsonMessage, { 
-        binary: false,
-        compress: false, // Disable compression to prevent fragmentation
-        fin: true // Ensure this is sent as a complete frame
-        // mask option omitted - let the WebSocket library handle masking automatically
-      });
+      this.ws.send(jsonMessage);
 
       // Log success (periodically to avoid spam)
       if (message.event === 'media' && this.sequenceNumber % 20 === 0) {
@@ -587,91 +589,7 @@ export class TwilioWebSocketManager {
    * Validate Twilio message format to prevent protocol errors
    */
   private validateTwilioMessage(message: TwilioMessage): { valid: boolean; error?: string } {
-    if (!message || typeof message !== 'object') {
-      return { valid: false, error: 'Message must be an object' };
-    }
-
-    if (!message.event || typeof message.event !== 'string') {
-      return { valid: false, error: 'Message must have a valid event field' };
-    }
-
-    // Validate known Twilio event types
-    const validEvents = ['media', 'start', 'stop', 'mark', 'clear'];
-    if (!validEvents.includes(message.event)) {
-      return { valid: false, error: `Invalid event type: ${message.event}. Must be one of: ${validEvents.join(', ')}` };
-    }
-
-    // Validate media messages specifically
-    if (message.event === 'media') {
-      if (!message.streamSid || typeof message.streamSid !== 'string') {
-        return { valid: false, error: 'Media messages must include streamSid as string' };
-      }
-      
-      if (!message.media || typeof message.media !== 'object') {
-        return { valid: false, error: 'Media messages must include media object' };
-      }
-      
-      const { media } = message;
-      
-      // Validate required media fields with strict types
-      if (!media.track || typeof media.track !== 'string') {
-        return { valid: false, error: 'Media messages must include track as string' };
-      }
-      
-      if (!media.chunk || typeof media.chunk !== 'string') {
-        return { valid: false, error: 'Media messages must include chunk as string' };
-      }
-      
-      if (!media.timestamp || typeof media.timestamp !== 'string') {
-        return { valid: false, error: 'Media messages must include timestamp as string' };
-      }
-      
-      if (!media.payload || typeof media.payload !== 'string') {
-        return { valid: false, error: 'Media messages must include payload as string' };
-      }
-
-      // Validate track value
-      if (!['inbound', 'outbound'].includes(media.track)) {
-        return { valid: false, error: 'Media track must be either "inbound" or "outbound"' };
-      }
-
-      // Validate chunk is a valid sequence number
-      const chunkNum = parseInt(media.chunk, 10);
-      if (isNaN(chunkNum) || chunkNum < 0) {
-        return { valid: false, error: 'Media chunk must be a valid non-negative integer string' };
-      }
-
-      // Validate timestamp is a valid number string
-      const timestampNum = parseInt(media.timestamp, 10);
-      if (isNaN(timestampNum) || timestampNum <= 0) {
-        return { valid: false, error: 'Media timestamp must be a valid positive integer string' };
-      }
-
-      // Validate base64 payload
-      try {
-        const decoded = Buffer.from(media.payload, 'base64');
-        if (decoded.length === 0) {
-          return { valid: false, error: 'Media payload cannot be empty after base64 decoding' };
-        }
-      } catch (e) {
-        return { valid: false, error: 'Media payload must be valid base64' };
-      }
-    }
-
-    // Validate mark messages
-    if (message.event === 'mark') {
-      if (!message.streamSid || typeof message.streamSid !== 'string') {
-        return { valid: false, error: 'Mark messages must include streamSid as string' };
-      }
-      if (!message.mark || typeof message.mark !== 'object') {
-        return { valid: false, error: 'Mark messages must include mark object' };
-      }
-      if (!message.mark.name || typeof message.mark.name !== 'string') {
-        return { valid: false, error: 'Mark messages must include mark.name as string' };
-      }
-    }
-
-    return { valid: true };
+    return validateTwilioMessage(message);
   }
 
 

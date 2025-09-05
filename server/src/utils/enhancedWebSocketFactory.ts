@@ -9,6 +9,7 @@
  */
 
 import { EnhancedWebSocketManager, ConnectionConfig } from './enhancedWebSocketManager';
+import { createCompatibleWebSocket, CompatibleWebSocket } from './websocketCompatibility';
 import logger from './logger';
 
 export interface EnhancedWebSocketOptions extends Partial<ConnectionConfig> {

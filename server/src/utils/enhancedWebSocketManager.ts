@@ -9,6 +9,11 @@ import * as WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import logger from '../utils/logger';
 import { getCallResilienceService } from '../services/callResilienceService';
+import { 
+  CompatibleWebSocket, 
+  enhanceWebSocket, 
+  WebSocketCompatibilityManager 
+} from './websocketCompatibility';
 
 export interface ConnectionConfig {
   maxReconnectAttempts: number;
@@ -39,7 +44,7 @@ export interface BufferStats {
 }
 
 export class EnhancedWebSocketManager extends EventEmitter {
-  private ws: WebSocket | null = null;
+  private ws: CompatibleWebSocket | null = null;
   private config: ConnectionConfig;
   private metrics: ConnectionMetrics;
   private bufferStats: BufferStats;
@@ -127,11 +132,15 @@ export class EnhancedWebSocketManager extends EventEmitter {
     return new Promise((resolve, reject) => {
       logger.info(`Connecting to WebSocket for call ${this.callId}: ${this.url}`);
       
-      // Create WebSocket connection
-      this.ws = new (WebSocket as any)(this.url, {
+      // Create WebSocket connection with compatibility layer
+      const rawWs = new (WebSocket as any)(this.url, {
         perMessageDeflate: false,
-        handshakeTimeout: this.config.connectionTimeout
+        handshakeTimeout: this.config.connectionTimeout,
+        maxPayload: 64 * 1024 // 64KB limit for Twilio compatibility
       });
+      
+      // Enhance with compatibility features
+      this.ws = enhanceWebSocket(rawWs);
       
       const connectionTimeout = setTimeout(() => {
         if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
@@ -317,9 +326,9 @@ export class EnhancedWebSocketManager extends EventEmitter {
   }
   
   /**
-   * Send data through WebSocket with error handling
+   * Send data through WebSocket with error handling and Twilio compatibility
    */
-  public async send(data: WebSocket.Data): Promise<void> {
+  public async send(data: string | Buffer | ArrayBuffer): Promise<void> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected');
     }
@@ -568,22 +577,8 @@ export class EnhancedWebSocketManager extends EventEmitter {
    * Get the underlying WebSocket instance
    * Used for integration with other WebSocket managers
    */
-  public getWebSocket(): WebSocket | null {
+  public getWebSocket(): CompatibleWebSocket | null {
     return this.ws;
-  }
-
-  /**
-   * Get connection status
-   */
-  public isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
-  }
-
-  /**
-   * Get connection metrics
-   */
-  public getMetrics(): ConnectionMetrics {
-    return { ...this.metrics };
   }
 
   /**

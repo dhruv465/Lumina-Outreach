@@ -43,6 +43,9 @@ import { optimizedStreamRoute } from "./controllers/optimizedStreamController";
 // Twilio Media Streams WebSocket handler
 import { initializeTwilioWebSocketServer } from "./services/twilioWebSocketServer";
 
+// Enhanced WebSocket connection management
+import { enhancedWebSocketFactory } from "./utils/enhancedWebSocketFactory";
+
 // WebSocket handlers removed
 
 // Services initialization
@@ -1172,6 +1175,19 @@ const gracefulShutdown = (signal: string) => {
       } catch (error) {
         logger.warn(
           `Error cleaning up Deepgram auto-config service: ${getErrorMessage(
+            error
+          )}`
+        );
+      }
+
+      // Clean up enhanced WebSocket connections
+      try {
+        logger.info("Closing enhanced WebSocket connections...");
+        await enhancedWebSocketFactory.closeAllConnections();
+        logger.info("Enhanced WebSocket connections closed");
+      } catch (error) {
+        logger.warn(
+          `Error closing enhanced WebSocket connections: ${getErrorMessage(
             error
           )}`
         );

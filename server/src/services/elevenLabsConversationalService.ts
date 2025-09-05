@@ -3,6 +3,7 @@
  * Handles interactive conversations with the ability to stop audio when user interrupts
  * and adapt voice tone according to conversation context.
  * Uses the official ElevenLabs Node.js SDK.
+ * Enhanced with robust WebSocket connection management.
  */
 
 import axios from 'axios';
@@ -14,6 +15,8 @@ import { getErrorMessage } from '../utils/logger';
 import { VoicePersonality } from './voiceAIService';
 // Import the official ElevenLabs SDK
 import ElevenLabs from 'elevenlabs-node';
+// Import enhanced WebSocket factory
+import { createPlainWebSocket } from '../utils/enhancedWebSocketFactory';
 
 // Define Language type locally if not available from types
 type Language = 'English' | 'Hindi' | 'Spanish' | 'French' | 'German';
@@ -275,16 +278,29 @@ export class ElevenLabsConversationalService extends EventEmitter {
       throw new Error(`Conversation ${conversationId} not found`);
     }
 
-    // Create WebSocket connection
-    const ws = new WebSocket(this.wsUrl);
-    let interrupted = false;
+    // Create enhanced WebSocket connection
+    try {
+      logger.info(`Creating enhanced WebSocket connection for ElevenLabs conversation ${conversationId}`);
+      
+      const ws = await createPlainWebSocket(this.wsUrl, {
+        callId: `elevenlabs-${conversationId}`,
+        connectionId: conversationId,
+        serviceName: 'elevenlabs-conversational',
+        // ElevenLabs specific optimizations
+        heartbeatInterval: 30000, // 30 seconds for TTS services
+        connectionTimeout: 15000,
+        maxReconnectAttempts: 3, // Fewer retries for TTS to fail fast
+        reconnectDelay: 2000 // Slightly longer delay for TTS services
+      });
 
-    // Store connection for potential interruption
-    this.activeConnections.set(conversationId, ws);
+      let interrupted = false;
 
-    // Handle WebSocket connection
-    ws.on('open', () => {
-      logger.info(`WebSocket connection opened for conversation ${conversationId}`);
+      // Store connection for potential interruption
+      this.activeConnections.set(conversationId, ws);
+
+      // Handle WebSocket connection
+      ws.on('open', () => {
+        logger.info(`Enhanced WebSocket connection opened for ElevenLabs conversation ${conversationId}`);
       
       // Send initialization message
       ws.send(JSON.stringify({
@@ -361,11 +377,26 @@ export class ElevenLabsConversationalService extends EventEmitter {
       }
     });
 
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       // Handle WebSocket events to resolve/reject the promise
       ws.on('close', () => resolve());
       ws.on('error', (error) => reject(error));
     });
+
+    } catch (error) {
+      logger.error(`Failed to create enhanced WebSocket connection for ElevenLabs conversation ${conversationId}`, {
+        error: getErrorMessage(error),
+        conversationId,
+        wsUrl: this.wsUrl
+      });
+      
+      this.emit(ConversationEvent.ERROR, { 
+        conversationId, 
+        error: `Failed to establish connection: ${getErrorMessage(error)}` 
+      });
+      
+      throw error;
+    }
   }
 
   /**

@@ -1114,6 +1114,14 @@ export class TwilioWebSocketManager {
   }
 
   /**
+   * Get the underlying enhanced WebSocket manager
+   * Provides access to enhanced capabilities for advanced use cases
+   */
+  public getEnhancedManager(): EnhancedWebSocketManager {
+    return this.enhancedManager;
+  }
+
+  /**
    * Create a TwilioWebSocketManager from a raw WebSocket (legacy compatibility)
    * @param ws Raw WebSocket instance
    * @param connectionId Optional connection ID

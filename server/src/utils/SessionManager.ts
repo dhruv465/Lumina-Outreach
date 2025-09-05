@@ -88,8 +88,8 @@ export class Session extends EventEmitter {
     this.createdAt = new Date();
     this.lastActivity = new Date();
     
-    // Create Twilio WebSocket manager for this session
-    this.twilioManager = new TwilioWebSocketManager(ws, this.getConnectionId());
+    // Create Twilio WebSocket manager for this session using backward compatibility method
+    this.twilioManager = TwilioWebSocketManager.fromWebSocket(ws, this.getConnectionId());
     
     this.setupSessionHandlers();
     this.addEvent({

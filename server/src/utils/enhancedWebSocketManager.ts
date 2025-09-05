@@ -29,6 +29,7 @@ export interface ConnectionMetrics {
   connectionQuality: 'excellent' | 'good' | 'poor' | 'failed';
   latency: number;
   errorCount: number;
+  messagesSent: number;
 }
 
 export interface BufferStats {
@@ -90,7 +91,8 @@ export class EnhancedWebSocketManager extends EventEmitter {
       lastHeartbeat: null,
       connectionQuality: 'excellent',
       latency: 0,
-      errorCount: 0
+      errorCount: 0,
+      messagesSent: 0
     };
     
     this.bufferStats = {
@@ -334,6 +336,63 @@ export class EnhancedWebSocketManager extends EventEmitter {
         }
       });
     });
+  }
+
+  /**
+   * Send Twilio-compliant message with proper frame handling and validation
+   * This method ensures protocol compliance to prevent malformed message errors
+   */
+  public sendTwilioMessage(data: string | Buffer): boolean {
+    try {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        logger.error(`Cannot send Twilio message: WebSocket not connected for call ${this.callId}`);
+        return false;
+      }
+
+      // Validate and format data for Twilio protocol compliance
+      let messageData: string | Buffer;
+      let messageSize = 0;
+      
+      if (typeof data === 'string') {
+        // For text messages, validate JSON format
+        try {
+          const parsed = JSON.parse(data);
+          // Re-stringify to ensure consistent formatting and remove unnecessary whitespace
+          messageData = JSON.stringify(parsed);
+          messageSize = Buffer.byteLength(messageData, 'utf8');
+        } catch (error) {
+          logger.error(`Invalid JSON message for call ${this.callId}:`, error);
+          return false;
+        }
+      } else {
+        messageData = data;
+        messageSize = data.length;
+      }
+
+      // Validate message size - Twilio has limits on message sizes
+      const MAX_TWILIO_MESSAGE_SIZE = 64 * 1024; // 64KB
+      if (messageSize > MAX_TWILIO_MESSAGE_SIZE) {
+        logger.error(`Message too large for Twilio protocol: ${messageSize} bytes (max: ${MAX_TWILIO_MESSAGE_SIZE}) for call ${this.callId}`);
+        return false;
+      }
+
+      // Send with Twilio-specific options to ensure protocol compliance
+      this.ws.send(messageData, {
+        binary: Buffer.isBuffer(messageData),
+        compress: false, // Disable compression to prevent fragmentation issues
+        fin: true, // Ensure message is sent as a complete frame (no fragmentation)
+        mask: undefined // Let WebSocket library handle masking automatically for client connections
+      });
+
+      // Update metrics
+      this.metrics.messagesSent++;
+      
+      return true;
+    } catch (error) {
+      logger.error(`Failed to send Twilio message for call ${this.callId}:`, error);
+      this.handleConnectionError(error as Error);
+      return false;
+    }
   }
   
   /**

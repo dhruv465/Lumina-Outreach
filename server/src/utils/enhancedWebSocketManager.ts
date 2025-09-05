@@ -572,19 +572,7 @@ export class EnhancedWebSocketManager extends EventEmitter {
     return this.ws;
   }
 
-  /**
-   * Get connection status
-   */
-  public isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
-  }
 
-  /**
-   * Get connection metrics
-   */
-  public getMetrics(): ConnectionMetrics {
-    return { ...this.metrics };
-  }
 
   /**
    * Gracefully close connection

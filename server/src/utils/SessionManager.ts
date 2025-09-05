@@ -757,7 +757,7 @@ export class SessionManager extends EventEmitter {
       const session = new Session(ws, config);
 
       // Register the session
-      this.addSession(session);
+      this.sessions.set(config.sessionId, session);
 
       logger.info(`Enhanced session ${config.sessionId} created successfully`);
       return session;

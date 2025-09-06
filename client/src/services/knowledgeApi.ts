@@ -64,15 +64,15 @@ export interface ChunkData {
 const knowledgeApi = {
   // Documents
   getDocuments: async (params: DocumentParams = {}) => {
-    return await api.get('/api/knowledge/documents', { params });
+    return await api.get('/knowledge/documents', { params });
   },
   
   getDocumentById: async (id: string) => {
-    return await api.get(`/api/knowledge/documents/${id}`);
+    return await api.get(`/knowledge/documents/${id}`);
   },
   
   uploadDocuments: async (formData: FormData, onUploadProgress?: (progressEvent: any) => void) => {
-    return await api.post('/api/knowledge/documents', formData, {
+    return await api.post('/knowledge/documents', formData, {
       onUploadProgress,
       headers: {
         'Content-Type': 'multipart/form-data'
@@ -81,55 +81,55 @@ const knowledgeApi = {
   },
   
   updateDocument: async (id: string, data: DocumentData) => {
-    return await api.put(`/api/knowledge/documents/${id}`, data);
+    return await api.put(`/knowledge/documents/${id}`, data);
   },
   
   deleteDocument: async (id: string) => {
-    return await api.delete(`/api/knowledge/documents/${id}`);
+    return await api.delete(`/knowledge/documents/${id}`);
   },
   
   // Categories
   getCategories: async () => {
-    return await api.get('/api/knowledge/categories');
+    return await api.get('/knowledge/categories');
   },
   
   createCategory: async (data: CategoryData) => {
-    return await api.post('/api/knowledge/categories', data);
+    return await api.post('/knowledge/categories', data);
   },
   
   updateCategory: async (id: string, data: CategoryData) => {
-    return await api.put(`/api/knowledge/categories/${id}`, data);
+    return await api.put(`/knowledge/categories/${id}`, data);
   },
   
   deleteCategory: async (id: string) => {
-    return await api.delete(`/api/knowledge/categories/${id}`);
+    return await api.delete(`/knowledge/categories/${id}`);
   },
   
   // Tags
   getTags: async () => {
-    return await api.get('/api/knowledge/tags');
+    return await api.get('/knowledge/tags');
   },
   
   createTag: async (data: TagData) => {
-    return await api.post('/api/knowledge/tags', data);
+    return await api.post('/knowledge/tags', data);
   },
   
   // Chunks
   getChunks: async (params: ChunkParams = {}) => {
-    return await api.get('/api/knowledge/chunks', { params });
+    return await api.get('/knowledge/chunks', { params });
   },
   
   getChunkById: async (id: string) => {
-    return await api.get(`/api/knowledge/chunks/${id}`);
+    return await api.get(`/knowledge/chunks/${id}`);
   },
   
   updateChunk: async (id: string, data: ChunkData) => {
-    return await api.put(`/api/knowledge/chunks/${id}`, data);
+    return await api.put(`/knowledge/chunks/${id}`, data);
   },
   
   // Search
   searchKnowledge: async (query: string, filters = {}, limit = 10) => {
-    return await api.post('/api/knowledge/search', {
+    return await api.post('/knowledge/search', {
       query,
       filters,
       limit
@@ -138,15 +138,15 @@ const knowledgeApi = {
   
   // Analytics
   getUsageAnalytics: async (params: AnalyticsParams = {}) => {
-    return await api.get('/api/knowledge/analytics/usage', { params });
+    return await api.get('/knowledge/analytics/usage', { params });
   },
   
   getPerformanceAnalytics: async (params: AnalyticsParams = {}) => {
-    return await api.get('/api/knowledge/analytics/performance', { params });
+    return await api.get('/knowledge/analytics/performance', { params });
   },
   
   getKnowledgeGaps: async () => {
-    return await api.get('/api/knowledge/analytics/gaps');
+    return await api.get('/knowledge/analytics/gaps');
   }
 };
 

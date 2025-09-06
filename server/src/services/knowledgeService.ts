@@ -1,10 +1,3 @@
-/**
- * Knowledge Service
- *
- * Core service for document management, content chunking,
- * vector storage, and semantic search for the RAG knowledge base.
- */
-
 import { Types } from 'mongoose';
 import path from 'path';
 import fs from 'fs';

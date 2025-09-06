@@ -1,17 +1,52 @@
-import { Edit, FileText, FolderTree, Plus, Search, Tag, Trash2, UploadCloud } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Badge } from '../components/ui/badge';
-import { Button } from '../components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Spinner } from '../components/ui/spinner';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { useToast } from '../hooks/useToast';
-import api from '../services/api';
+import {
+  Edit,
+  FileText,
+  FolderTree,
+  Plus,
+  Search,
+  Tag,
+  Trash2,
+  UploadCloud,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Spinner } from "../components/ui/spinner";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../components/ui/tabs";
+import { useToast } from "../hooks/useToast";
+import knowledgeApi from "../services/knowledgeApi";
 
 // Define interfaces
 interface Document {
@@ -19,7 +54,7 @@ interface Document {
   fileName: string;
   fileType: string;
   fileSize: number;
-  status: 'processed' | 'processing' | 'error' | 'pending';
+  status: "processed" | "processing" | "error" | "pending";
   categoryId?: {
     _id: string;
     name: string;
@@ -49,87 +84,95 @@ interface Tag {
 const KnowledgeManagement = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState('documents');
+  const [activeTab, setActiveTab] = useState("documents");
   const [isLoading, setIsLoading] = useState(false);
+  const isLoadingRef = useRef(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [tagsLoaded, setTagsLoaded] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [newTagName, setNewTagName] = useState('');
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [newCategoryDescription, setNewCategoryDescription] = useState('');
-  const [newCategoryParent, setNewCategoryParent] = useState('');
+  const [newTagName, setNewTagName] = useState("");
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryDescription, setNewCategoryDescription] = useState("");
+  const [newCategoryParent, setNewCategoryParent] = useState("");
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
 
   // Fetch documents
   const fetchDocuments = useCallback(async (filters = {}) => {
+    // Prevent multiple simultaneous calls
+    if (isLoadingRef.current) {
+      return;
+    }
+
     try {
+      isLoadingRef.current = true;
       setIsLoading(true);
-      const response = await api.get('/api/knowledge/documents', { params: filters });
+      const response = await knowledgeApi.getDocuments(filters);
       setDocuments(response.data.documents || []);
     } catch (error: any) {
-      // Check if it's an authentication error (401) 
+      // Check if it's an authentication error (401)
       if (error.response?.status === 401) {
         toast({
-          title: 'Authentication Required',
-          description: 'You need to be logged in to access documents.',
-          variant: 'destructive'
+          title: "Authentication Required",
+          description: "You need to be logged in to access documents.",
+          variant: "destructive",
         });
       } else {
         // Generic error for other failures (network, server errors, etc.)
         toast({
-          title: 'Error',
-          description: 'Failed to fetch documents. Please try again.',
-          variant: 'destructive'
+          title: "Error",
+          description: "Failed to fetch documents. Please try again.",
+          variant: "destructive",
         });
       }
-      console.error('Error fetching documents:', error);
+      console.error("Error fetching documents:", error);
       // Set empty documents array to show empty state instead of keeping old data
       setDocuments([]);
     } finally {
+      isLoadingRef.current = false;
       setIsLoading(false);
     }
-  }, [toast]);
+  }, []); // Remove toast dependency to prevent unnecessary re-renders
 
   // Fetch categories
   const fetchCategories = useCallback(async () => {
     try {
-      const response = await api.get('/api/knowledge/categories');
+      const response = await knowledgeApi.getCategories();
       setCategories(response.data.categories || []);
       setCategoriesLoaded(true);
     } catch (error) {
       toast({
-        title: 'Error',
-        description: 'Failed to fetch categories. Please try again.',
-        variant: 'destructive'
+        title: "Error",
+        description: "Failed to fetch categories. Please try again.",
+        variant: "destructive",
       });
-      console.error('Error fetching categories:', error);
+      console.error("Error fetching categories:", error);
     }
-  }, [toast]);
+  }, []); // Remove toast dependency
 
   // Fetch tags
   const fetchTags = useCallback(async () => {
     try {
-      const response = await api.get('/api/knowledge/tags');
+      const response = await knowledgeApi.getTags();
       setTags(response.data.tags || []);
       setTagsLoaded(true);
     } catch (error) {
       toast({
-        title: 'Error',
-        description: 'Failed to fetch tags. Please try again.',
-        variant: 'destructive'
+        title: "Error",
+        description: "Failed to fetch tags. Please try again.",
+        variant: "destructive",
       });
-      console.error('Error fetching tags:', error);
+      console.error("Error fetching tags:", error);
     }
-  }, [toast]);
+  }, []); // Remove toast dependency
 
   // Fetch initial data
   useEffect(() => {
@@ -140,7 +183,7 @@ const KnowledgeManagement = () => {
   // Handle opening upload dialog and lazy load categories/tags
   const handleOpenUploadDialog = async () => {
     setUploadDialogOpen(true);
-    
+
     // Lazy load categories and tags only when upload dialog is opened
     if (!categoriesLoaded) {
       fetchCategories();
@@ -153,7 +196,7 @@ const KnowledgeManagement = () => {
   // Handle opening category dialog and lazy load categories if needed
   const handleOpenCategoryDialog = async () => {
     setCategoryDialogOpen(true);
-    
+
     // Lazy load categories only when category dialog is opened
     if (!categoriesLoaded) {
       fetchCategories();
@@ -163,7 +206,7 @@ const KnowledgeManagement = () => {
   // Handle opening tag dialog and lazy load tags if needed
   const handleOpenTagDialog = async () => {
     setTagDialogOpen(true);
-    
+
     // Lazy load tags only when tag dialog is opened
     if (!tagsLoaded) {
       fetchTags();
@@ -181,7 +224,7 @@ const KnowledgeManagement = () => {
   // Handle tag selection
   const handleTagSelect = (tagId: string) => {
     if (selectedTags.includes(tagId)) {
-      setSelectedTags(selectedTags.filter(id => id !== tagId));
+      setSelectedTags(selectedTags.filter((id) => id !== tagId));
     } else {
       setSelectedTags([...selectedTags, tagId]);
     }
@@ -191,9 +234,9 @@ const KnowledgeManagement = () => {
   const handleUpload = async () => {
     if (uploadFiles.length === 0) {
       toast({
-        title: 'Warning',
-        description: 'Please select at least one file to upload.',
-        variant: 'default'
+        title: "Warning",
+        description: "Please select at least one file to upload.",
+        variant: "default",
       });
       return;
     }
@@ -201,42 +244,49 @@ const KnowledgeManagement = () => {
     try {
       setIsLoading(true);
       setUploadProgress(0);
-      
+
       const formData = new FormData();
-      uploadFiles.forEach(file => {
-        formData.append('documents', file);
+      uploadFiles.forEach((file) => {
+        formData.append("documents", file);
       });
-      
+
       if (selectedCategory) {
-        formData.append('categoryId', selectedCategory);
+        formData.append("categoryId", selectedCategory);
       }
-      
+
       if (selectedTags.length > 0) {
-        formData.append('tags', selectedTags.join(','));
+        formData.append("tags", selectedTags.join(","));
       }
-      
-      
-      toast({
-        title: 'Success',
-        description: `Successfully uploaded ${uploadFiles.length} document(s).`,
-        variant: 'default'
+
+      // Upload the documents
+      await knowledgeApi.uploadDocuments(formData, (progressEvent) => {
+        const progress = Math.round(
+          (progressEvent.loaded * 100) / progressEvent.total
+        );
+        setUploadProgress(progress);
       });
-      
+
+      toast({
+        title: "Success",
+        description: `Successfully uploaded ${uploadFiles.length} document(s).`,
+        variant: "default",
+      });
+
       // Reset form and close dialog
       setUploadFiles([]);
-      setSelectedCategory('');
+      setSelectedCategory("");
       setSelectedTags([]);
       setUploadDialogOpen(false);
-      
+
       // Refresh documents list
       fetchDocuments();
     } catch (error) {
       toast({
-        title: 'Error',
-        description: 'Failed to upload documents. Please try again.',
-        variant: 'destructive'
+        title: "Error",
+        description: "Failed to upload documents. Please try again.",
+        variant: "destructive",
       });
-      console.error('Error uploading documents:', error);
+      console.error("Error uploading documents:", error);
     } finally {
       setIsLoading(false);
       setUploadProgress(0);
@@ -247,45 +297,45 @@ const KnowledgeManagement = () => {
   const handleCreateCategory = async () => {
     if (!newCategoryName.trim()) {
       toast({
-        title: 'Warning',
-        description: 'Please enter a category name.',
-        variant: 'default'
+        title: "Warning",
+        description: "Please enter a category name.",
+        variant: "default",
       });
       return;
     }
 
     try {
       setIsLoading(true);
-      
+
       const categoryData = {
         name: newCategoryName.trim(),
         description: newCategoryDescription.trim(),
-        parentId: newCategoryParent || undefined
+        parentId: newCategoryParent || undefined,
       };
-      
-      await api.post('/api/knowledge/categories', categoryData);
-      
+
+      await knowledgeApi.createCategory(categoryData);
+
       toast({
-        title: 'Success',
-        description: 'Category created successfully.',
-        variant: 'default'
+        title: "Success",
+        description: "Category created successfully.",
+        variant: "default",
       });
-      
+
       // Reset form and close dialog
-      setNewCategoryName('');
-      setNewCategoryDescription('');
-      setNewCategoryParent('');
+      setNewCategoryName("");
+      setNewCategoryDescription("");
+      setNewCategoryParent("");
       setCategoryDialogOpen(false);
-      
+
       // Refresh categories
       fetchCategories();
     } catch (error) {
       toast({
-        title: 'Error',
-        description: 'Failed to create category. Please try again.',
-        variant: 'destructive'
+        title: "Error",
+        description: "Failed to create category. Please try again.",
+        variant: "destructive",
       });
-      console.error('Error creating category:', error);
+      console.error("Error creating category:", error);
     } finally {
       setIsLoading(false);
     }
@@ -295,42 +345,42 @@ const KnowledgeManagement = () => {
   const handleCreateTag = async () => {
     if (!newTagName.trim()) {
       toast({
-        title: 'Warning',
-        description: 'Please enter a tag name.',
-        variant: 'default'
+        title: "Warning",
+        description: "Please enter a tag name.",
+        variant: "default",
       });
       return;
     }
 
     try {
       setIsLoading(true);
-      
+
       const tagData = {
         name: newTagName.trim(),
-        color: getRandomColor()
+        color: getRandomColor(),
       };
-      
-      await api.post('/api/knowledge/tags', tagData);
-      
+
+      await knowledgeApi.createTag(tagData);
+
       toast({
-        title: 'Success',
-        description: 'Tag created successfully.',
-        variant: 'default'
+        title: "Success",
+        description: "Tag created successfully.",
+        variant: "default",
       });
-      
+
       // Reset form and close dialog
-      setNewTagName('');
+      setNewTagName("");
       setTagDialogOpen(false);
-      
+
       // Refresh tags
       fetchTags();
     } catch (error) {
       toast({
-        title: 'Error',
-        description: 'Failed to create tag. Please try again.',
-        variant: 'destructive'
+        title: "Error",
+        description: "Failed to create tag. Please try again.",
+        variant: "destructive",
       });
-      console.error('Error creating tag:', error);
+      console.error("Error creating tag:", error);
     } finally {
       setIsLoading(false);
     }
@@ -338,30 +388,34 @@ const KnowledgeManagement = () => {
 
   // Delete document
   const handleDeleteDocument = async (documentId: string) => {
-    if (!window.confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
+    if (
+      !window.confirm(
+        "Are you sure you want to delete this document? This action cannot be undone."
+      )
+    ) {
       return;
     }
 
     try {
       setIsLoading(true);
-      
-      await api.delete(`/api/knowledge/documents/${documentId}`);
-      
+
+      await knowledgeApi.deleteDocument(documentId);
+
       toast({
-        title: 'Success',
-        description: 'Document deleted successfully.',
-        variant: 'default'
+        title: "Success",
+        description: "Document deleted successfully.",
+        variant: "default",
       });
-      
+
       // Refresh documents list
       fetchDocuments();
     } catch (error) {
       toast({
-        title: 'Error',
-        description: 'Failed to delete document. Please try again.',
-        variant: 'destructive'
+        title: "Error",
+        description: "Failed to delete document. Please try again.",
+        variant: "destructive",
       });
-      console.error('Error deleting document:', error);
+      console.error("Error deleting document:", error);
     } finally {
       setIsLoading(false);
     }
@@ -374,7 +428,15 @@ const KnowledgeManagement = () => {
 
   // Generate random color for tags
   const getRandomColor = () => {
-    const colors = ['#FF5733', '#33FF57', '#3357FF', '#F033FF', '#FF33A8', '#33FFF6', '#FFE333'];
+    const colors = [
+      "#FF5733",
+      "#33FF57",
+      "#3357FF",
+      "#F033FF",
+      "#FF33A8",
+      "#33FFF6",
+      "#FFE333",
+    ];
     return colors[Math.floor(Math.random() * colors.length)];
   };
 
@@ -385,17 +447,17 @@ const KnowledgeManagement = () => {
 
   // Format file size
   const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes === 0) return "0 Bytes";
     const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const sizes = ["Bytes", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   };
 
   return (
     <div className="container mx-auto py-8">
       <h1 className="text-3xl font-bold mb-8">Knowledge Management</h1>
-      
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="w-full justify-start mb-8">
           <TabsTrigger value="documents" className="flex items-center">
@@ -411,7 +473,7 @@ const KnowledgeManagement = () => {
             Tags
           </TabsTrigger>
         </TabsList>
-        
+
         {/* Documents Tab */}
         <TabsContent value="documents">
           <div className="flex justify-between items-center mb-6">
@@ -427,12 +489,15 @@ const KnowledgeManagement = () => {
                 Search
               </Button>
             </div>
-            <Button onClick={handleOpenUploadDialog} className="flex items-center">
+            <Button
+              onClick={handleOpenUploadDialog}
+              className="flex items-center"
+            >
               <UploadCloud className="mr-2 h-4 w-4" />
               Upload
             </Button>
           </div>
-          
+
           {isLoading ? (
             <div className="flex justify-center items-center py-12">
               <Spinner size="lg" />
@@ -453,46 +518,71 @@ const KnowledgeManagement = () => {
               </TableHeader>
               <TableBody>
                 {documents.map((doc) => (
-                  <TableRow key={doc._id} className="cursor-pointer hover:bg-gray-50" onClick={() => viewDocumentDetails(doc._id)}>
-                    <TableCell className="font-medium">{doc.fileName}</TableCell>
+                  <TableRow
+                    key={doc._id}
+                    className="cursor-pointer hover:bg-gray-50"
+                    onClick={() => viewDocumentDetails(doc._id)}
+                  >
+                    <TableCell className="font-medium">
+                      {doc.fileName}
+                    </TableCell>
                     <TableCell>{doc.fileType}</TableCell>
                     <TableCell>{formatFileSize(doc.fileSize)}</TableCell>
                     <TableCell>
-                      <Badge 
+                      <Badge
                         variant={
-                          doc.status === 'processed' ? 'default' : 
-                          doc.status === 'processing' ? 'outline' : 
-                          doc.status === 'error' ? 'destructive' : 'secondary'
+                          doc.status === "processed"
+                            ? "default"
+                            : doc.status === "processing"
+                            ? "outline"
+                            : doc.status === "error"
+                            ? "destructive"
+                            : "secondary"
                         }
                         className="capitalize"
                       >
                         {doc.status}
                       </Badge>
                     </TableCell>
-                    <TableCell>
-                      {doc.categoryId?.name || '-'}
-                    </TableCell>
+                    <TableCell>{doc.categoryId?.name || "-"}</TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
-                        {doc.tags?.map(tag => (
-                          <Badge key={tag} variant="outline" className="text-xs">
+                        {doc.tags?.map((tag) => (
+                          <Badge
+                            key={tag}
+                            variant="outline"
+                            className="text-xs"
+                          >
                             {tag}
                           </Badge>
                         ))}
                       </div>
                     </TableCell>
-                    <TableCell>{new Date(doc.createdAt).toLocaleDateString()}</TableCell>
-                    <TableCell className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <Button variant="ghost" size="sm" onClick={(e) => {
-                        e.stopPropagation();
-                        viewDocumentDetails(doc._id);
-                      }}>
+                    <TableCell>
+                      {new Date(doc.createdAt).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell
+                      className="flex items-center gap-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          viewDocumentDetails(doc._id);
+                        }}
+                      >
                         <Edit className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="sm" onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteDocument(doc._id);
-                      }}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDocument(doc._id);
+                        }}
+                      >
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
                     </TableCell>
@@ -504,8 +594,12 @@ const KnowledgeManagement = () => {
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <FileText className="h-16 w-16 text-gray-400 mb-4" />
-                <h3 className="text-xl font-semibold mb-2">No documents found</h3>
-                <p className="text-gray-500 mb-6">Upload documents to start building your knowledge base</p>
+                <h3 className="text-xl font-semibold mb-2">
+                  No documents found
+                </h3>
+                <p className="text-gray-500 mb-6">
+                  Upload documents to start building your knowledge base
+                </p>
                 <Button onClick={handleOpenUploadDialog}>
                   <UploadCloud className="mr-2 h-4 w-4" />
                   Upload Documents
@@ -514,17 +608,20 @@ const KnowledgeManagement = () => {
             </Card>
           )}
         </TabsContent>
-        
+
         {/* Categories Tab */}
         <TabsContent value="categories">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-semibold">Document Categories</h2>
-            <Button onClick={handleOpenCategoryDialog} className="flex items-center">
+            <Button
+              onClick={handleOpenCategoryDialog}
+              className="flex items-center"
+            >
               <Plus className="mr-2 h-4 w-4" />
               New Category
             </Button>
           </div>
-          
+
           {isLoading ? (
             <div className="flex justify-center items-center py-12">
               <Spinner size="lg" />
@@ -537,20 +634,25 @@ const KnowledgeManagement = () => {
                     <CardTitle>{category.name}</CardTitle>
                     {category.parentId && (
                       <CardDescription>
-                        Parent: {categories.find(c => c._id === category.parentId)?.name || 'Unknown'}
+                        Parent:{" "}
+                        {categories.find((c) => c._id === category.parentId)
+                          ?.name || "Unknown"}
                       </CardDescription>
                     )}
                   </CardHeader>
                   <CardContent>
                     <p className="text-gray-500">
-                      {category.description || 'No description provided'}
+                      {category.description || "No description provided"}
                     </p>
                   </CardContent>
                   <CardFooter className="flex justify-between">
-                    <Button variant="outline" onClick={() => {
-                      fetchDocuments({ categoryId: category._id });
-                      setActiveTab('documents');
-                    }}>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        fetchDocuments({ categoryId: category._id });
+                        setActiveTab("documents");
+                      }}
+                    >
                       View Documents
                     </Button>
                     <Button variant="ghost" size="sm">
@@ -564,8 +666,12 @@ const KnowledgeManagement = () => {
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <FolderTree className="h-16 w-16 text-gray-400 mb-4" />
-                <h3 className="text-xl font-semibold mb-2">No categories found</h3>
-                <p className="text-gray-500 mb-6">Create categories to organize your documents</p>
+                <h3 className="text-xl font-semibold mb-2">
+                  No categories found
+                </h3>
+                <p className="text-gray-500 mb-6">
+                  Create categories to organize your documents
+                </p>
                 <Button onClick={handleOpenCategoryDialog}>
                   <Plus className="mr-2 h-4 w-4" />
                   Create Category
@@ -574,7 +680,7 @@ const KnowledgeManagement = () => {
             </Card>
           )}
         </TabsContent>
-        
+
         {/* Tags Tab */}
         <TabsContent value="tags">
           <div className="flex justify-between items-center mb-6">
@@ -584,7 +690,7 @@ const KnowledgeManagement = () => {
               New Tag
             </Button>
           </div>
-          
+
           {isLoading ? (
             <div className="flex justify-center items-center py-12">
               <Spinner size="lg" />
@@ -595,8 +701,8 @@ const KnowledgeManagement = () => {
                 <Card key={tag._id}>
                   <CardHeader className="pb-2">
                     <div className="flex justify-between items-center">
-                      <Badge 
-                        style={{ backgroundColor: tag.color || '#333' }}
+                      <Badge
+                        style={{ backgroundColor: tag.color || "#333" }}
                         className="px-3 py-1"
                       >
                         {tag.name}
@@ -607,13 +713,13 @@ const KnowledgeManagement = () => {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
+                    <Button
+                      variant="outline"
+                      size="sm"
                       className="w-full"
                       onClick={() => {
                         fetchDocuments({ tags: tag.name });
-                        setActiveTab('documents');
+                        setActiveTab("documents");
                       }}
                     >
                       View Documents
@@ -627,7 +733,9 @@ const KnowledgeManagement = () => {
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <Tag className="h-16 w-16 text-gray-400 mb-4" />
                 <h3 className="text-xl font-semibold mb-2">No tags found</h3>
-                <p className="text-gray-500 mb-6">Create tags to organize your documents</p>
+                <p className="text-gray-500 mb-6">
+                  Create tags to organize your documents
+                </p>
                 <Button onClick={handleOpenTagDialog}>
                   <Plus className="mr-2 h-4 w-4" />
                   Create Tag
@@ -637,17 +745,18 @@ const KnowledgeManagement = () => {
           )}
         </TabsContent>
       </Tabs>
-      
+
       {/* Upload Dialog */}
       <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Upload Documents</DialogTitle>
             <DialogDescription>
-              Upload documents to your knowledge base. Supported formats: PDF, Word, Text, CSV, JSON, Markdown.
+              Upload documents to your knowledge base. Supported formats: PDF,
+              Word, Text, CSV, JSON, Markdown.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4 py-4">
             <div className="grid w-full items-center gap-1.5">
               <Label htmlFor="documents">Select Files</Label>
@@ -665,7 +774,7 @@ const KnowledgeManagement = () => {
                 </p>
               )}
             </div>
-            
+
             <div className="grid w-full items-center gap-1.5">
               <Label htmlFor="category">Category (Optional)</Label>
               <select
@@ -682,31 +791,39 @@ const KnowledgeManagement = () => {
                 ))}
               </select>
             </div>
-            
+
             <div className="grid w-full items-center gap-1.5">
               <Label>Tags (Optional)</Label>
               <div className="flex flex-wrap gap-2 border rounded-md p-2">
                 {tags.map((tag) => (
                   <Badge
                     key={tag._id}
-                    variant={selectedTags.includes(tag._id) ? 'default' : 'outline'}
+                    variant={
+                      selectedTags.includes(tag._id) ? "default" : "outline"
+                    }
                     className="cursor-pointer"
                     onClick={() => handleTagSelect(tag._id)}
                     style={{
-                      backgroundColor: selectedTags.includes(tag._id) ? tag.color : 'transparent',
+                      backgroundColor: selectedTags.includes(tag._id)
+                        ? tag.color
+                        : "transparent",
                       borderColor: tag.color,
-                      color: selectedTags.includes(tag._id) ? 'white' : 'inherit'
+                      color: selectedTags.includes(tag._id)
+                        ? "white"
+                        : "inherit",
                     }}
                   >
                     {tag.name}
                   </Badge>
                 ))}
                 {tags.length === 0 && (
-                  <p className="text-sm text-gray-500 py-1">No tags available</p>
+                  <p className="text-sm text-gray-500 py-1">
+                    No tags available
+                  </p>
                 )}
               </div>
             </div>
-            
+
             {uploadProgress > 0 && (
               <div className="w-full">
                 <div className="w-full bg-gray-200 rounded-full h-2.5">
@@ -721,7 +838,7 @@ const KnowledgeManagement = () => {
               </div>
             )}
           </div>
-          
+
           <DialogFooter className="sm:justify-between">
             <Button
               variant="ghost"
@@ -749,7 +866,7 @@ const KnowledgeManagement = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* New Category Dialog */}
       <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
         <DialogContent>
@@ -759,7 +876,7 @@ const KnowledgeManagement = () => {
               Create a new category to organize your documents.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4 py-4">
             <div className="grid w-full items-center gap-1.5">
               <Label htmlFor="categoryName">Category Name</Label>
@@ -770,9 +887,11 @@ const KnowledgeManagement = () => {
                 placeholder="Enter category name"
               />
             </div>
-            
+
             <div className="grid w-full items-center gap-1.5">
-              <Label htmlFor="categoryDescription">Description (Optional)</Label>
+              <Label htmlFor="categoryDescription">
+                Description (Optional)
+              </Label>
               <Input
                 id="categoryDescription"
                 value={newCategoryDescription}
@@ -780,7 +899,7 @@ const KnowledgeManagement = () => {
                 placeholder="Enter category description"
               />
             </div>
-            
+
             <div className="grid w-full items-center gap-1.5">
               <Label htmlFor="parentCategory">Parent Category (Optional)</Label>
               <select
@@ -798,7 +917,7 @@ const KnowledgeManagement = () => {
               </select>
             </div>
           </div>
-          
+
           <DialogFooter>
             <Button
               variant="ghost"
@@ -826,7 +945,7 @@ const KnowledgeManagement = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* New Tag Dialog */}
       <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
         <DialogContent className="sm:max-w-md">
@@ -836,7 +955,7 @@ const KnowledgeManagement = () => {
               Create a new tag to organize your documents.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4 py-4">
             <div className="grid w-full items-center gap-1.5">
               <Label htmlFor="tagName">Tag Name</Label>
@@ -848,7 +967,7 @@ const KnowledgeManagement = () => {
               />
             </div>
           </div>
-          
+
           <DialogFooter>
             <Button
               variant="ghost"

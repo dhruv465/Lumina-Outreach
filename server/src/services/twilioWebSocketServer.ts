@@ -12,7 +12,7 @@ interface ExtendedWebSocket extends WebSocket {
   isAlive?: boolean;
 }
 
-// Protocol state interface to explicitly track handshake status
+// Enhanced protocol state interface to explicitly track handshake status and connection quality
 export interface ProtocolState {
   // Handshake sequence tracking
   receivedConnected: boolean;
@@ -23,16 +23,30 @@ export interface ProtocolState {
   // Message sequence tracking
   messageCount: number;
   lastMessageTimestamp: number;
+  expectedSequence: number;
+  messageSequenceErrors: number;
   
   // Protocol validation
   protocolCompliant: boolean;
   protocolErrors: string[];
+  complianceScore: number; // 0-100 score based on protocol adherence
   
-  // Timing information
+  // Timing information for performance analysis
   connectionStartTime: number;
   connectedEventTime?: number;
   startEventTime?: number;
   connectedAckTime?: number;
+  
+  // Connection quality metrics
+  connectionQuality: 'excellent' | 'good' | 'fair' | 'poor' | 'critical';
+  lastQualityUpdate: number;
+  pingLatency: number[];
+  averageLatency: number;
+  
+  // Error recovery tracking
+  reconnectionAttempts: number;
+  lastReconnectionTime?: number;
+  recoveryState: 'stable' | 'recovering' | 'degraded' | 'failed';
 }
 
 type ConnectionState = {
@@ -71,10 +85,12 @@ export class TwilioWebSocketServer {
   // Optional feature flag to allow bi-directional outbound audio
   private readonly enableBidi: boolean = process.env.ENABLE_TWILIO_BIDI === 'true';
 
-  // Constants for intervals and sizes
-  private readonly KEEP_ALIVE_INTERVAL = 15000; // 15 seconds (like Deepgram Voice Agent)
-  private readonly CONNECTION_HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
+  // Constants for intervals and sizes - optimized for connection stability
+  private readonly KEEP_ALIVE_INTERVAL = 10000; // 10 seconds (reduced for better persistence)
+  private readonly CONNECTION_HEALTH_CHECK_INTERVAL = 20000; // 20 seconds (more frequent monitoring)
   private readonly AUDIO_CHUNK_SIZE = 8192; // 8KB chunks
+  private readonly PING_TIMEOUT = 5000; // 5 seconds timeout for ping responses
+  private readonly CONNECTION_TIMEOUT = 15000; // 15 seconds for initial connection timeout
   
   // For Twilio Media Streams, outbound audio must be 8kHz PCMU (µ-law), ~20ms frames (160 samples)
   public static readonly OUTBOUND_SAMPLES_PER_FRAME = 160;
@@ -181,9 +197,18 @@ export class TwilioWebSocketServer {
                 hasStreamSid: false,
                 messageCount: 0,
                 lastMessageTimestamp: Date.now(),
+                expectedSequence: 0,
+                messageSequenceErrors: 0,
                 protocolCompliant: true,
                 protocolErrors: [],
-                connectionStartTime: Date.now()
+                complianceScore: 100,
+                connectionStartTime: Date.now(),
+                connectionQuality: 'excellent',
+                lastQualityUpdate: Date.now(),
+                pingLatency: [],
+                averageLatency: 0,
+                reconnectionAttempts: 0,
+                recoveryState: 'stable'
               }
             };
             this.active.set(connectionKey, state);
@@ -356,9 +381,18 @@ export class TwilioWebSocketServer {
                         hasStreamSid: false,
                         messageCount: 0,
                         lastMessageTimestamp: Date.now(),
+                        expectedSequence: 0,
+                        messageSequenceErrors: 0,
                         protocolCompliant: true,
                         protocolErrors: [],
-                        connectionStartTime: Date.now()
+                        complianceScore: 100,
+                        connectionStartTime: Date.now(),
+                        connectionQuality: 'excellent',
+                        lastQualityUpdate: Date.now(),
+                        pingLatency: [],
+                        averageLatency: 0,
+                        reconnectionAttempts: 0,
+                        recoveryState: 'stable'
                       }
                     };
                     this.active.set(connectionKey, state);
@@ -533,19 +567,57 @@ export class TwilioWebSocketServer {
       }
     });
 
-    // Set up heartbeat to keep connections alive
+    // Enhanced heartbeat mechanism with proper timeout handling
     this.heartbeatInterval = setInterval(() => {
       this.wss.clients.forEach((ws) => {
         const extWs = ws as ExtendedWebSocket;
+        
+        // Terminate connections that didn't respond to previous ping
         if (extWs.isAlive === false) {
-          logger.warn('Terminating inactive WebSocket connection');
+          logger.warn('Terminating inactive WebSocket connection - no pong received', {
+            readyState: ws.readyState,
+            url: (ws as any).url
+          });
+          
+          // Clean up connection state before terminating
+          this.active.forEach((state, key) => {
+            if (state.ws === ws) {
+              logger.info('Cleaning up connection state for terminated connection', { connectionKey: key });
+              this.active.delete(key);
+              this.activeConnections.delete(key);
+              this.audioChunkBuffers.delete(key);
+              
+              // Clear timers
+              const keepAliveTimer = this.keepAliveTimers.get(key);
+              const healthTimer = this.connectionHealthTimers.get(key);
+              if (keepAliveTimer) {
+                clearInterval(keepAliveTimer);
+                this.keepAliveTimers.delete(key);
+              }
+              if (healthTimer) {
+                clearInterval(healthTimer);
+                this.connectionHealthTimers.delete(key);
+              }
+            }
+          });
+          
           return ws.terminate();
         }
         
-        extWs.isAlive = false;
-        ws.ping();
+        // Only ping open connections
+        if (ws.readyState === WebSocket.OPEN) {
+          extWs.isAlive = false;
+          try {
+            ws.ping();
+            logger.debug('Sent heartbeat ping to connection', { readyState: ws.readyState });
+          } catch (error) {
+            logger.error('Failed to send heartbeat ping', { error, readyState: ws.readyState });
+            // Mark as not alive if ping fails
+            extWs.isAlive = false;
+          }
+        }
       });
-    }, 30000); // 30 seconds
+    }, 20000); // 20 seconds - more frequent than keep-alive for better monitoring
 
     logger.info('Twilio WebSocket server initialized', { mode: 'noServer', serverCreated: true });
   }
@@ -689,24 +761,90 @@ export class TwilioWebSocketServer {
       clearInterval(this.keepAliveTimers.get(connectionKey));
     }
 
-    // Set up new keep-alive timer
+    let pingTimeouts: Map<string, NodeJS.Timeout> = new Map();
+
+    // Set up enhanced keep-alive timer with timeout handling
     const keepAliveTimer = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         try {
+          // Clear any existing ping timeout for this connection
+          const existingTimeout = pingTimeouts.get(connectionKey);
+          if (existingTimeout) {
+            clearTimeout(existingTimeout);
+            pingTimeouts.delete(connectionKey);
+          }
+
+          // Send ping and set up timeout for pong response
           ws.ping();
-          logger.debug(`Sent keep-alive ping for ${connectionKey}`);
+          logger.debug(`Sent keep-alive ping for ${connectionKey}`, { readyState: ws.readyState });
+          
+          // Set up timeout to detect unresponsive connections
+          const pingTimeout = setTimeout(() => {
+            logger.warn(`Keep-alive ping timeout for ${connectionKey} - connection may be unresponsive`);
+            const state = this.active.get(connectionKey);
+            if (state) {
+              state.protocolState.protocolCompliant = false;
+              state.protocolState.protocolErrors.push('Keep-alive ping timeout - connection unresponsive');
+            }
+            
+            // Mark WebSocket as not alive for heartbeat cleanup
+            const extWs = ws as ExtendedWebSocket;
+            extWs.isAlive = false;
+            
+            pingTimeouts.delete(connectionKey);
+          }, this.PING_TIMEOUT);
+          
+          pingTimeouts.set(connectionKey, pingTimeout);
+          
         } catch (error) {
-          logger.error(`Failed to send keep-alive ping for ${connectionKey}`, { error });
+          logger.error(`Failed to send keep-alive ping for ${connectionKey}`, { 
+            error, 
+            readyState: ws.readyState,
+            connectionKey 
+          });
+          
+          // Update protocol state for ping failure
+          const state = this.active.get(connectionKey);
+          if (state) {
+            state.protocolState.protocolCompliant = false;
+            state.protocolState.protocolErrors.push(`Keep-alive ping failed: ${error.message}`);
+          }
         }
       } else {
-        // Stop the timer if the connection is closed
+        // Stop the timer and cleanup if the connection is closed
         clearInterval(keepAliveTimer);
         this.keepAliveTimers.delete(connectionKey);
-        logger.debug(`Stopped keep-alive timer for closed connection ${connectionKey}`);
+        
+        // Clear any pending ping timeout
+        const pingTimeout = pingTimeouts.get(connectionKey);
+        if (pingTimeout) {
+          clearTimeout(pingTimeout);
+          pingTimeouts.delete(connectionKey);
+        }
+        
+        logger.debug(`Stopped keep-alive timer for closed connection ${connectionKey}`, { 
+          readyState: ws.readyState 
+        });
       }
     }, this.KEEP_ALIVE_INTERVAL);
 
     this.keepAliveTimers.set(connectionKey, keepAliveTimer);
+    
+    // Enhanced pong handler to clear ping timeouts
+    ws.on('pong', () => {
+      const pingTimeout = pingTimeouts.get(connectionKey);
+      if (pingTimeout) {
+        clearTimeout(pingTimeout);
+        pingTimeouts.delete(connectionKey);
+        logger.debug(`Received pong for ${connectionKey} - connection responsive`);
+      }
+      
+      // Update protocol state
+      const state = this.active.get(connectionKey);
+      if (state) {
+        state.protocolState.lastMessageTimestamp = Date.now();
+      }
+    });
   }
 
   private setupConnectionHealthCheck(connectionKey: string, ws: WebSocket): void {
@@ -715,16 +853,87 @@ export class TwilioWebSocketServer {
       clearInterval(this.connectionHealthTimers.get(connectionKey));
     }
 
-    // Set up new health check timer
+    // Set up enhanced health check timer with comprehensive monitoring
     const healthCheckTimer = setInterval(() => {
       try {
-        if (ws.readyState !== WebSocket.OPEN) {
+        const state = this.active.get(connectionKey);
+        
+        if (!state) {
+          logger.warn(`No connection state found for ${connectionKey} during health check`);
+          clearInterval(healthCheckTimer);
+          this.connectionHealthTimers.delete(connectionKey);
+          return;
+        }
+
+        const now = Date.now();
+        const connectionAge = now - state.createdAt;
+        const timeSinceLastMessage = now - state.protocolState.lastMessageTimestamp;
+        const isHealthy = ws.readyState === WebSocket.OPEN;
+        
+        // Comprehensive health assessment with connection quality
+        this.assessConnectionQuality(connectionKey);
+        
+        const healthMetrics = {
+          connectionKey,
+          readyState: ws.readyState,
+          connectionAge,
+          timeSinceLastMessage,
+          isHealthy,
+          protocolCompliant: state.protocolState.protocolCompliant,
+          messageCount: state.protocolState.messageCount,
+          errorCount: state.protocolState.protocolErrors.length,
+          hasCompletedHandshake: state.protocolState.receivedStart && state.protocolState.sentConnectedAck
+        };
+        
+        logger.debug(`Health check for ${connectionKey}`, healthMetrics);
+        
+        // Check for concerning patterns
+        if (!isHealthy) {
           logger.warn(`Connection ${connectionKey} health check failed, socket state: ${ws.readyState}`);
           clearInterval(healthCheckTimer);
           this.connectionHealthTimers.delete(connectionKey);
+          return;
         }
+        
+        // Check for stale connections (no messages for extended period)
+        const staleThreshold = 60000; // 1 minute
+        if (timeSinceLastMessage > staleThreshold && connectionAge > staleThreshold) {
+          logger.warn(`Connection ${connectionKey} appears stale`, {
+            timeSinceLastMessage,
+            connectionAge,
+            messageCount: state.protocolState.messageCount
+          });
+          
+          // Update protocol state to reflect staleness
+          state.protocolState.protocolErrors.push(`Connection stale - no activity for ${timeSinceLastMessage}ms`);
+        }
+        
+        // Check for protocol compliance issues
+        if (!state.protocolState.protocolCompliant) {
+          logger.warn(`Protocol compliance issues detected for ${connectionKey}`, {
+            errors: state.protocolState.protocolErrors,
+            errorCount: state.protocolState.protocolErrors.length
+          });
+        }
+        
+        // Check for incomplete handshake after reasonable time
+        const handshakeTimeout = 30000; // 30 seconds
+        if (connectionAge > handshakeTimeout && !healthMetrics.hasCompletedHandshake) {
+          logger.error(`Incomplete handshake detected for ${connectionKey} after ${connectionAge}ms`, {
+            receivedStart: state.protocolState.receivedStart,
+            sentConnectedAck: state.protocolState.sentConnectedAck,
+            hasStreamSid: state.protocolState.hasStreamSid
+          });
+          
+          state.protocolState.protocolCompliant = false;
+          state.protocolState.protocolErrors.push(`Incomplete handshake after ${connectionAge}ms`);
+        }
+        
       } catch (error) {
-        logger.error(`Error in health check for ${connectionKey}`, { error });
+        logger.error(`Error in health check for ${connectionKey}`, { 
+          error: error.message,
+          stack: error.stack
+        });
       }
     }, this.CONNECTION_HEALTH_CHECK_INTERVAL);
 
@@ -734,6 +943,77 @@ export class TwilioWebSocketServer {
   // Helper function to clean a pathname
   private cleanPathname(pathname: string): string {
     return pathname.replace(/\/\.websocket$/, "");
+  }
+
+  /** 
+   * Assess connection quality based on multiple metrics
+   * Returns quality score and updates protocol state
+   */
+  private assessConnectionQuality(connectionKey: string): void {
+    const state = this.active.get(connectionKey);
+    if (!state) return;
+
+    const now = Date.now();
+    const connectionAge = now - state.protocolState.connectionStartTime;
+    const timeSinceLastMessage = now - state.protocolState.lastMessageTimestamp;
+    
+    let qualityScore = 100;
+    let qualityLevel: 'excellent' | 'good' | 'fair' | 'poor' | 'critical' = 'excellent';
+    
+    // Deduct points for protocol errors
+    qualityScore -= state.protocolState.protocolErrors.length * 10;
+    
+    // Deduct points for message sequence errors
+    qualityScore -= state.protocolState.messageSequenceErrors * 15;
+    
+    // Deduct points for high average latency
+    if (state.protocolState.averageLatency > 500) {
+      qualityScore -= 20;
+    } else if (state.protocolState.averageLatency > 200) {
+      qualityScore -= 10;
+    }
+    
+    // Deduct points for stale connection
+    if (timeSinceLastMessage > 30000) { // 30 seconds
+      qualityScore -= 25;
+    } else if (timeSinceLastMessage > 15000) { // 15 seconds
+      qualityScore -= 10;
+    }
+    
+    // Deduct points for incomplete handshake
+    if (connectionAge > 10000 && (!state.protocolState.receivedStart || !state.protocolState.sentConnectedAck)) {
+      qualityScore -= 30;
+    }
+    
+    // Determine quality level
+    if (qualityScore >= 90) {
+      qualityLevel = 'excellent';
+    } else if (qualityScore >= 75) {
+      qualityLevel = 'good';
+    } else if (qualityScore >= 50) {
+      qualityLevel = 'fair';
+    } else if (qualityScore >= 25) {
+      qualityLevel = 'poor';
+    } else {
+      qualityLevel = 'critical';
+    }
+    
+    // Update protocol state
+    state.protocolState.complianceScore = Math.max(0, qualityScore);
+    state.protocolState.connectionQuality = qualityLevel;
+    state.protocolState.lastQualityUpdate = now;
+    
+    // Log quality changes
+    if (state.protocolState.connectionQuality !== qualityLevel) {
+      logger.info(`Connection quality changed for ${connectionKey}`, {
+        oldQuality: state.protocolState.connectionQuality,
+        newQuality: qualityLevel,
+        score: state.protocolState.complianceScore,
+        connectionAge,
+        timeSinceLastMessage,
+        errorCount: state.protocolState.protocolErrors.length
+      });
+    }
   }
 
   /** Optional helper to send an outbound PCMU frame (base64) after start */

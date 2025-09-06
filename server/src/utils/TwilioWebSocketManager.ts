@@ -49,6 +49,7 @@ export class TwilioWebSocketManager {
   private heartbeatService: HeartbeatService;
   private adaptiveHeartbeatManager: AdaptiveHeartbeatManager;
   private reconnectionService: ReconnectionService;
+  private connectionId: string;
   private sequenceNumber: number = 0;
   private streamSid?: string;
   private lastPingTime: number = 0;
@@ -72,6 +73,7 @@ export class TwilioWebSocketManager {
     
     // Initialize health monitoring components with unique connection ID
     const connId = connectionId || `twilio-ws-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    this.connectionId = connId;
     this.healthMonitor = new ConnectionHealthMonitor(connId);
     this.circuitBreaker = new ConnectionCircuitBreaker(connId);
     this.realTimeAssessment = new RealTimeHealthAssessment(
@@ -773,6 +775,17 @@ export class TwilioWebSocketManager {
       });
       errorType = 'protocol';
       severity = 'critical';
+    } else if (error.message.includes('11205') || error.message.includes('connection closed by server') ||
+               error.message.includes('websocket connection closed')) {
+      logger.warn('Detected Twilio error 11205 - WebSocket connection closed by server', {
+        error: error.message,
+        errorType: 'server_closure',
+        reconnectionRecommended: true
+      });
+      errorType = 'network';
+      severity = 'high';
+      // Trigger immediate reconnection for 11205 scenarios
+      setTimeout(() => this.handleTwilio11205Recovery(), 100);
     } else if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
       errorType = 'network';
       severity = 'high';
@@ -1111,6 +1124,57 @@ export class TwilioWebSocketManager {
    */
   public forceHeartbeatAdaptation(condition: any, reason: string): void {
     this.adaptiveHeartbeatManager.forceAdaptation(condition, reason);
+  }
+
+  /**
+   * Handle specific recovery for Twilio error 11205 (WebSocket connection closed by server)
+   * Implements enhanced reconnection strategy with immediate and progressive retry logic
+   */
+  private async handleTwilio11205Recovery(): Promise<void> {
+    logger.info('Initiating Twilio 11205 recovery sequence', {
+      connectionHealth: this.connectionHealth,
+      reconnectionAttempts: this.enhancedManager.getMetrics().reconnectAttempts
+    });
+
+    // Mark connection as needing recovery
+    this.connectionHealth.isHealthy = false;
+    this.connectionHealth.connectionQuality = 'poor';
+    
+    // Use reconnection service for intelligent retry with circuit breaker
+    try {
+      const decision = this.reconnectionService.getReconnectionDecision('Twilio 11205 - server closed connection');
+      
+      if (decision.shouldReconnect) {
+        logger.info('Twilio 11205 recovery decision: attempting reconnection', {
+          urgency: decision.urgency,
+          estimatedDelay: decision.estimatedDelay,
+          fallbackRecommended: decision.fallbackRecommended
+        });
+
+        // Use enhanced reconnection with shortened delays for 11205 scenarios
+        await this.reconnectionService.attemptReconnection(
+          async () => {
+            await this.enhancedManager.connect();
+          },
+          'Twilio 11205 recovery',
+          this.connectionId
+        );
+      } else {
+        logger.warn('Twilio 11205 recovery skipped based on reconnection service decision', {
+          decision
+        });
+      }
+    } catch (error) {
+      logger.error('Twilio 11205 recovery attempt failed', {
+        error: error instanceof Error ? error.message : String(error),
+        connectionId: this.connectionId
+      });
+      
+      // Update connection health to reflect failure
+      this.connectionHealth.errorCount++;
+      this.connectionHealth.lastError = `11205 recovery failed: ${error}`;
+      this.connectionHealth.connectionQuality = 'critical';
+    }
   }
 
   /**

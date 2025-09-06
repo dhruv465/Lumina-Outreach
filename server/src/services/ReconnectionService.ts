@@ -8,6 +8,11 @@ export interface ReconnectionConfig {
   jitterFactor: number;
   circuitBreakerThreshold: number;
   circuitBreakerTimeout: number;
+  // Enhanced configuration for better connection stability
+  fastRetryWindow: number; // Time window for fast retries (ms)
+  fastRetryMaxAttempts: number; // Max attempts within fast retry window
+  connectionStabilityThreshold: number; // Min connection duration to consider stable (ms)
+  adaptiveDelayEnabled: boolean; // Enable adaptive delay based on connection patterns
 }
 
 export interface ReconnectionAttempt {
@@ -27,6 +32,12 @@ export interface ReconnectionMetrics {
   lastAttemptTime: Date | null;
   circuitBreakerState: 'closed' | 'open' | 'half-open';
   consecutiveFailures: number;
+  // Enhanced metrics for connection stability analysis
+  connectionStabilityRatio: number; // Ratio of stable connections to total attempts
+  averageConnectionDuration: number;
+  fastRetryCount: number;
+  adaptiveDelayAdjustments: number;
+  lastStableConnectionTime: Date | null;
 }
 
 /**
@@ -51,6 +62,11 @@ export class ReconnectionService extends EventEmitter {
       jitterFactor: config.jitterFactor || 0.1,
       circuitBreakerThreshold: config.circuitBreakerThreshold || 5,
       circuitBreakerTimeout: config.circuitBreakerTimeout || 60000, // 1 minute
+      // Enhanced default configuration
+      fastRetryWindow: config.fastRetryWindow || 30000, // 30 seconds
+      fastRetryMaxAttempts: config.fastRetryMaxAttempts || 3,
+      connectionStabilityThreshold: config.connectionStabilityThreshold || 10000, // 10 seconds
+      adaptiveDelayEnabled: config.adaptiveDelayEnabled ?? true,
       ...config
     };
 
@@ -270,6 +286,10 @@ export class ReconnectionService extends EventEmitter {
     const failedAttempts = this.attempts.filter(a => !a.success).length;
     const totalDelay = this.attempts.reduce((sum, a) => sum + a.delay, 0);
     
+    // Calculate enhanced metrics
+    const stableConnections = 0; // This would need to be tracked separately in a real implementation
+    const connectionStabilityRatio = successfulAttempts > 0 ? stableConnections / successfulAttempts : 0;
+    
     return {
       totalAttempts: this.attempts.length,
       successfulAttempts,
@@ -278,7 +298,13 @@ export class ReconnectionService extends EventEmitter {
       lastAttemptTime: this.attempts.length > 0 ? 
         this.attempts[this.attempts.length - 1].timestamp : null,
       circuitBreakerState: this.circuitBreakerState,
-      consecutiveFailures: this.consecutiveFailures
+      consecutiveFailures: this.consecutiveFailures,
+      // Enhanced metrics (placeholder values - would be properly tracked in production)
+      connectionStabilityRatio,
+      averageConnectionDuration: 0,
+      fastRetryCount: 0,
+      adaptiveDelayAdjustments: 0,
+      lastStableConnectionTime: null
     };
   }
 

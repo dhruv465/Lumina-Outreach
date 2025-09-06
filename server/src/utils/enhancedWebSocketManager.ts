@@ -314,28 +314,64 @@ export class EnhancedWebSocketManager extends EventEmitter {
   }
   
   /**
-   * Handle connection close
+   * Enhanced connection close handling with protocol state analysis
    */
   private onConnectionClose(code: number, reason: string): void {
     this.metrics.lastDisconnectionTime = new Date();
     this.metrics.disconnectionReason = `Code: ${code}, Reason: ${reason}`;
     
     // Update connection uptime
+    const connectionDuration = this.connectionStartTime ? 
+      Date.now() - this.connectionStartTime.getTime() : 0;
+    
     if (this.connectionStartTime) {
-      this.metrics.connectionUptime += Date.now() - this.connectionStartTime.getTime();
+      this.metrics.connectionUptime += connectionDuration;
       this.connectionStartTime = null;
     }
     
-    logger.warn(`WebSocket closed for call ${this.callId}`, { code, reason });
+    // Enhanced logging with connection analysis
+    const closeAnalysis = {
+      code,
+      reason,
+      connectionDuration,
+      messagesSent: this.metrics.messagesSent,
+      messagesReceived: this.metrics.messagesReceived,
+      reconnectAttempts: this.reconnectAttempts,
+      isAbnormalClose: code !== 1000,
+      isPrematureClose: connectionDuration < 5000, // Less than 5 seconds
+      callId: this.callId
+    };
+    
+    logger.warn(`WebSocket connection closed for call ${this.callId}`, closeAnalysis);
+    
+    // Analyze close patterns for Twilio-specific issues
+    if (code === 1000 && reason.toLowerCase().includes('server')) {
+      logger.info('Detected potential Twilio 11205 scenario - server-initiated close', {
+        callId: this.callId,
+        reason,
+        connectionDuration,
+        shouldAttemptRecovery: true
+      });
+    } else if (code === 1006) {
+      logger.warn('Abnormal WebSocket closure detected', {
+        callId: this.callId,
+        connectionDuration,
+        messageCount: this.metrics.messagesReceived,
+        likelyNetworkIssue: true
+      });
+    }
     
     this.metrics.activeConnections = 0;
     this.updateConnectionQuality('failed');
     this.stopHealthMonitoring();
     
-    // Classify the close reason for better error handling
-    const error = this.classifyCloseCode(code, reason);
-    if (error) {
-      this.recordClassifiedError(error);
+    // Enhanced error classification for close codes
+    const classifiedError = this.classifyCloseCode(code, reason);
+    if (classifiedError) {
+      this.recordClassifiedError(classifiedError);
+      
+      // Update metrics based on error classification
+      this.updateMetricsForError(classifiedError);
     }
     
     const resilienceService = getCallResilienceService();
@@ -345,9 +381,30 @@ export class EnhancedWebSocketManager extends EventEmitter {
       'websocket'
     );
     
-    // Attempt reconnection based on close code and error classification
-    if (this.shouldReconnect && this.shouldAttemptReconnection(code, error)) {
-      this.scheduleReconnect();
+    // Enhanced reconnection decision with immediate recovery for critical scenarios
+    if (this.shouldReconnect) {
+      const shouldReconnect = this.shouldAttemptReconnection(code, classifiedError);
+      
+      if (shouldReconnect) {
+        // For Twilio-specific errors, use shorter delay
+        if (classifiedError?.type === ErrorType.TWILIO_SPECIFIC) {
+          logger.info('Fast reconnection for Twilio-specific close', {
+            callId: this.callId,
+            code,
+            errorType: classifiedError.type
+          });
+          
+          // Immediate reconnection attempt for 11205-like scenarios
+          setTimeout(() => {
+            this.connect().catch((error) => {
+              logger.error(`Fast reconnection failed for call ${this.callId}:`, error);
+              this.scheduleReconnect(); // Fall back to normal scheduling
+            });
+          }, 2000); // 2 second delay for fast reconnection
+        } else {
+          this.scheduleReconnect();
+        }
+      }
     }
     
     this.emit('disconnected', code, reason);
@@ -808,14 +865,81 @@ export class EnhancedWebSocketManager extends EventEmitter {
   }
   
   /**
-   * Handle connection error and trigger resilience measures
+   * Enhanced connection error handling with immediate recovery assessment
    */
   private handleConnectionError(error: Error): void {
+    logger.error(`Connection error for call ${this.callId}:`, {
+      error: error.message,
+      readyState: this.ws?.readyState,
+      reconnectAttempts: this.reconnectAttempts,
+      isReconnecting: this.isReconnecting
+    });
+
+    // Classify the error for recovery strategy
+    const classifiedError = this.classifyError(error);
+    this.recordClassifiedError(classifiedError);
+    
+    // Update connection metrics
+    this.metrics.errorCount++;
+    this.updateMetricsForError(classifiedError);
+    this.updateConnectionQualityFromError(classifiedError);
+    
+    // Immediate recovery decision based on error classification
+    if (this.shouldAttemptImmediateRecovery(classifiedError)) {
+      logger.info(`Attempting immediate recovery for ${classifiedError.type} error`, {
+        callId: this.callId,
+        errorType: classifiedError.type,
+        severity: classifiedError.severity
+      });
+      
+      // For critical Twilio-specific errors, try immediate reconnection
+      if (classifiedError.type === ErrorType.TWILIO_SPECIFIC && 
+          classifiedError.severity === 'high' &&
+          this.reconnectAttempts < 3) { // Allow up to 3 immediate retries
+        
+        setTimeout(() => {
+          this.connect().catch((retryError) => {
+            logger.error(`Immediate recovery failed for call ${this.callId}:`, retryError);
+            this.scheduleReconnect(); // Fall back to normal reconnection logic
+          });
+        }, 1000); // 1 second delay for immediate retry
+        
+        return;
+      }
+    }
+    
+    // Standard error handling flow
     this.onConnectionError(error);
     
     // Activate fallback if available
     const resilienceService = getCallResilienceService();
+    resilienceService.reportError(this.callId, error, 'websocket');
     resilienceService.activateFallback(this.callId, `WebSocket error: ${error.message}`);
+  }
+
+  /**
+   * Determine if immediate recovery should be attempted based on error classification
+   */
+  private shouldAttemptImmediateRecovery(classifiedError: ClassifiedError): boolean {
+    // For Twilio 11205 scenarios, attempt immediate recovery
+    if (classifiedError.type === ErrorType.TWILIO_SPECIFIC && 
+        classifiedError.severity === 'high') {
+      return true;
+    }
+    
+    // For connection timeouts that might be temporary
+    if (classifiedError.type === ErrorType.TIMEOUT && 
+        classifiedError.severity !== 'critical') {
+      return true;
+    }
+    
+    // For network errors that might be transient
+    if (classifiedError.type === ErrorType.NETWORK && 
+        classifiedError.severity === 'medium') {
+      return true;
+    }
+    
+    return false;
   }
   
   /**

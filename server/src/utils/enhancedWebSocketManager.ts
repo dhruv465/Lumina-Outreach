@@ -99,6 +99,41 @@ export interface ClassifiedError {
   retryCount: number;
 }
 
+// Twilio protocol state interface for tracking handshake sequence
+export interface TwilioProtocolState {
+  // Handshake sequence tracking
+  receivedConnected: boolean;
+  receivedStart: boolean;
+  sentConnectedAck: boolean;
+  hasStreamSid: boolean;
+  
+  // Message sequence tracking
+  messageCount: number;
+  lastMessageTimestamp: number;
+  expectedSequence: number;
+  messageSequenceErrors: number;
+  
+  // Protocol validation
+  protocolCompliant: boolean;
+  protocolErrors: string[];
+  complianceScore: number; // 0-100 score based on protocol adherence
+  
+  // Timing information for handshake analysis
+  connectionStartTime: number;
+  connectedEventTime?: number;
+  startEventTime?: number;
+  connectedAckTime?: number;
+  
+  // Connection quality metrics
+  connectionQuality: 'excellent' | 'good' | 'fair' | 'poor' | 'critical';
+  lastQualityUpdate: number;
+  
+  // Error recovery tracking
+  reconnectionAttempts: number;
+  lastReconnectionTime?: number;
+  recoveryState: 'stable' | 'recovering' | 'degraded' | 'failed';
+}
+
 export class EnhancedWebSocketManager extends EventEmitter {
   private ws: WebSocket | null = null;
   private config: ConnectionConfig;
@@ -139,11 +174,15 @@ export class EnhancedWebSocketManager extends EventEmitter {
   private connectionStartTime: Date | null = null;
   private lastQualityCheck: Date = new Date();
   
+  // Twilio protocol state tracking
+  private twilioProtocolState: TwilioProtocolState;
+  
   constructor(callId: string, url: string, config: Partial<ConnectionConfig> = {}) {
     super();
     
     this.callId = callId;
-    this.url = url;
+    // Normalize URL to prevent path duplication issues (e.g., duplicate .websocket suffixes)
+    this.url = this.normalizeWebSocketUrl(url);
     
     this.config = {
       maxReconnectAttempts: 5,
@@ -203,8 +242,65 @@ export class EnhancedWebSocketManager extends EventEmitter {
       cleanupCycles: 0,
       adaptiveCleanupEnabled: true
     };
+    
+    // Initialize Twilio protocol state
+    this.initializeTwilioProtocolState();
   }
   
+  /**
+   * Normalize WebSocket URL to prevent path duplication issues
+   */
+  private normalizeWebSocketUrl(url: string): string {
+    try {
+      // Remove duplicate .websocket suffixes that can cause Twilio error 31924
+      let normalizedUrl = url.replace(/\/\.websocket$/, "").replace(/\.websocket$/, "");
+      
+      // Ensure no double slashes in path except for protocol
+      normalizedUrl = normalizedUrl.replace(/([^:])\/\/+/g, '$1/');
+      
+      // Log URL normalization for debugging
+      if (normalizedUrl !== url) {
+        logger.info(`Normalized WebSocket URL for call ${this.callId}`, {
+          original: url,
+          normalized: normalizedUrl,
+          reason: 'Removed duplicate .websocket suffix and extra slashes'
+        });
+      }
+      
+      return normalizedUrl;
+    } catch (error) {
+      logger.warn(`Failed to normalize WebSocket URL for call ${this.callId}, using original URL`, {
+        originalUrl: url,
+        error: error
+      });
+      return url;
+    }
+  }
+
+  /**
+   * Initialize Twilio protocol state
+   */
+  private initializeTwilioProtocolState(): void {
+    this.twilioProtocolState = {
+      receivedConnected: false,
+      receivedStart: false,
+      sentConnectedAck: false,
+      hasStreamSid: false,
+      messageCount: 0,
+      lastMessageTimestamp: Date.now(),
+      expectedSequence: 0,
+      messageSequenceErrors: 0,
+      protocolCompliant: true,
+      protocolErrors: [],
+      complianceScore: 100,
+      connectionStartTime: Date.now(),
+      connectionQuality: 'excellent',
+      lastQualityUpdate: Date.now(),
+      reconnectionAttempts: 0,
+      recoveryState: 'stable'
+    };
+  }
+
   /**
    * Connect to WebSocket with retry logic
    */
@@ -278,10 +374,17 @@ export class EnhancedWebSocketManager extends EventEmitter {
   }
   
   /**
-   * Handle successful connection
+   * Handle successful connection with enhanced Twilio handshake logging
    */
   private onConnectionOpen(): void {
-    logger.info(`WebSocket connected for call ${this.callId}`);
+    const handshakeStartTime = Date.now();
+    
+    logger.info(`WebSocket connected for call ${this.callId} - starting Twilio handshake sequence`, {
+      url: this.url,
+      handshakeStartTime,
+      reconnectAttempt: this.reconnectAttempts > 0,
+      previousReconnectAttempts: this.reconnectAttempts
+    });
     
     this.metrics.totalConnections++;
     this.metrics.activeConnections = 1;
@@ -305,6 +408,19 @@ export class EnhancedWebSocketManager extends EventEmitter {
     // Reset frame buffer for RFC compliance
     this.frameBuffer = Buffer.alloc(0);
     this.expectedContinuationFrames = 0;
+    
+    // Reset and initialize Twilio protocol state for new connection
+    this.initializeTwilioProtocolState();
+    this.twilioProtocolState.connectionStartTime = handshakeStartTime;
+    
+    logger.info(`Twilio protocol state initialized for call ${this.callId}`, {
+      protocolState: {
+        connectionStartTime: this.twilioProtocolState.connectionStartTime,
+        waitingForConnectedMessage: true,
+        protocolCompliant: this.twilioProtocolState.protocolCompliant,
+        complianceScore: this.twilioProtocolState.complianceScore
+      }
+    });
     
     // Register with resilience service
     const resilienceService = getCallResilienceService();
@@ -503,26 +619,219 @@ export class EnhancedWebSocketManager extends EventEmitter {
   }
   
   /**
-   * Handle text messages (control messages)
+   * Handle text messages (control messages) with Twilio handshake sequence tracking
    */
   private handleTextMessage(data: string): void {
     try {
       const message = JSON.parse(data);
       
-      // Handle control messages
-      if (message.event === 'ping') {
-        this.sendPong();
+      // Update Twilio protocol state
+      this.updateTwilioProtocolState(message);
+      
+      // Handle control messages with enhanced Twilio handshake logging
+      if (message.event === 'connected') {
+        this.handleTwilioConnectedMessage(message);
       } else if (message.event === 'start') {
-        logger.info(`Stream started for call ${this.callId}`);
+        this.handleTwilioStartMessage(message);
       } else if (message.event === 'stop') {
-        logger.info(`Stream stopped for call ${this.callId}`);
+        logger.info(`Twilio stream stopped for call ${this.callId}`, {
+          protocolState: this.getTwilioProtocolSummary()
+        });
+      } else if (message.event === 'ping') {
+        this.sendPong();
       }
       
       this.emit('control', message);
     } catch (error) {
       // Not JSON, treat as plain text
+      logger.debug(`Received non-JSON text message for call ${this.callId}: ${data.substring(0, 100)}${data.length > 100 ? '...' : ''}`);
       this.emit('text', data);
     }
+  }
+  
+  /**
+   * Handle Twilio 'connected' message - first step of handshake sequence
+   */
+  private handleTwilioConnectedMessage(message: any): void {
+    const connectedTime = Date.now();
+    this.twilioProtocolState.receivedConnected = true;
+    this.twilioProtocolState.connectedEventTime = connectedTime;
+    
+    logger.info(`Twilio 'connected' message received for call ${this.callId}`, {
+      message,
+      handshakeTiming: {
+        connectionStartTime: this.twilioProtocolState.connectionStartTime,
+        connectedEventTime: connectedTime,
+        timeToConnected: connectedTime - this.twilioProtocolState.connectionStartTime
+      },
+      protocolState: this.getTwilioProtocolSummary()
+    });
+    
+    // Send the required 'connected_ack' response
+    this.sendTwilioConnectedAck();
+  }
+  
+  /**
+   * Handle Twilio 'start' message - second step of handshake sequence
+   */
+  private handleTwilioStartMessage(message: any): void {
+    const startTime = Date.now();
+    this.twilioProtocolState.receivedStart = true;
+    this.twilioProtocolState.startEventTime = startTime;
+    
+    // Extract streamSid if available
+    if (message.start && message.start.streamSid) {
+      this.twilioProtocolState.hasStreamSid = true;
+    }
+    
+    logger.info(`Twilio 'start' message received for call ${this.callId} - handshake complete`, {
+      message,
+      streamSid: message.start?.streamSid,
+      handshakeTiming: {
+        connectionStartTime: this.twilioProtocolState.connectionStartTime,
+        connectedEventTime: this.twilioProtocolState.connectedEventTime,
+        startEventTime: startTime,
+        totalHandshakeTime: startTime - this.twilioProtocolState.connectionStartTime,
+        connectedToStartTime: this.twilioProtocolState.connectedEventTime ? 
+          startTime - this.twilioProtocolState.connectedEventTime : null
+      },
+      protocolState: this.getTwilioProtocolSummary()
+    });
+    
+    // Validate handshake sequence completion
+    this.validateTwilioHandshakeSequence();
+  }
+  
+  /**
+   * Send Twilio 'connected_ack' message as required by protocol
+   */
+  private sendTwilioConnectedAck(): void {
+    try {
+      const ackMessage = { event: 'connected_ack' };
+      const ackData = JSON.stringify(ackMessage);
+      
+      if (this.sendTwilioMessage(ackData)) {
+        const ackTime = Date.now();
+        this.twilioProtocolState.sentConnectedAck = true;
+        this.twilioProtocolState.connectedAckTime = ackTime;
+        
+        logger.info(`Twilio 'connected_ack' sent for call ${this.callId}`, {
+          message: ackMessage,
+          handshakeTiming: {
+            connectedEventTime: this.twilioProtocolState.connectedEventTime,
+            connectedAckTime: ackTime,
+            responseTime: this.twilioProtocolState.connectedEventTime ? 
+              ackTime - this.twilioProtocolState.connectedEventTime : null
+          },
+          protocolState: this.getTwilioProtocolSummary()
+        });
+      } else {
+        this.twilioProtocolState.protocolCompliant = false;
+        this.twilioProtocolState.protocolErrors.push('Failed to send connected_ack message');
+        
+        logger.error(`Failed to send Twilio 'connected_ack' for call ${this.callId}`, {
+          protocolState: this.getTwilioProtocolSummary()
+        });
+      }
+    } catch (error) {
+      this.twilioProtocolState.protocolCompliant = false;
+      this.twilioProtocolState.protocolErrors.push(`Connected_ack error: ${error}`);
+      
+      logger.error(`Error sending Twilio 'connected_ack' for call ${this.callId}:`, error, {
+        protocolState: this.getTwilioProtocolSummary()
+      });
+    }
+  }
+  
+  /**
+   * Update Twilio protocol state based on received message
+   */
+  private updateTwilioProtocolState(message: any): void {
+    this.twilioProtocolState.messageCount++;
+    this.twilioProtocolState.lastMessageTimestamp = Date.now();
+    
+    // Update compliance score based on message sequence
+    this.calculateProtocolComplianceScore();
+  }
+  
+  /**
+   * Validate that the Twilio handshake sequence completed correctly
+   */
+  private validateTwilioHandshakeSequence(): void {
+    const isValidSequence = this.twilioProtocolState.receivedConnected && 
+                           this.twilioProtocolState.sentConnectedAck && 
+                           this.twilioProtocolState.receivedStart;
+    
+    if (isValidSequence) {
+      logger.info(`Twilio handshake sequence validated successfully for call ${this.callId}`, {
+        handshakeSequence: {
+          connected: this.twilioProtocolState.receivedConnected,
+          connectedAck: this.twilioProtocolState.sentConnectedAck,
+          start: this.twilioProtocolState.receivedStart
+        },
+        timing: {
+          totalHandshakeTime: this.twilioProtocolState.startEventTime ? 
+            this.twilioProtocolState.startEventTime - this.twilioProtocolState.connectionStartTime : null
+        },
+        protocolState: this.getTwilioProtocolSummary()
+      });
+      
+      this.twilioProtocolState.protocolCompliant = true;
+      this.twilioProtocolState.recoveryState = 'stable';
+    } else {
+      this.twilioProtocolState.protocolCompliant = false;
+      this.twilioProtocolState.protocolErrors.push('Invalid handshake sequence');
+      
+      logger.warn(`Twilio handshake sequence validation failed for call ${this.callId}`, {
+        expectedSequence: ['connected', 'connected_ack', 'start'],
+        actualSequence: {
+          connected: this.twilioProtocolState.receivedConnected,
+          connectedAck: this.twilioProtocolState.sentConnectedAck,
+          start: this.twilioProtocolState.receivedStart
+        },
+        protocolState: this.getTwilioProtocolSummary()
+      });
+    }
+  }
+  
+  /**
+   * Calculate protocol compliance score based on handshake timing and sequence
+   */
+  private calculateProtocolComplianceScore(): void {
+    let score = 100;
+    
+    // Deduct points for protocol errors
+    score -= this.twilioProtocolState.protocolErrors.length * 10;
+    
+    // Deduct points for message sequence errors
+    score -= this.twilioProtocolState.messageSequenceErrors * 5;
+    
+    // Ensure score stays within bounds
+    this.twilioProtocolState.complianceScore = Math.max(0, Math.min(100, score));
+  }
+  
+  /**
+   * Get a summary of the current Twilio protocol state
+   */
+  private getTwilioProtocolSummary(): object {
+    return {
+      receivedConnected: this.twilioProtocolState.receivedConnected,
+      sentConnectedAck: this.twilioProtocolState.sentConnectedAck,
+      receivedStart: this.twilioProtocolState.receivedStart,
+      hasStreamSid: this.twilioProtocolState.hasStreamSid,
+      messageCount: this.twilioProtocolState.messageCount,
+      protocolCompliant: this.twilioProtocolState.protocolCompliant,
+      complianceScore: this.twilioProtocolState.complianceScore,
+      protocolErrors: this.twilioProtocolState.protocolErrors,
+      recoveryState: this.twilioProtocolState.recoveryState
+    };
+  }
+  
+  /**
+   * Get the current Twilio protocol state (public interface)
+   */
+  public getTwilioProtocolState(): TwilioProtocolState {
+    return { ...this.twilioProtocolState }; // Return a copy to prevent external modification
   }
   
   /**
@@ -604,21 +913,56 @@ export class EnhancedWebSocketManager extends EventEmitter {
         }
       }
 
-      // Enhanced size validation with Twilio-specific limits
+      // Enhanced size validation with Twilio-specific limits and control frame handling
       const maxSize = Math.min(this.config.maxMessageSize, 64 * 1024); // 64KB Twilio limit
-      if (messageSize > maxSize) {
-        logger.error(`Message too large for Twilio protocol: ${messageSize} bytes (max: ${maxSize}) for call ${this.callId}`);
+      
+      // For control frames (text messages), enforce stricter size limits to prevent fragmentation
+      let isControlFrame = false;
+      if (typeof data === 'string') {
+        try {
+          const parsed = JSON.parse(data);
+          isControlFrame = parsed.event && ['connected', 'connected_ack', 'start', 'stop', 'ping', 'pong'].includes(parsed.event);
+        } catch (e) {
+          // Not JSON, assume it's a control message if it's text
+          isControlFrame = true;
+        }
+      }
+      
+      // Apply stricter limits for control frames to ensure no fragmentation
+      const effectiveMaxSize = isControlFrame ? Math.min(maxSize, 1024) : maxSize; // 1KB max for control frames
+      
+      if (messageSize > effectiveMaxSize) {
+        const frameType = isControlFrame ? 'control frame' : 'data frame';
+        logger.error(`Message too large for Twilio protocol: ${messageSize} bytes (max: ${effectiveMaxSize} for ${frameType}) for call ${this.callId}`);
         this.metrics.protocolErrors++;
         return false;
       }
 
-      // Send with RFC 6455 compliant options for Twilio
-      this.ws.send(messageData, {
+      // Enhanced sending options with control frame protection
+      const sendOptions = {
         binary: Buffer.isBuffer(messageData),
         compress: false, // Disable compression to prevent fragmentation issues
         fin: true, // Ensure message is sent as a complete frame (RFC 6455 requirement)
         mask: undefined // Let WebSocket library handle masking automatically
-      });
+      };
+      
+      // Log control frame sends for debugging
+      if (isControlFrame && typeof data === 'string') {
+        try {
+          const parsed = JSON.parse(data);
+          logger.debug(`Sending Twilio control frame for call ${this.callId}`, {
+            event: parsed.event,
+            size: messageSize,
+            sendOptions,
+            protocolState: this.getTwilioProtocolSummary()
+          });
+        } catch (e) {
+          // Ignore JSON parse errors
+        }
+      }
+
+      // Send with RFC 6455 compliant options for Twilio
+      this.ws.send(messageData, sendOptions);
 
       // Update enhanced metrics
       this.metrics.messagesSent++;

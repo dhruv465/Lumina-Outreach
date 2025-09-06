@@ -43,6 +43,9 @@ import { optimizedStreamRoute } from "./controllers/optimizedStreamController";
 // Twilio Media Streams WebSocket handler
 import { initializeTwilioWebSocketServer } from "./services/twilioWebSocketServer";
 
+// Enhanced WebSocket Server for improved connection management
+import { initializeEnhancedWebSocketServer } from "./services/enhancedWebSocketServer";
+
 // Enhanced WebSocket connection management
 import { enhancedWebSocketFactory } from "./utils/enhancedWebSocketFactory";
 
@@ -85,13 +88,50 @@ const app = express();
 const server = http.createServer(app);
 // Find this section in your index.ts file:
 
-// Initialize dedicated Twilio WebSocket server FIRST (before any other WebSocket servers)
-const twilioWSServer = initializeTwilioWebSocketServer(server);
-bootstrapLogger.info(
-  "Dedicated Twilio WebSocket server initialized for robust framing"
-);
+// Initialize WebSocket server for Twilio Media Streams
+// Support both Enhanced and Legacy implementations
+const useEnhancedWebSocketServer = process.env.USE_ENHANCED_WEBSOCKET_SERVER === 'true';
 
-// WebSocket upgrade handling is now managed by TwilioWebSocketServer
+let twilioWSServer: any;
+
+if (useEnhancedWebSocketServer) {
+  // Initialize Enhanced WebSocket Server with advanced connection management
+  twilioWSServer = initializeEnhancedWebSocketServer(server, {
+    maxConnections: parseInt(process.env.MAX_WEBSOCKET_CONNECTIONS || '1000'),
+    enableHealthMonitoring: true,
+    healthCheckInterval: 30000, // 30 seconds
+    metricsCollectionInterval: 60000, // 1 minute
+    enhancedManagerConfig: {
+      maxReconnectAttempts: 5,
+      reconnectDelay: 1000,
+      heartbeatInterval: 15000,
+      connectionTimeout: 10000,
+      maxHeartbeatMisses: 3,
+      pingInterval: 20000,
+      pongTimeout: 5000,
+      enableFrameValidation: true,
+      strictProtocolCompliance: true,
+      maxFrameSize: 64 * 1024,
+      maxMessageSize: 1024 * 1024,
+      errorClassificationEnabled: true,
+      retryOnProtocolErrors: false
+    }
+  });
+  bootstrapLogger.info(
+    "Enhanced WebSocket Server initialized with advanced connection management", {
+      maxConnections: parseInt(process.env.MAX_WEBSOCKET_CONNECTIONS || '1000'),
+      enhancedFeatures: ['frameValidation', 'protocolCompliance', 'errorClassification', 'healthMonitoring']
+    }
+  );
+} else {
+  // Initialize legacy Twilio WebSocket server for backward compatibility
+  twilioWSServer = initializeTwilioWebSocketServer(server);
+  bootstrapLogger.info(
+    "Legacy Twilio WebSocket server initialized for robust framing"
+  );
+}
+
+// WebSocket upgrade handling is now managed by the selected WebSocket server
 // to prevent Express interference with Twilio Media Stream connections
 
 const io = new SocketIOServer(server, {

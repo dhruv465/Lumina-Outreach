@@ -133,7 +133,7 @@ export class EnhancedWebSocketManager extends EventEmitter {
   // Frame validation and protocol compliance
   private frameBuffer: Buffer = Buffer.alloc(0);
   private expectedContinuationFrames = 0;
-  private readonly TWILIO_ERROR_CODES = [31924, 31951, 31003, 53400, 53401];
+  private readonly TWILIO_ERROR_CODES = [31924, 31951, 31003, 53400, 53401, 11205];
   
   // Connection quality tracking
   private connectionStartTime: Date | null = null;
@@ -237,10 +237,16 @@ export class EnhancedWebSocketManager extends EventEmitter {
         handshakeTimeout: this.config.connectionTimeout
       });
       
+      // Enhanced timeout handling for Twilio 11205 scenarios
       const connectionTimeout = setTimeout(() => {
         if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
+          logger.warn(`Connection timeout after ${this.config.connectionTimeout}ms for call ${this.callId}`, {
+            readyState: this.ws.readyState,
+            url: this.url,
+            reconnectAttempts: this.reconnectAttempts
+          });
           this.ws.terminate();
-          reject(new Error('Connection timeout'));
+          reject(new Error(`Twilio WebSocket connection timeout after ${this.config.connectionTimeout}ms - possible 11205 scenario`));
         }
       }, this.config.connectionTimeout);
       
@@ -831,8 +837,31 @@ export class EnhancedWebSocketManager extends EventEmitter {
     let severity: 'low' | 'medium' | 'high' | 'critical' = 'medium';
     let recoverable = true;
 
+    // Twilio-specific errors (check first to avoid conflicts with generic terms)
+    if (this.TWILIO_ERROR_CODES.some(code => errorMessage.includes(code.toString())) ||
+        errorMessage.includes('twilio') || errorMessage.includes('malformed') ||
+        errorMessage.includes('31924') || errorMessage.includes('31951') ||
+        errorMessage.includes('11205') || errorMessage.includes('connection closed by server') ||
+        errorMessage.includes('websocket connection closed')) {
+      type = ErrorType.TWILIO_SPECIFIC;
+      
+      // Special handling for 11205 (server-initiated connection closure)
+      if (errorMessage.includes('11205') || errorMessage.includes('connection closed by server') ||
+          errorMessage.includes('websocket connection closed')) {
+        severity = 'high'; // Less critical than protocol errors but needs immediate attention
+        recoverable = true;
+        logger.warn('Twilio error 11205 detected - WebSocket connection closed by server', {
+          error: error.message,
+          callId: this.callId,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        severity = 'critical';
+        recoverable = true; // Twilio errors are often recoverable with reconnection
+      }
+    }
     // Network-related errors
-    if (errorMessage.includes('econnrefused') || errorMessage.includes('enotfound') ||
+    else if (errorMessage.includes('econnrefused') || errorMessage.includes('enotfound') ||
         errorMessage.includes('timeout') || errorMessage.includes('network') ||
         errorMessage.includes('connection') || errorMessage.includes('econnreset')) {
       type = ErrorType.NETWORK;
@@ -846,14 +875,6 @@ export class EnhancedWebSocketManager extends EventEmitter {
       type = ErrorType.PROTOCOL;
       severity = 'critical';
       recoverable = this.config.retryOnProtocolErrors;
-    }
-    // Twilio-specific errors
-    else if (this.TWILIO_ERROR_CODES.some(code => errorMessage.includes(code.toString())) ||
-             errorMessage.includes('twilio') || errorMessage.includes('malformed') ||
-             errorMessage.includes('31924') || errorMessage.includes('31951')) {
-      type = ErrorType.TWILIO_SPECIFIC;
-      severity = 'critical';
-      recoverable = true; // Twilio errors are often recoverable with reconnection
     }
     // Buffer overflow errors
     else if (errorMessage.includes('buffer') || errorMessage.includes('overflow') ||
@@ -899,7 +920,22 @@ export class EnhancedWebSocketManager extends EventEmitter {
 
     switch (code) {
       case 1000: // Normal closure
-        return null; // Not an error
+        // Check for server-initiated closures that may indicate Twilio error 11205
+        if (reason && 
+            (reason.toLowerCase().includes('server') || 
+             reason.toLowerCase().includes('twilio') ||
+             reason.toLowerCase().includes('closed'))) {
+          type = ErrorType.TWILIO_SPECIFIC;
+          severity = 'high';
+          recoverable = true;
+          logger.info('Detected potential Twilio 11205 scenario - server-initiated closure', {
+            code,
+            reason: reason.toString(),
+            callId: this.callId
+          });
+          break;
+        }
+        return null; // Normal closure, not an error
       case 1001: // Going away
         type = ErrorType.NETWORK;
         severity = 'low';
@@ -1194,8 +1230,17 @@ export class EnhancedWebSocketManager extends EventEmitter {
    * Determine if reconnection should be attempted based on error classification
    */
   private shouldAttemptReconnection(code: number, error: ClassifiedError | null): boolean {
-    // Normal closure - no reconnection
+    // Normal closure - but check for Twilio 11205 patterns first
     if (code === 1000) {
+      // For Twilio 11205 scenarios, server-initiated closures should trigger reconnection
+      if (error?.type === ErrorType.TWILIO_SPECIFIC && error?.recoverable) {
+        logger.info('Allowing reconnection for potential Twilio 11205 server closure', {
+          code,
+          error: error?.message,
+          callId: this.callId
+        });
+        return true;
+      }
       return false;
     }
 
@@ -1207,6 +1252,18 @@ export class EnhancedWebSocketManager extends EventEmitter {
     // Protocol errors - only if configured to retry
     if (error?.type === ErrorType.PROTOCOL && !this.config.retryOnProtocolErrors) {
       return false;
+    }
+
+    // Enhanced handling for Twilio-specific errors including 11205
+    if (error?.type === ErrorType.TWILIO_SPECIFIC) {
+      // Always attempt reconnection for Twilio errors as they're often recoverable
+      logger.info('Attempting reconnection for Twilio-specific error', {
+        code,
+        error: error?.message,
+        callId: this.callId,
+        severity: error?.severity
+      });
+      return true;
     }
 
     // Check if we've hit the retry limit for this error type

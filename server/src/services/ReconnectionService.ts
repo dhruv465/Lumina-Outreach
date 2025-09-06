@@ -331,6 +331,13 @@ export class ReconnectionService extends EventEmitter {
     
     if (reason.includes('protocol') || reason.includes('31924')) {
       urgency = 'high'; // Twilio protocol errors need quick resolution
+    } else if (reason.includes('11205') || reason.includes('server closed connection') ||
+               reason.includes('Twilio 11205')) {
+      urgency = 'high'; // Twilio 11205 needs quick reconnection to resume service
+      logger.info('Detected Twilio 11205 scenario - prioritizing reconnection', {
+        reason,
+        consecutiveFailures: metrics.consecutiveFailures
+      });
     } else if (reason.includes('timeout') || reason.includes('ping')) {
       urgency = 'medium'; // Network issues
     } else if (reason.includes('close') || reason.includes('disconnect')) {

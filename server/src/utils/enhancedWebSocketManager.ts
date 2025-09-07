@@ -397,7 +397,7 @@ export class EnhancedWebSocketManager extends EventEmitter {
     this.updateConnectionQuality('excellent');
     
     // Start health monitoring
-    this.startHealthMonitoring();
+    // this.startHealthMonitoring(); // Temporarily disabled for debugging Twilio handshake
     
     // Clear any reconnect timer
     if (this.reconnectTimer) {
@@ -622,6 +622,10 @@ export class EnhancedWebSocketManager extends EventEmitter {
    * Handle text messages (control messages) with Twilio handshake sequence tracking
    */
   private handleTextMessage(data: string): void {
+    logger.debug('EnhancedWebSocketManager received text message', {
+      callId: this.callId,
+      messageContent: data.substring(0, 200) // Log first 200 chars
+    });
     try {
       const message = JSON.parse(data);
       

@@ -407,7 +407,8 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                   const baseUrl = webhookBaseUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
                   // Use path segments instead of query parameters for Twilio Media Stream compatibility
                   const streamPath = `/voice/stream/${callId}/${conversationId}`;
-                  const wsUrl = new URL(streamPath, baseUrl).href;
+                  // TEMPORARY: Hardcode wsUrl to point to minimal_websocket_server for testing
+                  const wsUrl = `wss://f0aca0273fcb.ngrok-free.app/voice/stream/${callId}/${conversationId}`;
 
                   logger.info(`Generated websocket URL for Twilio Media Stream: ${wsUrl}`);
 

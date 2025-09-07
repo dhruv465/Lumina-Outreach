@@ -376,11 +376,11 @@ export class EnhancedWebSocketServer {
     // Generate a temporary connection key for legacy connections
     const connectionKey = `legacy:${Date.now()}:${Math.random().toString(36).substr(2, 9)}`;
     const callId = `legacy-${Date.now()}`;
-    
+
     try {
       const virtualUrl = `ws://enhanced-internal/${connectionKey}`;
       const enhancedManager = new EnhancedWebSocketManager(callId, virtualUrl, this.config.enhancedManagerConfig);
-      
+
       // Inject existing WebSocket
       (enhancedManager as any).ws = ws;
       (enhancedManager as any).isConnected = true;
@@ -478,6 +478,14 @@ export class EnhancedWebSocketServer {
 
     // Enhanced message handling
     ws.on('message', (data: RawData) => {
+      logger.debug('Raw WebSocket message received', {
+        callId,
+        conversationId,
+        connectionKey,
+        messageSize: data.length,
+        messageType: typeof data,
+        messageContent: data.toString().substring(0, 200) // Log first 200 chars
+      });
       state.connectionMetrics.totalMessages++;
       state.connectionMetrics.lastHealthCheck = Date.now();
       

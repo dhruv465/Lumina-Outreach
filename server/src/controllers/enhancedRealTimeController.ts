@@ -161,6 +161,7 @@ export const handleRealTimeMediaStream = async (ws: WebSocket, req: Request): Pr
 
     // Set up message handlers
     ws.on('message', async (data: WebSocket.Data) => {
+      logger.debug(`Received raw WebSocket data for call ${callId}: ${data.toString().substring(0, 200)}`); // Log first 200 chars
       try {
         const message: TwilioMediaMessage = JSON.parse(data.toString());
         

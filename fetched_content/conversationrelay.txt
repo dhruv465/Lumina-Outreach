@@ -1,0 +1,15 @@
+The `browse` tool successfully retrieved the content from the provided URL.
+
+The page describes Twilio's `<ConversationRelay>` TwiML noun, which is used under the `<Connect>` verb to route calls to Twilio's ConversationRelay service. This service provides advanced AI-powered voice interactions, handling complexities like Speech-to-Text (STT) and Text-to-Speech (TTS) conversions, session management, and low-latency communication with an application, typically via a WebSocket.[1]
+
+Key aspects of `<ConversationRelay>` include:
+*   **Purpose:** To enable real-time, AI-based voice interactions for scenarios like customer service and virtual assistants.[1]
+*   **Attributes:** It supports various attributes such as `url` (required, for your WebSocket server), `welcomeGreeting`, `language`, `ttsLanguage`, `ttsProvider` (e.g., "Google", "Amazon", "ElevenLabs"), `voice`, `transcriptionLanguage`, `transcriptionProvider` (e.g., "Google", "Deepgram"), `speechModel`, and `interruptible`.[1]
+*   **Nested Elements:**
+    *   `<Language>`: Maps a language code to specific TTS and STT settings, allowing configuration of multiple languages for a session.[1]
+    *   `<Parameter>`: Sends custom parameters from the TwiML directly into the initial "setup" message sent over the WebSocket.[1]
+*   **Language Settings:** Configurations for both TTS and STT can be set via `<ConversationRelay>` attributes (as defaults) or within `<Language>` elements (for specific language codes).[1]
+*   **AI Nutrition Facts:** The document also provides "AI nutrition facts" for different providers (Deepgram, Google, Amazon, ElevenLabs) detailing aspects like model type, privacy, data handling, and compliance.[1]
+
+Sources:
+[1] TwiML™ Voice: &lt;ConversationRelay&gt; | Twilio (https://www.twilio.com/docs/voice/twiml/connect/conversationrelay)

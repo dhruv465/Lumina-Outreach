@@ -6,7 +6,6 @@
 
 import express from 'express';
 import { Request, Response } from 'express';
-import { getRAGService } from '../services/ragService';
 import { getRAGSystem, initializeRAGSystem } from '../services/rag/ragSystem';
 import { getLLMService } from '../services';
 import { authenticate } from '../middleware/auth';
@@ -61,30 +60,29 @@ router.post('/query',
   validateRequest(querySchema),
   async (req: Request, res: Response) => {
     try {
-      const llmService = getLLMService();
-      const ragService = getRAGService(llmService);
+      const ragService = getRAGSystem();
       
       const { query, maxResults, minRelevanceScore, sources, includeMetadata, bypassCache } = req.body;
       
       logger.info(`RAG query received: ${query}`);
       
-      const result = await ragService.query(query, {
-        maxResults,
-        minRelevanceScore,
-        sources,
-        includeMetadata,
-        bypassCache
+      const result = await ragService.generateEnhancedPrompt(query, [], {
+        documentTypes: sources,
+        maxDocuments: maxResults,
+        filterMetadata: {
+          includeMetadata,
+          bypassCache
+        }
       });
       
-      logger.info(`RAG query completed with ${result.results.length} results`);
+      logger.info(`RAG query completed with ${result.retrievalResults.documents.length} results`);
       
       res.json({
         success: true,
         data: result,
         meta: {
           query,
-          resultsCount: result.results.length,
-          hasAvailableSources: await ragService.hasAvailableSources()
+          resultsCount: result.retrievalResults.documents.length,
         }
       });
     } catch (error) {
@@ -108,8 +106,7 @@ router.post('/generate',
   validateRequest(generateResponseSchema),
   async (req: Request, res: Response) => {
     try {
-      const llmService = getLLMService();
-      const ragService = getRAGService(llmService);
+      const ragService = getRAGSystem();
       
       const { 
         query, 
@@ -123,13 +120,16 @@ router.post('/generate',
       
       logger.info(`RAG generation requested for: ${query}`);
       
-      const result = await ragService.generateResponse(query, {
-        provider,
-        model,
-        temperature,
-        systemPrompt,
-        maxResults,
-        minRelevanceScore
+      const result = await ragService.generateEnhancedPrompt(query, [], {
+        documentTypes: [],
+        maxDocuments: maxResults,
+        filterMetadata: {
+          provider,
+          model,
+          temperature,
+          systemPrompt,
+          minRelevanceScore
+        }
       });
       
       logger.info(`RAG generation completed`);
@@ -139,7 +139,7 @@ router.post('/generate',
         data: result,
         meta: {
           query,
-          sourcesUsed: result.sources.length
+          sourcesUsed: result.retrievalResults.documents.length
         }
       });
     } catch (error) {
@@ -219,10 +219,7 @@ router.get('/status',
   authenticate,
   async (req: Request, res: Response) => {
     try {
-      const llmService = getLLMService();
-      const ragService = getRAGService(llmService);
-      
-      const hasAvailableSources = await ragService.hasAvailableSources();
+      const ragService = getRAGSystem();
       
       // Get knowledge base stats
       const { KnowledgeBase } = await import('../models/KnowledgeBase');
@@ -249,7 +246,6 @@ router.get('/status',
         success: true,
         data: {
           status: 'operational',
-          hasAvailableSources,
           statistics: {
             knowledgeBase: knowledgeBaseCount,
             faqs: faqCount,
@@ -319,12 +315,7 @@ router.post('/cache/clear',
   authenticate,
   async (req: Request, res: Response) => {
     try {
-      const llmService = getLLMService();
-      const ragService = getRAGService(llmService);
-      
-      ragService.clearCache();
-      
-      logger.info('RAG service cache cleared');
+      const ragService = getRAGSystem();
       
       res.json({
         success: true,

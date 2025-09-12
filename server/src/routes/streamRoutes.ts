@@ -1,7 +1,7 @@
 import express from 'express';
 import expressWs from 'express-ws';
-import { handleVoiceStream, handleConversationalAIStream } from '../controllers/streamController';
-import { handleOptimizedVoiceStream } from '../controllers/optimizedStreamController';
+import { handleRealTimeMediaStream } from '../controllers/enhancedRealTimeController';
+
 import { handleTwilioStreamWebhook } from '../services/webhookHandlers';
 
 const router = express.Router();
@@ -14,7 +14,7 @@ const wsRouter = expressWs(router as any).app;
 // wsRouter.ws('/voice/stream', handleVoiceStream);
 
 // WebSocket streaming endpoint for ElevenLabs Conversational AI
-wsRouter.ws('/voice/conversational-ai', handleConversationalAIStream);
+// wsRouter.ws('/voice/conversational-ai', handleConversationalAIStream);
 
 // Note: Twilio optimized streaming endpoints are handled by TwilioWebSocketServer
 // to avoid duplicate WebSocket handlers that cause connection conflicts

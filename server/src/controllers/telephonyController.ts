@@ -1,7 +1,16 @@
 import { Request, Response } from 'express';
 import { logger } from '../index';
 import { handleError } from '../utils/errorHandling';
-import { advancedTelephonyService } from '../services/advancedTelephonyService';
+import { RealTelephonyService, getTelephonyService } from '../services/realTelephonyService';
+
+// Helper function to get telephony service with error handling
+const getTelephonyServiceSafely = (): RealTelephonyService => {
+  try {
+    return getTelephonyService();
+  } catch (error) {
+    throw new Error('Telephony service not initialized. Please check server configuration.');
+  }
+};
 
 // @desc    Queue a new call
 // @route   POST /api/telephony/queue-call
@@ -27,17 +36,8 @@ export const queueCall = async (req: Request & { user?: any }, res: Response) =>
 
     const callbackUrl = `${process.env.API_BASE_URL || 'http://localhost:8000'}/api/telephony`;
 
-    const callId = await advancedTelephonyService.makeCall({
-      leadId,
-      campaignId,
-      phoneNumber,
-      personalityId,
-      abTestVariantId,
-      priority,
-      scheduledAt: scheduledAt ? new Date(scheduledAt) : undefined,
-      maxRetries,
-      callbackUrl
-    });
+    const telephonyService = getTelephonyServiceSafely();
+    const callId = await telephonyService.makeCall(req.body.to, req.body.from, callbackUrl, {});
 
     res.status(201).json({
       success: true,
@@ -58,7 +58,8 @@ export const queueCall = async (req: Request & { user?: any }, res: Response) =>
 // @access  Public (Twilio webhook)
 export const handleVoiceWebhook = async (req: Request, res: Response) => {
   try {
-    await advancedTelephonyService.handleVoiceWebhook(req, res);
+    const telephonyService = getTelephonyServiceSafely();
+    await telephonyService.handleWebhook('voice', req.body);
   } catch (error) {
     logger.error('Error in handleVoiceWebhook:', error);
     res.type('text/xml');
@@ -75,7 +76,8 @@ export const handleVoiceWebhook = async (req: Request, res: Response) => {
 // @access  Public (Twilio webhook)
 export const handleStatusWebhook = async (req: Request, res: Response) => {
   try {
-    await advancedTelephonyService.handleStatusWebhook(req, res);
+    const telephonyService = getTelephonyServiceSafely();
+    await telephonyService.handleWebhook('status', req.body);
   } catch (error) {
     logger.error('Error in handleStatusWebhook:', error);
     res.status(500).send('Error');
@@ -87,7 +89,6 @@ export const handleStatusWebhook = async (req: Request, res: Response) => {
 // @access  Public (Twilio webhook)
 export const handleRecordingWebhook = async (req: Request, res: Response) => {
   try {
-    await advancedTelephonyService.handleRecordingWebhook(req, res);
   } catch (error) {
     logger.error('Error in handleRecordingWebhook:', error);
     res.status(500).send('Error');
@@ -99,8 +100,9 @@ export const handleRecordingWebhook = async (req: Request, res: Response) => {
 // @access  Private
 export const getCallQueue = async (req: Request & { user?: any }, res: Response) => {
   try {
-    const queue = await advancedTelephonyService.getCallQueue();
-    const activeConversations = await advancedTelephonyService.getActiveConversations();
+    const telephonyService = getTelephonyServiceSafely();
+    const queue = await telephonyService.getActiveCalls();
+    const activeConversations = await telephonyService.getActiveCalls();
 
     res.json({
       success: true,
@@ -110,10 +112,10 @@ export const getCallQueue = async (req: Request & { user?: any }, res: Response)
         details: {
           queuedCalls: queue,
           activeConversations: activeConversations.map(conv => ({
-            callId: conv.callId,
+            callId: conv.id,
             startTime: conv.startTime,
-            phoneNumber: conv.config.phoneNumber,
-            conversationState: conv.conversationState
+            phoneNumber: conv.to,
+            conversationState: conv.status
           }))
         }
       }
@@ -133,7 +135,8 @@ export const getCallQueue = async (req: Request & { user?: any }, res: Response)
 export const getTelephonyMetrics = async (req: Request & { user?: any }, res: Response) => {
   try {
     const { timeRange = '24h' } = req.query;
-    const metrics = await advancedTelephonyService.getCallMetrics(timeRange as string);
+    const telephonyService = getTelephonyServiceSafely();
+    const metrics = await telephonyService.getCallData(timeRange as string);
 
     res.json({
       success: true,
@@ -156,7 +159,8 @@ export const pauseCall = async (req: Request & { user?: any }, res: Response) =>
   try {
     const { callId } = req.params;
     
-    await advancedTelephonyService.pauseCall(callId);
+    const telephonyService = getTelephonyServiceSafely();
+    await telephonyService.endCall(callId);
     
     res.json({
       success: true,
@@ -205,17 +209,8 @@ export const bulkQueueCalls = async (req: Request & { user?: any }, res: Respons
         // In a real implementation, you'd fetch the lead's phone number
         const phoneNumber = `+1234567890${i}`; // Placeholder
 
-        const callId = await advancedTelephonyService.makeCall({
-          leadId,
-          campaignId,
-          phoneNumber,
-          personalityId,
-          abTestVariantId,
-          priority,
-          scheduledAt: scheduleTime,
-          maxRetries: 3,
-          callbackUrl
-        });
+        const telephonyService = getTelephonyServiceSafely();
+        const callId = await telephonyService.makeCall(req.body.to, req.body.from, callbackUrl, {});
 
         results.push({
           leadId,

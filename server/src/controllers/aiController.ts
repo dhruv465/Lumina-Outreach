@@ -7,7 +7,7 @@
 
 import { Request, Response } from 'express';
 import { getAIOrchestrationService } from '../services/aiOrchestrationService';
-import { getRAGService } from '../services/ragService';
+import { getRAGSystem } from '../services/rag/ragSystem';
 
 // Extend the Express Request interface to include fileValidationError
 declare global {
@@ -28,7 +28,7 @@ const readFile = promisify(fs.readFile);
 
 // Get services
 const aiService = getAIOrchestrationService();
-const ragService = getRAGService(aiService.getLLMService());
+const ragService = getRAGSystem();
 
 // File upload configuration
 const storage = multer.diskStorage({
@@ -132,12 +132,10 @@ export const processRAG = async (req: Request, res: Response) => {
       });
     }
     
-    const response = await ragService.generateResponse(
-      query,
-      {
-        sources,
-        maxResults,
-        minRelevanceScore,
+    const response = await ragService.generateEnhancedPrompt(query, [], {
+      documentTypes: sources,
+      maxDocuments: maxResults,
+      filterMetadata: {
         provider,
         model,
         temperature,
@@ -145,7 +143,7 @@ export const processRAG = async (req: Request, res: Response) => {
         bypassCache,
         cacheKey
       }
-    );
+    });
     
     return res.json({
       success: true,
@@ -378,7 +376,7 @@ export const getMetrics = async (req: Request, res: Response) => {
 export const clearCache = async (req: Request, res: Response) => {
   try {
     aiService.clearCache();
-    ragService.clearCache();
+    
     
     return res.json({
       success: true,
@@ -399,7 +397,6 @@ export const clearCache = async (req: Request, res: Response) => {
 export const updateConfig = async (req: Request, res: Response) => {
   try {
     await aiService.updateConfiguration();
-    await ragService.updateConfiguration();
     
     return res.json({
       success: true,

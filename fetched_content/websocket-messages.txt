@@ -1,0 +1,4 @@
+This document describes the various WebSocket messages used in Twilio Media Streams. It covers messages sent from Twilio to your WebSocket server, such as `connected`, `start`, `media` (raw audio data), `stop`, `DTMF` (touch-tone key presses), and `mark` messages[1]. For bidirectional streams, your server can also send messages back to Twilio, including `media` (to pipe audio), `mark` (to be notified when audio playback is complete), and `clear` (to interrupt buffered audio) messages[1]. Each message type has a specific JSON structure with properties like `event`, `sequenceNumber`, and stream-specific data[1]. Media Streams are supported in the Ireland (IE1) and Australia (AU1) Twilio Regions, with US1 remaining the default[1].
+
+Sources:
+[1] Media Streams - WebSocket Messages | Twilio (https://www.twilio.com/docs/voice/media-streams/websocket-messages)

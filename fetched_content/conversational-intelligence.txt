@@ -1,0 +1,15 @@
+The Twilio documentation states that "Voice Intelligence is now Conversational Intelligence", reflecting an expansion into analyzing conversations across all customer touchpoints.[1] This AI-powered cross-channel analysis can be used to boost lead generation, spot compliance risks early, and improve agent performance.[1]
+
+Conversational Intelligence supports various conversation channels, including:
+*   **Voice:** Twilio Recordings, External Recordings, and real-time calls.[1]
+*   **ConversationRelay:** For monitoring AI agent performance.[1]
+*   **Messaging Conversations:** SMS, WhatsApp, Web Chat, and other text channels supported by the Twilio Conversations API (currently in private beta).[1]
+
+The documentation also highlights "Generative Custom Operators" as an advanced and flexible language intelligence feature, using LLM-powered Language Operators for sophisticated natural language understanding tasks, now available in Public Beta.[1]
+
+To get started, users can create an Intelligence Service to transcribe voice calls, create transcripts, and add Language Operators to tag transcripts with relevant concepts and context.[1] There are also API references and integration guides available, including single-page applications for listing transcripts and viewing transcriptions.[1]
+
+Related Twilio products include Twilio Voice, Voice Insights, and Branded Calling.[1]
+
+Sources:
+[1] Conversational Intelligence | Twilio (https://www.twilio.com/docs/conversational-intelligence)

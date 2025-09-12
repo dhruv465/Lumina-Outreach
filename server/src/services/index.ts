@@ -1,22 +1,19 @@
 // Export all services from a central file for easier imports
+import { logger } from '../index';
+import { AdvancedCampaignService, advancedCampaignService } from './advancedCampaignService';
+import { AdvancedConversationEngine } from './advancedConversationEngine';
 import ConversationEngineService from './conversationEngineService';
+import { conversationStateMachine } from './conversationStateMachine';
 import { EnhancedVoiceAIService } from './enhancedVoiceAIService';
 import { LLMService } from './llm/service';
 import SpeechAnalysisService from './speechAnalysisService';
-import VoiceAIService from './voiceAIService';
-import { AdvancedTelephonyService } from './advancedTelephonyService';
-import { advancedTelephonyService } from './advancedTelephonyService';
-import { AdvancedConversationEngine } from './advancedConversationEngine';
-import { AdvancedCampaignService, advancedCampaignService } from './advancedCampaignService';
-import { conversationStateMachine } from './conversationStateMachine';
-import { logger } from '../index';
 
 // Import webhook handlers individually for proper re-export
 import {
-  handleTwilioVoiceWebhook,
-  handleTwilioStatusWebhook,
   handleTwilioGatherWebhook,
+  handleTwilioStatusWebhook,
   handleTwilioStreamWebhook,
+  handleTwilioVoiceWebhook,
   updateCallWithOutcome
 } from './webhookHandlers';
 
@@ -44,16 +41,16 @@ const initializeFromDatabase = async () => {
     const config = await Configuration.findOne();
     if (config) {
       elevenLabsApiKey = config.elevenLabsConfig?.apiKey || '';
-      
+
       const openAIProvider = config.llmConfig?.providers?.find((p: any) => p.name === 'openai');
       openAIApiKey = openAIProvider?.apiKey || '';
-      
+
       const anthropicProvider = config.llmConfig?.providers?.find((p: any) => p.name === 'anthropic');
       anthropicApiKey = anthropicProvider?.apiKey || '';
-      
+
       const googleProvider = config.llmConfig?.providers?.find((p: any) => p.name === 'google');
       googleSpeechKey = googleProvider?.apiKey || '';
-      
+
       // Get deepgram API key
       deepgramApiKey = config.deepgramConfig?.apiKey || '';
 
@@ -178,51 +175,38 @@ export const advancedConversationEngine = new Proxy({} as AdvancedConversationEn
 export { conversationStateMachine };
 
 // Export webhook handlers individually - THIS IS THE KEY CHANGE
-export {
-  handleTwilioVoiceWebhook,
-  handleTwilioStatusWebhook,
-  handleTwilioGatherWebhook,
-  handleTwilioStreamWebhook,
-  updateCallWithOutcome
-};
+  export {
+    handleTwilioGatherWebhook, handleTwilioStatusWebhook, handleTwilioStreamWebhook, handleTwilioVoiceWebhook, updateCallWithOutcome
+  };
 
 // Also export as namespace for backward compatibility if needed
-export * as webhookHandlers from './webhookHandlers';
+  export * as webhookHandlers from './webhookHandlers';
 
 // Export analytics services
 export { callAnalyticsService } from './callAnalyticsService';
 
 // Export individual services
 export {
-  ConversationEngineService,
+  AdvancedCampaignService, AdvancedConversationEngine, ConversationEngineService,
   EnhancedVoiceAIService,
   LLMService,
-  SpeechAnalysisService,
-  VoiceAIService,
-  AdvancedTelephonyService,
-  AdvancedConversationEngine,
-  AdvancedCampaignService
+  SpeechAnalysisService
 };
 
 // Export Model Compatibility Service
-export { 
-  ModelCompatibilityService,
-  initializeModelCompatibilityService,
-  getModelCompatibilityService
-} from './modelCompatibilityService';
+  export {
+    getModelCompatibilityService, initializeModelCompatibilityService, ModelCompatibilityService
+  } from './modelCompatibilityService';
 
 // Export Deepgram Validation Service
 export {
-  DeepgramValidationService,
-  initializeDeepgramValidationService,
-  getDeepgramValidationService
+  DeepgramValidationService, getDeepgramValidationService, initializeDeepgramValidationService
 } from './deepgramValidationService';
 
 // Deepgram Model Metrics removed
 
 // Export service instances
 export {
-  advancedTelephonyService,
   advancedCampaignService
 };
 
@@ -230,10 +214,10 @@ export {
 export const initializeServicesAfterDB = async () => {
   try {
     console.log('Starting services initialization after database connection...');
-    
+
     // Re-initialize services that depend on database configuration
     await initializeFromDatabase();
-    
+
     // Initialize the Deepgram controller
     try {
       const { initializeDeepgramController } = await import('../controllers/deepgramController');
@@ -243,27 +227,27 @@ export const initializeServicesAfterDB = async () => {
       logger.error('Failed to initialize Deepgram controller:', deepgramError);
     }
 
-  // Monitoring metrics service initialization removed
-    
+    // Monitoring metrics service initialization removed
+
     console.log('About to initialize services with keys:', {
       hasElevenLabsKey: !!elevenLabsApiKey,
       hasOpenAIKey: !!openAIApiKey,
       elevenLabsKeyLength: elevenLabsApiKey?.length || 0,
       openAIKeyLength: openAIApiKey?.length || 0
     });
-    
+
     // Get TTS provider configuration
     const Configuration = require('../models/Configuration').default;
     const config = await Configuration.findOne();
     const selectedTTSProvider = config?.ttsConfig?.provider || 'elevenlabs';
-    
+
     // Import TTS configuration helper
     const { isTTSProviderConfigured, hasAnyTTSProviderConfigured } = await import('../utils/ttsServiceFactory');
-    
+
     // Check if the selected TTS provider is properly configured
     const isSelectedTTSConfigured = isTTSProviderConfigured(config);
     const hasAnyTTSConfigured = hasAnyTTSProviderConfigured(config);
-    
+
     console.log('TTS Provider Configuration:', {
       selectedProvider: selectedTTSProvider,
       isSelectedConfigured: isSelectedTTSConfigured,
@@ -271,12 +255,12 @@ export const initializeServicesAfterDB = async () => {
       hasElevenLabsKey: !!elevenLabsApiKey,
       hasDeepgramKey: !!deepgramApiKey
     });
-    
+
     // Initialize services - we need at least some API keys for core functionality
     // But TTS-specific services will only be initialized if the selected TTS provider is configured
     if (elevenLabsApiKey || openAIApiKey || anthropicApiKey || googleSpeechKey || deepgramApiKey) {
       console.log('Initializing services with API keys from database...');
-      
+
       // Initialize VoiceAI service only if ElevenLabs is the selected TTS provider AND properly configured
       if (selectedTTSProvider === 'elevenlabs' && isSelectedTTSConfigured && elevenLabsApiKey) {
         _voiceAIService = new EnhancedVoiceAIService(elevenLabsApiKey);
@@ -291,15 +275,15 @@ export const initializeServicesAfterDB = async () => {
           console.log('ElevenLabs selected but no API key available');
         }
       }
-      
+
       // Initialize speech analysis service
       const speechAnalysis = new SpeechAnalysisService(
-        openAIApiKey || '', 
-        googleSpeechKey || '', 
+        openAIApiKey || '',
+        googleSpeechKey || '',
         deepgramApiKey || ''
       );
       console.log('Speech analysis service initialized with API keys (Deepgram length:', deepgramApiKey?.length || 0, ')');
-      
+
       // Initialize LLM service
       const llmService = new LLMService({
         providers: [
@@ -307,36 +291,36 @@ export const initializeServicesAfterDB = async () => {
           { name: 'anthropic', apiKey: anthropicApiKey || '', isEnabled: !!anthropicApiKey }
         ]
       });
-      
+
       // Initialize ConversationEngine with all services
       _conversationEngine = new ConversationEngineService(
         _voiceAIService,
         speechAnalysis,
         llmService
       );
-      
+
       // Initialize LLM service with proper configuration
       await reinitializeGlobalLLMService();
-      
+
       // Initialize advanced conversation engine with initialized services
       _advancedConversationEngine = new AdvancedConversationEngine(getLLMService(), getVoiceAIService());
-      
+
       servicesInitialized = true;
       console.log('Core services initialized with database configuration');
-      
+
       // Log Deepgram configuration status
       console.log('Deepgram API key loaded:', deepgramApiKey ? `${deepgramApiKey.substring(0, 8)}...` : 'NOT SET');
     } else {
       console.warn('No API keys found in database for core services');
       console.log('Services will only be initialized if the selected TTS provider is properly configured');
-      
+
       // Even without core API keys, we can still initialize basic services if TTS is configured
       if (isSelectedTTSConfigured) {
         _voiceAIService = new EnhancedVoiceAIService('');
         console.log(`Minimal service initialization - TTS provider ${selectedTTSProvider} is configured`);
       }
     }
-    
+
     // Always update existing conversation engine with latest API keys from database
     // This ensures that even if the conversation engine was created earlier with empty keys,
     // it gets updated with the proper configuration from the database
@@ -349,46 +333,42 @@ export const initializeServicesAfterDB = async () => {
     // Import and call reinitializeLLMServiceWithDbConfig to ensure campaign service LLM is properly initialized
     const { reinitializeLLMServiceWithDbConfig } = await import('./advancedCampaignService');
     await reinitializeLLMServiceWithDbConfig();
-    
+
     // Initialize TTS services based on selected provider and its configuration
     const shouldInitializeElevenLabs = selectedTTSProvider === 'elevenlabs' && isSelectedTTSConfigured && elevenLabsApiKey && openAIApiKey;
     const shouldInitializeDeepgram = selectedTTSProvider === 'deepgram' && isSelectedTTSConfigured && deepgramApiKey;
     const shouldInitializeTTS = shouldInitializeElevenLabs || shouldInitializeDeepgram || (selectedTTSProvider !== 'elevenlabs' && selectedTTSProvider !== 'deepgram' && openAIApiKey);
-    
+
     if (shouldInitializeTTS) {
       try {
         if (shouldInitializeElevenLabs) {
           console.log('Initializing ElevenLabs services with API keys from database...');
-          
+
           // Re-initialize the ElevenLabs Conversational Service with the database API keys
           const { initializeConversationalService } = await import('./elevenLabsConversationalService');
           initializeConversationalService(elevenLabsApiKey, openAIApiKey);
           console.log('ElevenLabs Conversational Service initialized');
-          
+
           // Re-initialize the ElevenLabs SDK Service with the database API keys
           const { initializeSDKService } = await import('./elevenlabsSDKService');
           const sdkService = initializeSDKService(elevenLabsApiKey);
           console.log('ElevenLabs SDK Service initialized:', !!sdkService);
-          
+
           // Load the SDK extension with streaming methods
           await import('./elevenlabsSDKExtension');
-          
-          // Initialize optimized stream controllers
-          const { initialize: initializeOptimizedController } = await import('../controllers/optimizedStreamController');
-          await initializeOptimizedController();
-          
+
           // Initialize parallel processing service if SDK service is available
           if (sdkService) {
             const { initializeParallelProcessingService } = await import('./parallelProcessingService');
             initializeParallelProcessingService(sdkService, getLLMService());
             logger.info('Parallel processing service initialized for low-latency responses');
           }
-          
+
           console.log('ElevenLabs Voice AI services initialized with database configuration');
           logger.info('ElevenLabs Voice AI services initialized with database configuration');
         } else if (shouldInitializeDeepgram) {
           console.log('Initializing Deepgram TTS services with API key from database...');
-          
+
           // Initialize Deepgram TTS service
           const { initializeDeepgramTTS } = await import('./deepgramTTSService');
           initializeDeepgramTTS(deepgramApiKey);
@@ -404,7 +384,7 @@ export const initializeServicesAfterDB = async () => {
       }
     } else {
       console.warn(`Skipping TTS services initialization for provider ${selectedTTSProvider}:`, {
-        selectedTTSProvider,
+        selectedProvider: selectedTTSProvider,
         isSelectedConfigured: isSelectedTTSConfigured,
         hasElevenLabsKey: !!elevenLabsApiKey,
         hasDeepgramKey: !!deepgramApiKey,
@@ -412,7 +392,7 @@ export const initializeServicesAfterDB = async () => {
         reason: !isSelectedTTSConfigured ? 'Selected TTS provider not properly configured' : 'Required API keys missing'
       });
     }
-    
+
     // Update global conversation engine if it exists
     if (global.conversationEngine && typeof global.conversationEngine.updateApiKeys === 'function') {
       try {
@@ -422,15 +402,7 @@ export const initializeServicesAfterDB = async () => {
         logger.error('Failed to update global conversation engine API keys:', error);
       }
     }
-    
-    // Update telephony service configuration
-    try {
-      await advancedTelephonyService.updateConfiguration();
-      logger.info('Advanced telephony service configuration updated from database');
-    } catch (error) {
-      logger.error('Failed to update telephony service configuration:', error);
-    }
-    
+
     console.log('All services re-initialized with database configuration');
   } catch (error) {
     console.error('Error re-initializing services after database connection:', error);
@@ -461,7 +433,7 @@ export const reinitializeGlobalLLMService = async () => {
           maxDelayMs: 5000
         }
       };
-      
+
       // Create or update the LLM service with proper configuration
       if (!_llmService) {
         _llmService = new LLMService(llmConfig);
@@ -469,16 +441,16 @@ export const reinitializeGlobalLLMService = async () => {
         // Update the existing service configuration
         _llmService.updateConfig(llmConfig);
       }
-      
+
       // Make the LLM service available globally
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (global as any).llmService = _llmService;
-      
+
       // Store the llmService instance in the configuration for shared access across controllers
       // This is stored as a property but not persisted to the database
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (config as any).llmConfig.llmService = _llmService;
-      
+
       logger.info('Global LLM service reinitialized with database configuration and stored for shared access');
     } else {
       logger.warn('No LLM configuration found in database for global service');

@@ -6,7 +6,7 @@ import Call, { ICall } from '../models/Call';
 import Campaign from '../models/Campaign';
 import Configuration from '../models/Configuration';
 import { conversationEngine } from './index';
-import { AdvancedTelephonyService } from './advancedTelephonyService';
+import { RealTelephonyService } from './realTelephonyService';
 import { EnhancedVoiceAIService } from './enhancedVoiceAIService';
 import { synthesizeVoiceResponse, processAudioForTwiML, prepareUrlForTwilioPlay } from '../utils/voiceSynthesis';
 import { getPreferredVoiceId } from '../utils/voiceUtils';
@@ -54,7 +54,7 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                               if (enabledProvider) {
                                     // Use the TTS service factory to get the appropriate service
                                     const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
-                                    
+
                                     const defaultVoiceId = config.voiceAIConfig?.conversationalAI?.defaultVoiceId ||
                                           (config.ttsConfig?.provider === 'deepgram' ? 'aura-2-thalia-en' : 'XvRdSQXvmv5jHPGBw0XU');
 
@@ -172,7 +172,7 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                               if (enabledProvider) {
                                     // Use the TTS service factory to get the appropriate service
                                     const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
-                                    
+
                                     const defaultVoiceId = configuration.voiceAIConfig?.conversationalAI?.defaultVoiceId ||
                                           (configuration.ttsConfig?.provider === 'deepgram' ? 'aura-2-thalia-en' : 'XvRdSQXvmv5jHPGBw0XU');
 
@@ -277,8 +277,8 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                                           formattedGreeting,
                                           requestedVoiceId,
                                           campaign.primaryLanguage === 'hi' ? 'hi' : 'en',
-                                          { 
-                                              provider: campaign.voiceConfiguration?.provider // Pass the campaign's selected provider
+                                          {
+                                                provider: campaign.voiceConfiguration?.provider // Pass the campaign's selected provider
                                           }
                                     );
 
@@ -407,8 +407,7 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                   const baseUrl = webhookBaseUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
                   // Use path segments instead of query parameters for Twilio Media Stream compatibility
                   const streamPath = `/voice/stream/${callId}/${conversationId}`;
-                  // TEMPORARY: Hardcode wsUrl to point to minimal_websocket_server for testing
-                  const wsUrl = `wss://f0aca0273fcb.ngrok-free.app/voice/stream/${callId}/${conversationId}`;
+                  const wsUrl = `${baseUrl}${streamPath}`;
 
                   logger.info(`Generated websocket URL for Twilio Media Stream: ${wsUrl}`);
 
@@ -718,7 +717,7 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                                                 requestedVoiceId,
                                                 campaign?.primaryLanguage === 'hi' ? 'hi' : 'en',
                                                 {
-                                                    provider: campaign?.voiceConfiguration?.provider // Pass the campaign's selected provider
+                                                      provider: campaign?.voiceConfiguration?.provider // Pass the campaign's selected provider
                                                 }
                                           );
 
@@ -757,7 +756,7 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                   // Fallback if TTS is not available or fails
                   if (!useTTS) {
                         logger.info(`Using TTS fallback chain for call ${callId} response`);
-                        
+
                         // Try TTS provider chain before using Twilio voices
                         const call = await Call.findById(callId);
                         const ttsResult = await synthesizeWithTTSChain(aiResponse.text, {
@@ -935,23 +934,23 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
 export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
       // Log warning about legacy route usage
       logger.info('Legacy Twilio /stream route in use; dedicated TwilioWebSocketServer is recommended', {
-        url: req.url,
-        userAgent: req.headers['user-agent']
+            url: req.url,
+            userAgent: req.headers['user-agent']
       });
-      
+
       let callId: string | undefined;
       let conversationId: string | undefined;
       let streamSid: string | undefined;
       let audioBuffer: Buffer[] = [];
       let sequenceNumber = 0;
       let isProcessingAudio = false;
-      
+
       // Helper function to send audio back to Twilio
       const sendAudioToTwilio = (audioData: Buffer) => {
             if (!streamSid || ws.readyState !== WebSocket.OPEN) {
                   return;
             }
-            
+
             const message = {
                   event: 'media',
                   streamSid: streamSid,
@@ -962,10 +961,10 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
                         payload: audioData.toString('base64')
                   }
             };
-            
+
             ws.send(JSON.stringify(message));
       };
-      
+
       ws.on('message', async (data) => {
             let msg;
             try {
@@ -1000,7 +999,7 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
                               const qConversationId = parsed.searchParams.get('conversationId');
                               if (qCallId) callId = qCallId;
                               if (qConversationId) conversationId = qConversationId;
-                        } catch {}
+                        } catch { }
                         // Fall back to Twilio customParameters sent in the start event
                         if (msg.start?.customParameters) {
                               callId = callId || msg.start.customParameters.callId;
@@ -1015,25 +1014,25 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
                   // This legacy handler maintains old behavior for compatibility.
                   return;
             }
-            
+
             if (!callId || !conversationId || !streamSid) {
                   // still waiting for start event with proper parameters
                   return;
             }
-            
+
             if (msg.event === 'media' && msg.media?.payload) {
                   // Process inbound audio chunk
                   const payload = msg.media.payload; // base64-encoded audio
                   const audioChunk = Buffer.from(payload, 'base64');
                   audioBuffer.push(audioChunk);
-                  
+
                   // Process accumulated audio when we have enough data (every ~1 second of audio)
                   const totalBufferSize = audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
                   if (totalBufferSize >= 8192 && !isProcessingAudio) { // 8KB threshold
                         isProcessingAudio = true;
                         const completeAudio = Buffer.concat(audioBuffer);
                         audioBuffer = []; // Reset buffer
-                        
+
                         try {
                               // Process the audio asynchronously to avoid blocking the WebSocket
                               setImmediate(async () => {
@@ -1057,7 +1056,7 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
             }
             // Handle other events if needed...
       });
-      
+
       ws.on('close', () => {
             logger.info(`Media stream closed for call ${callId}`);
             audioBuffer = [];
@@ -1068,21 +1067,21 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
  * Process an audio chunk and generate AI response
  */
 async function processAudioChunk(
-      audioData: Buffer, 
-      callId: string, 
-      conversationId: string, 
+      audioData: Buffer,
+      callId: string,
+      conversationId: string,
       sendAudioToTwilio: (audio: Buffer) => void
 ): Promise<void> {
       try {
             logger.info(`Processing audio chunk for call ${callId}, size: ${audioData.length} bytes`);
-            
+
             // Get configuration for speech services
             const config = await Configuration.findOne();
             if (!config) {
                   logger.error('No configuration found for audio processing');
                   return;
             }
-            
+
             // Get conversation session
             let session = conversationEngine.getSession(conversationId);
             if (!session) {
@@ -1092,7 +1091,7 @@ async function processAudioChunk(
                         logger.error(`No call found with ID ${callId}`);
                         return;
                   }
-                  
+
                   const newConversationId = await conversationEngine.startConversation(
                         callId,
                         call.leadId.toString(),
@@ -1105,37 +1104,37 @@ async function processAudioChunk(
                         return;
                   }
             }
-            
+
             // Transcribe audio using available speech recognition service
             let transcribedText = '';
-            
+
             // Try to use Deepgram if configured
             if (config.deepgramConfig?.isEnabled && config.deepgramConfig?.apiKey) {
                   try {
                         const speechAnalysisService = conversationEngine.getSpeechAnalysisService();
                         const transcriptionResult = await speechAnalysisService.transcribeAudio(audioData);
                         transcribedText = transcriptionResult.transcript || '';
-                        
+
                         logger.info(`Deepgram transcription for call ${callId}: "${transcribedText.substring(0, 100)}..."`);
                   } catch (deepgramError) {
                         logger.error(`Deepgram transcription failed for call ${callId}:`, deepgramError);
                   }
             }
-            
+
             // Skip processing if no meaningful speech detected
             if (!transcribedText || transcribedText.trim().length < 3) {
                   logger.debug(`No meaningful speech detected for call ${callId}`);
                   return;
             }
-            
+
             // Process the transcribed text with conversation engine
             const aiResponse = await conversationEngine.processUserInput(conversationId, transcribedText);
-            
+
             logger.info(`AI response for call ${callId}: "${aiResponse.text.substring(0, 100)}..."`);
-            
+
             // Generate speech from AI response
             await generateAndSendAudioResponse(aiResponse.text, callId, session, config, sendAudioToTwilio);
-            
+
       } catch (error) {
             logger.error(`Error in processAudioChunk for call ${callId}:`, error);
       }
@@ -1155,17 +1154,17 @@ async function generateAndSendAudioResponse(
             // Get voice configuration
             const call = await Call.findById(callId);
             const campaign = call ? await Campaign.findById(call.campaignId) : null;
-            
+
             // Determine voice ID
-            const voiceId = call?.personalityId || 
-                          session.currentPersonality?.voiceId ||
-                          campaign?.voiceConfiguration?.voiceId ||
-                          config?.voiceAIConfig?.conversationalAI?.defaultVoiceId ||
-                          'default';
-            
+            const voiceId = call?.personalityId ||
+                  session.currentPersonality?.voiceId ||
+                  campaign?.voiceConfiguration?.voiceId ||
+                  config?.voiceAIConfig?.conversationalAI?.defaultVoiceId ||
+                  'default';
+
             // Get TTS provider configuration
             const selectedTTSProvider = config.ttsConfig?.provider || 'elevenlabs';
-            
+
             if (selectedTTSProvider === 'elevenlabs' && config.elevenLabsConfig?.isEnabled) {
                   // Use ElevenLabs for synthesis
                   const voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
@@ -1174,7 +1173,7 @@ async function generateAndSendAudioResponse(
                         personalityId: voiceId,
                         language: session.language === 'Hindi' ? 'hi' : 'en'
                   });
-                  
+
                   if (speechResponse?.audioContent) {
                         sendAudioToTwilio(speechResponse.audioContent);
                         logger.info(`Sent ElevenLabs audio response for call ${callId}`);
@@ -1188,7 +1187,7 @@ async function generateAndSendAudioResponse(
                         voiceId,
                         session.language === 'Hindi' ? 'hi' : 'en'
                   );
-                  
+
                   if (speechResponse?.audioContent) {
                         sendAudioToTwilio(speechResponse.audioContent);
                         logger.info(`Sent Deepgram audio response for call ${callId}`);
@@ -1196,7 +1195,7 @@ async function generateAndSendAudioResponse(
             } else {
                   logger.warn(`TTS provider ${selectedTTSProvider} not configured or available for call ${callId}`);
             }
-            
+
       } catch (error) {
             logger.error(`Error generating audio response for call ${callId}:`, error);
       }
@@ -1611,10 +1610,10 @@ async function analyzeTranscription(conversationLog: Array<{ role: string, conte
 }
 // Helper function to handle chunked audio text in TwiML using proper TTS chain
 async function handleChunkedAudioForTwiML(
-  twiml: any, 
-  audioText: string, 
-  language: string = 'en',
-  options: { callId?: string; campaignId?: string } = {}
+      twiml: any,
+      audioText: string,
+      language: string = 'en',
+      options: { callId?: string; campaignId?: string } = {}
 ) {
       try {
             // Check if this is a chunked audio request
@@ -1624,7 +1623,7 @@ async function handleChunkedAudioForTwiML(
 
                   // Check for special error markers
                   const hasCloudinaryError = fullText.startsWith('[CLOUDINARY_ERROR]');
-                  const cleanText = hasCloudinaryError 
+                  const cleanText = hasCloudinaryError
                         ? fullText.substring('[CLOUDINARY_ERROR]'.length).trim()
                         : fullText;
 
@@ -1686,10 +1685,10 @@ async function handleChunkedAudioForTwiML(
             // Graceful fallback - use Twilio voices if everything fails
             if (audioText?.startsWith('USE_CHUNKED_AUDIO:')) {
                   const fullText = audioText.substring('USE_CHUNKED_AUDIO:'.length);
-                  const cleanText = fullText.startsWith('[CLOUDINARY_ERROR]') 
+                  const cleanText = fullText.startsWith('[CLOUDINARY_ERROR]')
                         ? fullText.substring('[CLOUDINARY_ERROR]'.length).trim()
                         : fullText;
-                  
+
                   const chunks = splitTextIntoChunks(cleanText, 200);
                   for (const chunk of chunks) {
                         if (chunk.trim()) {

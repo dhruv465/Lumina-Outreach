@@ -1,0 +1,15 @@
+TwiML (Twilio Markup Language) is a set of instructions used to tell Twilio what to do when an incoming call or SMS is received[1]. It works by Twilio looking up the URL associated with a phone number, sending a request to that URL, and then reading the TwiML instructions hosted there to determine actions like recording a call, playing a message, or prompting for keypad input[1].
+
+At its core, TwiML is an XML document with special tags defined by Twilio for building Programmable Voice applications[1]. For example, a simple TwiML to say "Hello, world!" would look like this:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>Hello, world!</Say>
+</Response>
+```
+TwiML elements are divided into three groups: the root `<Response>` element, verbs, and nouns[1]. Verbs tell Twilio what actions to take on a call, such as `<Say>` (read text), `<Play>` (play audio), `<Dial>` (add another party), `<Record>` (record voice), and `<Gather>` (collect digits)[1]. Nouns describe the phone numbers and API resources that the verb acts upon[1].
+
+When Twilio makes a request to an application to retrieve TwiML, it sends parameters like `CallSid`, `AccountSid`, `From`, `To`, and `CallStatus`, which provide information about the call[1]. Twilio behaves like a web browser when making HTTP requests, supporting cookies, redirects, and caching[1]. It also understands various MIME types, interpreting `text/xml`, `application/xml`, and `text/html` as TwiML, and playing audio files for audio MIME types[1].
+
+Sources:
+[1] TwiML™ for Programmable Voice | Twilio (https://www.twilio.com/docs/voice/twiml)

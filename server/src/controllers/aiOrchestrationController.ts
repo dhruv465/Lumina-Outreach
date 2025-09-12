@@ -7,7 +7,7 @@
 
 import { Request, Response } from 'express';
 import { getAIOrchestrationService } from '../services/aiOrchestrationAdapter';
-import { getRAGService } from '../services/ragService';
+import { getRAGSystem } from '../services/rag/ragSystem';
 import { getLLMService } from '../services';
 import { logger } from '../index';
 
@@ -173,12 +173,12 @@ export const retrieveContext = async (req: Request, res: Response) => {
     }
     
     const llmService = getLLMService();
-    const ragService = getRAGService(llmService);
-    const result = await ragService.query(query, options);
+    const ragService = getRAGSystem();
+    const result = await ragService.generateEnhancedPrompt(query, [], options);
     
     res.json({
       success: true,
-      results: result.results,
+      results: result.retrievalResults.documents,
       augmentedPrompt: result.augmentedPrompt
     });
   } catch (error) {

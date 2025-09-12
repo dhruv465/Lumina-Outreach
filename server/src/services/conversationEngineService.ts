@@ -1,4 +1,3 @@
-import VoiceAIService from './voiceAIService';
 import { EnhancedVoiceAIService, VoicePersonality } from './enhancedVoiceAIService';
 import SpeechAnalysisService, { SpeechAnalysis, ConversationContext } from './speechAnalysisService';
 import { LLMService } from './llm/service';

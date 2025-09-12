@@ -1,6 +1,6 @@
 // Basic Voice Configuration Service - No Training or Hardcoded Data
 import { logger, getErrorMessage } from '../index';
-import { VoicePersonality } from './voiceAIService';
+import { VoicePersonality } from './enhancedVoiceAIService';
 
 export class VoiceTrainingService {
   constructor() {

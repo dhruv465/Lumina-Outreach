@@ -12,11 +12,10 @@ import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
-import { VoicePersonality } from './voiceAIService';
+
 // Import the official ElevenLabs SDK
 import ElevenLabs from 'elevenlabs-node';
-// Import enhanced WebSocket factory
-import { createPlainWebSocket } from '../utils/enhancedWebSocketFactory';
+
 
 // Define Language type locally if not available from types
 type Language = 'English' | 'Hindi' | 'Spanish' | 'French' | 'German';
@@ -281,17 +280,8 @@ export class ElevenLabsConversationalService extends EventEmitter {
     // Create enhanced WebSocket connection
     try {
       logger.info(`Creating enhanced WebSocket connection for ElevenLabs conversation ${conversationId}`);
-      
-      const ws = await createPlainWebSocket(this.wsUrl, {
-        callId: `elevenlabs-${conversationId}`,
-        connectionId: conversationId,
-        serviceName: 'elevenlabs-conversational',
-        // ElevenLabs specific optimizations
-        heartbeatInterval: 30000, // 30 seconds for TTS services
-        connectionTimeout: 15000,
-        maxReconnectAttempts: 3, // Fewer retries for TTS to fail fast
-        reconnectDelay: 2000 // Slightly longer delay for TTS services
-      });
+
+      const ws = new WebSocket(this.wsUrl);
 
       let interrupted = false;
 
@@ -312,15 +302,15 @@ export class ElevenLabsConversationalService extends EventEmitter {
           stability: options?.voiceSettings?.stability || 0.75,
           similarity_boost: options?.voiceSettings?.similarityBoost || 0.75,
           style: options?.voiceSettings?.style || 0.0,
-          use_speaker_boost: options?.voiceSettings?.speakerBoost || true
+          use_speaker_boost: true
         },
         optimize_streaming_latency: options?.latencyOptimization || 0
       }));
 
       // Emit connection status
-      this.emit(ConversationEvent.CONNECTION_STATUS, { 
-        conversationId, 
-        status: 'connected' 
+      this.emit(ConversationEvent.CONNECTION_STATUS, {
+        conversationId,
+        status: 'connected'
       });
     });
 
@@ -328,22 +318,22 @@ export class ElevenLabsConversationalService extends EventEmitter {
     ws.on('message', (data) => {
       if (Buffer.isBuffer(data)) {
         onAudioChunk(data);
-        this.emit(ConversationEvent.MESSAGE_STREAM, { 
-          conversationId, 
-          chunk: data 
+        this.emit(ConversationEvent.MESSAGE_STREAM, {
+          conversationId,
+          chunk: data
         });
       } else {
         try {
           const jsonData = JSON.parse(data.toString());
-          
+
           if (jsonData.type === 'message') {
             logger.info(`Message from ElevenLabs: ${jsonData.message}`);
           } else if (jsonData.type === 'audio_started') {
-            this.emit(ConversationEvent.MESSAGE_START, { 
-              conversationId 
+            this.emit(ConversationEvent.MESSAGE_START, {
+              conversationId
             });
           } else if (jsonData.type === 'audio_completed') {
-            this.emit(ConversationEvent.MESSAGE_COMPLETE, { 
+            this.emit(ConversationEvent.MESSAGE_COMPLETE, {
               conversationId,
               interrupted: false
             });
@@ -357,9 +347,9 @@ export class ElevenLabsConversationalService extends EventEmitter {
     // Handle errors
     ws.on('error', (error) => {
       logger.error(`WebSocket error for conversation ${conversationId}: ${getErrorMessage(error)}`);
-      this.emit(ConversationEvent.ERROR, { 
-        conversationId, 
-        error: getErrorMessage(error) 
+      this.emit(ConversationEvent.ERROR, {
+        conversationId,
+        error: getErrorMessage(error)
       });
     });
 
@@ -370,7 +360,7 @@ export class ElevenLabsConversationalService extends EventEmitter {
       
       // Emit completion event if not already emitted due to interruption
       if (interrupted) {
-        this.emit(ConversationEvent.MESSAGE_COMPLETE, { 
+        this.emit(ConversationEvent.MESSAGE_COMPLETE, {
           conversationId,
           interrupted: true
         });
@@ -390,9 +380,9 @@ export class ElevenLabsConversationalService extends EventEmitter {
         wsUrl: this.wsUrl
       });
       
-      this.emit(ConversationEvent.ERROR, { 
-        conversationId, 
-        error: `Failed to establish connection: ${getErrorMessage(error)}` 
+      this.emit(ConversationEvent.ERROR, {
+        conversationId,
+        error: `Failed to establish connection: ${getErrorMessage(error)}`
       });
       
       throw error;
@@ -549,10 +539,10 @@ export class ElevenLabsConversationalService extends EventEmitter {
       }
 
       const conversation = this.conversations.get(conversationId)!;
-      
+
       // Add user message
       this.addMessage(conversationId, 'user', text);
-      
+
       // Mark conversation as generating
       conversation.isGenerating = true;
 
@@ -561,7 +551,7 @@ export class ElevenLabsConversationalService extends EventEmitter {
         conversationId,
         text,
         voiceId,
-        onAudioChunk || (() => {}),
+        onAudioChunk || (() => { }),
         options
       ).finally(() => {
         conversation.isGenerating = false;

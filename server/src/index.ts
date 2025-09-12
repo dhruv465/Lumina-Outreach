@@ -27,7 +27,6 @@ import knowledgeRoutes from "./routes/knowledgeRoutes";
 import leadRoutes from "./routes/leadRoutes";
 import ragRoutes from "./routes/ragRoutes";
 import ttsProviderRoutes from "./routes/ttsProviderRoutes";
-// Monitoring routes removed
 import enhancedRealTimeRoutes from "./routes/enhancedRealTimeRoutes";
 import rootWebhookRoutes from "./routes/rootWebhookRoutes";
 import streamRoutes from "./routes/streamRoutes";
@@ -36,33 +35,16 @@ import transcriptionRoutes from "./routes/transcriptionRoutes";
 import userRoutes from "./routes/userRoutes";
 import voiceAIRoutes from "./routes/voiceAIRoutes";
 import healthRoutes from "./routes/healthRoutes";
-
-// Optimized stream controller
-import { optimizedStreamRoute } from "./controllers/optimizedStreamController";
-
-// Twilio Media Streams WebSocket handler
 import { initializeTwilioWebSocketServer } from "./services/twilioWebSocketServer";
-
-// Enhanced WebSocket Server for improved connection management
-import { initializeEnhancedWebSocketServer } from "./services/enhancedWebSocketServer";
-
-// Enhanced WebSocket connection management
-import { enhancedWebSocketFactory } from "./utils/enhancedWebSocketFactory";
-
-// WebSocket handlers removed
-
-// Services initialization
 import { getAIOrchestrationService } from "./services/aiOrchestrationService";
 import CampaignService from "./services/campaignService";
 import ConversationEngineService from "./services/conversationEngineService";
 import { EnhancedVoiceAIService } from "./services/enhancedVoiceAIService";
 import leadService from "./services/leadService";
 import { LLMService } from "./services/llm/service";
-import { getRAGService } from "./services/ragService";
+import { getRAGSystem } from "./services/rag/ragSystem";
 import { initializeSpeechService } from "./services/realSpeechService";
 import SpeechAnalysisService from "./services/speechAnalysisService";
-
-// Configuration and health services
 import { validateStartupConfig } from "./config/database-validation";
 import { connectToDatabase } from "./database/connection";
 import { healthCheckHandler, readinessCheckHandler } from "./health/service";
@@ -90,46 +72,10 @@ const server = http.createServer(app);
 
 // Initialize WebSocket server for Twilio Media Streams
 // Support both Enhanced and Legacy implementations
-const useEnhancedWebSocketServer = process.env.USE_ENHANCED_WEBSOCKET_SERVER === 'true';
-
-let twilioWSServer: any;
-
-if (useEnhancedWebSocketServer) {
-  // Initialize Enhanced WebSocket Server with advanced connection management
-  twilioWSServer = initializeEnhancedWebSocketServer(server, {
-    maxConnections: parseInt(process.env.MAX_WEBSOCKET_CONNECTIONS || '1000'),
-    enableHealthMonitoring: true,
-    healthCheckInterval: 30000, // 30 seconds
-    metricsCollectionInterval: 60000, // 1 minute
-    enhancedManagerConfig: {
-      maxReconnectAttempts: 5,
-      reconnectDelay: 1000,
-      heartbeatInterval: 15000,
-      connectionTimeout: 10000,
-      maxHeartbeatMisses: 3,
-      pingInterval: 20000,
-      pongTimeout: 5000,
-      enableFrameValidation: true,
-      strictProtocolCompliance: true,
-      maxFrameSize: 64 * 1024,
-      maxMessageSize: 1024 * 1024,
-      errorClassificationEnabled: true,
-      retryOnProtocolErrors: false
-    }
-  });
-  bootstrapLogger.info(
-    "Enhanced WebSocket Server initialized with advanced connection management", {
-      maxConnections: parseInt(process.env.MAX_WEBSOCKET_CONNECTIONS || '1000'),
-      enhancedFeatures: ['frameValidation', 'protocolCompliance', 'errorClassification', 'healthMonitoring']
-    }
-  );
-} else {
-  // Initialize legacy Twilio WebSocket server for backward compatibility
-  twilioWSServer = initializeTwilioWebSocketServer(server);
-  bootstrapLogger.info(
-    "Legacy Twilio WebSocket server initialized for robust framing"
-  );
-}
+let twilioWSServer = initializeTwilioWebSocketServer(server);
+bootstrapLogger.info(
+  "Twilio WebSocket server initialized for robust framing"
+);
 
 // WebSocket upgrade handling is now managed by the selected WebSocket server
 // to prevent Express interference with Twilio Media Stream connections
@@ -267,7 +213,7 @@ const rateLimitWindowMs = parseInt(
   process.env.RATE_LIMIT_WINDOW_MS || "900000"
 ); // 15 minutes
 const rateLimitMax = parseInt(
-  process.env.NODE_ENV === "development" 
+  process.env.NODE_ENV === "development"
     ? "5000" // Much higher limit for development
     : process.env.RATE_LIMIT_MAX_REQUESTS || "100"
 );
@@ -409,10 +355,7 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 // Add optimized stream route
-app.get(
-  "/voice/optimized-stream/:callId/:conversationId",
-  optimizedStreamRoute
-);
+
 
 // WebSocket routes
 app.use("/", streamRoutes);
@@ -543,8 +486,8 @@ const initializeServices = async () => {
       deepgramApiKey = config.deepgramConfig?.apiKey || "";
       logger.info(
         "Deepgram API key " +
-          (deepgramApiKey ? "found" : "not found") +
-          " in database configuration"
+        (deepgramApiKey ? "found" : "not found") +
+        " in database configuration"
       );
 
       // Initialize and validate Deepgram auto-configuration with graceful startup
@@ -811,12 +754,30 @@ const initializeServices = async () => {
       deepgramApiKey
     );
 
-    // Initialize AdvancedTelephonyService manually (safe initialization)
-    const {
-      advancedTelephonyService,
-    } = require("./services/advancedTelephonyService");
-    await advancedTelephonyService.updateConfiguration();
-    logger.info("Advanced telephony service initialized");
+    // Initialize RealTelephonyService with configuration
+    try {
+      const { initializeTelephonyService } = require("./services/realTelephonyService");
+
+      // Get Twilio configuration from database or environment
+      const twilioAccountSid = config?.twilioConfig?.accountSid || process.env.TWILIO_ACCOUNT_SID || '';
+      const twilioAuthToken = config?.twilioConfig?.authToken || process.env.TWILIO_AUTH_TOKEN || '';
+      const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || process.env.API_BASE_URL || 'http://localhost:8000';
+
+      if (twilioAccountSid && twilioAuthToken) {
+        initializeTelephonyService({
+          accountSid: twilioAccountSid,
+          authToken: twilioAuthToken,
+          webhookBaseUrl: webhookBaseUrl
+        });
+        logger.info("Real telephony service initialized successfully");
+      } else {
+        logger.warn("Twilio credentials not found - telephony service will be unavailable");
+        logger.info("To enable telephony features, configure Twilio credentials in the Configuration page");
+      }
+    } catch (error) {
+      logger.error("Failed to initialize telephony service:", error);
+      logger.warn("Telephony features will be unavailable");
+    }
 
     // Export services
     global.speechService = speechService;
@@ -986,8 +947,7 @@ const startServer = async () => {
     );
     const cloudinaryWorks = await cloudinaryService.testCloudinaryConnection();
     runtimeLogger.info(
-      `Cloudinary connection test result: ${
-        cloudinaryWorks ? "SUCCESS" : "FAILED"
+      `Cloudinary connection test result: ${cloudinaryWorks ? "SUCCESS" : "FAILED"
       }`
     );
 
@@ -1022,7 +982,7 @@ const startServer = async () => {
       const { getLLMService } = await import("./services");
       const llmService = getLLMService();
       const aiOrchestrationService = getAIOrchestrationService();
-      const ragService = getRAGService(llmService);
+      const ragService = getRAGSystem();
 
       logger.info("AI Orchestration and RAG services initialized");
     } catch (error) {
@@ -1036,7 +996,7 @@ const startServer = async () => {
     try {
       const { getLLMService } = await import("./services");
       const llmService = getLLMService();
-      const ragService = getRAGService(llmService);
+      const ragService = getRAGSystem();
 
       // Ensure RAG models are imported and registered
       await import("./models/KnowledgeBase");
@@ -1221,17 +1181,7 @@ const gracefulShutdown = (signal: string) => {
       }
 
       // Clean up enhanced WebSocket connections
-      try {
-        logger.info("Closing enhanced WebSocket connections...");
-        await enhancedWebSocketFactory.closeAllConnections();
-        logger.info("Enhanced WebSocket connections closed");
-      } catch (error) {
-        logger.warn(
-          `Error closing enhanced WebSocket connections: ${getErrorMessage(
-            error
-          )}`
-        );
-      }
+
 
       // Close database connections
       logger.info("Closing database connection...");

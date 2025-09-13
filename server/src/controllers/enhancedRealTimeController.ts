@@ -7,7 +7,7 @@ import { enhancedBargeInDetectionService } from '../services/enhancedBargeInDete
 import Call from '../models/Call';
 import Campaign from '../models/Campaign';
 import Configuration from '../models/Configuration';
-import { conversationEngine } from '../services/index';
+import { getVoiceAIService } from '../services';
 
 /**
  * Enhanced controller for real-time, interruption-friendly AI voice agent calls
@@ -388,8 +388,7 @@ async function generateAndSendGreeting(callId: string, greetingText: string): Pr
     // Try ElevenLabs first
     if (config.elevenLabsConfig?.isEnabled && config.elevenLabsConfig?.apiKey) {
       try {
-        const { EnhancedVoiceAIService } = await import('../services/enhancedVoiceAIService');
-        const voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
+        const voiceAI = getVoiceAIService();
         
         const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
           text: greetingText,

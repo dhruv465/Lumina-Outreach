@@ -5,6 +5,7 @@ import { getErrorMessage } from '../utils/logger';
 import Call, { ICall } from '../models/Call';
 import Campaign from '../models/Campaign';
 import Configuration from '../models/Configuration';
+import { getVoiceAIService } from '.';
 import { conversationEngine } from './index';
 import { RealTelephonyService } from './realTelephonyService';
 import { EnhancedVoiceAIService } from './enhancedVoiceAIService';
@@ -318,7 +319,7 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                                     // Fall back to adaptive voice method if file method fails
                                     logger.warn(`File synthesis method failed, trying adaptive method: ${fileMethodError}`);
 
-                                    const voiceAIService = new EnhancedVoiceAIService(configuration.elevenLabsConfig?.apiKey || '');
+                                    const voiceAIService = getVoiceAIService();
                                     const speechResponse = await voiceAIService.synthesizeAdaptiveVoice({
                                           text: formattedGreeting,
                                           personalityId: requestedVoiceId,
@@ -1167,7 +1168,7 @@ async function generateAndSendAudioResponse(
 
             if (selectedTTSProvider === 'elevenlabs' && config.elevenLabsConfig?.isEnabled) {
                   // Use ElevenLabs for synthesis
-                  const voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
+                  const voiceAI = getVoiceAIService();
                   const speechResponse = await voiceAI.synthesizeAdaptiveVoice({
                         text: responseText,
                         personalityId: voiceId,

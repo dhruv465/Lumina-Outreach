@@ -95,7 +95,7 @@ export const getConversationEngine = (): ConversationEngineService => {
   if (!_conversationEngine) {
     console.warn('ConversationEngine accessed before initialization, creating with empty keys');
     // Create with empty services
-    const voiceAI = new EnhancedVoiceAIService('');
+    const voiceAI = getVoiceAIService();
     const speechAnalysis = new SpeechAnalysisService('', '', '');
     const llmService = new LLMService({
       providers: [
@@ -261,12 +261,12 @@ export const initializeServicesAfterDB = async () => {
     if (elevenLabsApiKey || openAIApiKey || anthropicApiKey || googleSpeechKey || deepgramApiKey) {
       console.log('Initializing services with API keys from database...');
 
-      // Initialize VoiceAI service only if ElevenLabs is the selected TTS provider AND properly configured
+      const voiceAIService = getVoiceAIService();
       if (selectedTTSProvider === 'elevenlabs' && isSelectedTTSConfigured && elevenLabsApiKey) {
-        _voiceAIService = new EnhancedVoiceAIService(elevenLabsApiKey);
-        console.log('VoiceAI service initialized with ElevenLabs API key');
+        voiceAIService.updateApiKey(elevenLabsApiKey);
+        console.log('VoiceAI service updated with ElevenLabs API key');
       } else {
-        _voiceAIService = new EnhancedVoiceAIService('');
+        voiceAIService.updateApiKey('');
         if (selectedTTSProvider !== 'elevenlabs') {
           console.log(`Skipping ElevenLabs VoiceAI service - selected TTS provider is ${selectedTTSProvider}`);
         } else if (!isSelectedTTSConfigured) {

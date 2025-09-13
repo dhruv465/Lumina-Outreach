@@ -106,11 +106,13 @@ router.get('/status', async (req, res) => {
 
 /**
  * Set up WebSocket server for real-time transcription
+ * Uses noServer mode to avoid conflicts with Twilio WebSocket server
  */
-export function setupDeepgramWebSocketServer(server: any) {
+export function setupDeepgramWebSocketServer(server: any): WebSocket.Server {
   const wss = new WebSocket.Server({ 
-    server,
-    path: '/api/deepgram/ws'
+    noServer: true,
+    perMessageDeflate: false,
+    maxPayload: 1024 * 1024, // 1MB max payload
   });
 
   wss.on('connection', (ws) => {
@@ -126,7 +128,7 @@ export function setupDeepgramWebSocketServer(server: any) {
       isConfigured: false
     });
 
-    logger.info(`New WebSocket connection established: ${connectionId}`);
+    logger.info(`New Deepgram WebSocket connection established: ${connectionId}`);
 
     // Send welcome message
     ws.send(JSON.stringify({ 

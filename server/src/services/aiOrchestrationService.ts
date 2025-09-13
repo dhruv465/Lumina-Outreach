@@ -302,12 +302,15 @@ export class AIOrchestrationService extends EventEmitter {
         elevenLabsApiKey = config.elevenLabsConfig.apiKey || '';
       }
       
-      this.voiceService = new EnhancedVoiceAIService(elevenLabsApiKey);
+      const { getVoiceAIService } = await import('.');
+      this.voiceService = getVoiceAIService();
+      this.voiceService.updateApiKey(elevenLabsApiKey);
       logger.info('Voice AI Service initialized');
     } catch (error) {
       logger.error(`Failed to initialize Voice AI Service: ${getErrorMessage(error)}`);
-      // Create with empty API key as fallback
-      this.voiceService = new EnhancedVoiceAIService('');
+      const { getVoiceAIService } = await import('.');
+      this.voiceService = getVoiceAIService();
+      this.voiceService.updateApiKey('');
     }
   }
   

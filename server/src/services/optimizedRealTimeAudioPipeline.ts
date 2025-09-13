@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { logger } from '../index';
+import { getVoiceAIService } from '.';
 import { realTimeCallStateMachine, CallEvent, CallState } from './realTimeCallStateMachine';
 import { enhancedBargeInDetectionService } from './enhancedBargeInDetectionService';
 
@@ -656,8 +657,7 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
       if (!config) return null;
 
       if (provider === 'elevenlabs' && config.elevenLabsConfig?.isEnabled) {
-        const { EnhancedVoiceAIService } = await import('./enhancedVoiceAIService');
-        const voiceAI = new EnhancedVoiceAIService(config.elevenLabsConfig.apiKey);
+        const voiceAI = getVoiceAIService();
         
         return await voiceAI.synthesizeAdaptiveVoice({
           text,

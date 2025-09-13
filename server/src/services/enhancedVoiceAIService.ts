@@ -80,6 +80,19 @@ export class EnhancedVoiceAIService {
     console.log('EnhancedVoiceAIService initialization completed');
   }
 
+  public updateApiKey(apiKey: string): void {
+    console.log('Updating EnhancedVoiceAIService API key...');
+    this.elevenLabsApiKey = apiKey;
+    if (apiKey && apiKey.trim() !== '') {
+      this.initializeConversationalService();
+      this.initializeSDKService();
+    } else {
+      this.conversationalService = null;
+      this.sdkService = null;
+      console.log('ElevenLabs services cleared due to empty API key.');
+    }
+  }
+
   /**
    * Initialize the ElevenLabs Conversational Service
    */

@@ -3,6 +3,7 @@
  */
 
 import mongoose from 'mongoose';
+import { getVoiceAIService } from '.';
 import { logger, getErrorMessage } from '../index';
 import leadService from './leadService';
 import ConversationEngineService from './conversationEngineService';
@@ -84,14 +85,13 @@ export class CampaignService {
   private conversationEngine: ConversationEngineService;
   
   constructor(
-    elevenLabsApiKey: string = '', 
     openAIApiKey: string = '', 
     anthropicApiKey?: string,
     googleSpeechKey?: string,
     deepgramApiKey?: string
   ) {
     // Create EnhancedVoiceAIService
-    const voiceAI = new EnhancedVoiceAIService(elevenLabsApiKey);
+    const voiceAI = getVoiceAIService();
     
     // Create SpeechAnalysisService
     const speechAnalysis = new SpeechAnalysisService(openAIApiKey, googleSpeechKey, deepgramApiKey);
@@ -136,7 +136,8 @@ export class CampaignService {
         const googleKey = googleProvider?.apiKey || '';
         
         // Create services
-        const voiceAI = new EnhancedVoiceAIService(elevenLabsKey);
+        const voiceAI = getVoiceAIService();
+        voiceAI.updateApiKey(elevenLabsKey);
         const speechAnalysis = new SpeechAnalysisService(openAIKey, googleKey, '');
         const llmService = new LLMService({
           providers: [

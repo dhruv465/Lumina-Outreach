@@ -70,16 +70,8 @@ const app = express();
 const server = http.createServer(app);
 // Find this section in your index.ts file:
 
-// Initialize WebSocket server for Twilio Media Streams
-// Support both Enhanced and Legacy implementations
-let twilioWSServer = initializeTwilioWebSocketServer(server);
-bootstrapLogger.info(
-  "Twilio WebSocket server initialized for robust framing"
-);
-
-// WebSocket upgrade handling is now managed by the selected WebSocket server
-// to prevent Express interference with Twilio Media Stream connections
-
+// Initialize Socket.IO server first (before other WebSocket servers)
+// Configure it to avoid conflicts with Twilio Media Streams
 const io = new SocketIOServer(server, {
   cors: {
     origin: process.env.CLIENT_URL || "http://localhost:3000",
@@ -91,13 +83,39 @@ const io = new SocketIOServer(server, {
   connectTimeout: parseInt(process.env.WS_CONNECT_TIMEOUT || "60000"), // Use environment variable or default to 60 seconds
   maxHttpBufferSize: 1e8, // 100MB max buffer size for larger audio chunks
   transports: ["websocket", "polling"], // Prefer WebSocket, fallback to polling
+  // Configure Socket.IO to avoid interfering with Twilio Media Streams
+  allowEIO3: true, // Allow Engine.IO v3 clients
+  serveClient: false, // Don't serve the client files
 });
 
-// WebSocket handlers setup removed
+// Initialize WebSocket server for Twilio Media Streams
+// This must be initialized AFTER Socket.IO to ensure proper upgrade handling
+const twilioWSServer = initializeTwilioWebSocketServer(server);
+const twilioWss = twilioWSServer.getWss();
+bootstrapLogger.info(
+  "Twilio WebSocket server initialized for robust framing"
+);
 
 // Initialize Deepgram WebSocket server (after Twilio WebSocket server)
-setupDeepgramWebSocketServer(server);
+const deepgramWss = setupDeepgramWebSocketServer(server);
 bootstrapLogger.info("Deepgram WebSocket server initialized");
+
+// Centralized WebSocket upgrade handling
+server.on('upgrade', (request, socket, head) => {
+  const pathname = request.url || '/';
+
+  if (pathname.startsWith('/voice/stream')) {
+    twilioWss.handleUpgrade(request, socket, head, (ws) => {
+      twilioWss.emit('connection', ws, request);
+    });
+  } else if (pathname.startsWith('/api/deepgram/ws')) {
+    deepgramWss.handleUpgrade(request, socket, head, (ws) => {
+      deepgramWss.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
 
 // Enhanced middleware setup for production
 const corsOrigin =
@@ -942,14 +960,16 @@ const startServer = async () => {
     initCloudinary();
 
     // Test Cloudinary connection
-    const cloudinaryService = await import("./utils/cloudinaryService").then(
+    const cloudinaryService = import("./utils/cloudinaryService").then(
       (m) => m.default
     );
-    const cloudinaryWorks = await cloudinaryService.testCloudinaryConnection();
-    runtimeLogger.info(
-      `Cloudinary connection test result: ${cloudinaryWorks ? "SUCCESS" : "FAILED"
-      }`
-    );
+    cloudinaryService.then(service => {
+      service.testCloudinaryConnection().then(cloudinaryWorks => {
+        runtimeLogger.info(
+          `Cloudinary connection test result: ${cloudinaryWorks ? "SUCCESS" : "FAILED"}`
+        );
+      });
+    });
 
     // Initialize services that load configuration from database
     await initializeServices();

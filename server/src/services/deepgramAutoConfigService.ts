@@ -93,9 +93,27 @@ export class DeepgramAutoConfigService {
         throw new Error('Failed to initialize model compatibility service');
       }
 
-      // Get account capabilities
-      logger.info('Detecting account capabilities...');
-      const capabilities = await this.modelCompatibilityService.getAccountCapabilities(deepgramConfig.apiKey);
+      let capabilities: AccountCapabilities;
+      if (deepgramConfig.availableModels && deepgramConfig.availableModels.length > 0) {
+        logger.info('Using available models from configuration.');
+        capabilities = {
+            tier: deepgramConfig.accountTier || 'free',
+            availableModels: deepgramConfig.availableModels,
+            features: {
+                realtime: true,
+                batch: true,
+                streaming: true,
+            },
+            limits: {
+                requestsPerMinute: 100,
+                hoursPerMonth: 100,
+            }
+        };
+      } else {
+        // Get account capabilities
+        logger.info('Detecting account capabilities...');
+        capabilities = await this.modelCompatibilityService.getAccountCapabilities(deepgramConfig.apiKey);
+      }
       
       if (capabilities.availableModels.length === 0) {
         throw new Error('No compatible models found for this account');

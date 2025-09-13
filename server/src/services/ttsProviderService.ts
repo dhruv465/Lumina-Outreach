@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
+import { getVoiceAIService } from '.';
 import { getDeepgramTTSService, DeepgramTTSService } from './deepgramTTSService';
 import { EnhancedVoiceAIService } from './enhancedVoiceAIService';
 import { ttsMetrics } from '../monitoring/ttsMetrics';
@@ -62,7 +63,8 @@ export class TTSProviderService {
       this.configuration = await Configuration.findOne();
       
       if (this.configuration?.elevenLabsConfig?.apiKey) {
-        this.elevenLabsService = new EnhancedVoiceAIService(
+        this.elevenLabsService = getVoiceAIService();
+        this.elevenLabsService.updateApiKey(
           this.configuration.elevenLabsConfig.apiKey
         );
       }

@@ -1,5 +1,6 @@
 import logger from './logger';
 import { getErrorMessage } from './logger';
+import { getVoiceAIService } from '../services';
 import { EnhancedVoiceAIService } from '../services/enhancedVoiceAIService';
 import { TTSProviderService } from '../services/ttsProviderService';
 
@@ -15,7 +16,9 @@ export async function getTTSService(configuration: any): Promise<any> {
     switch (selectedProvider) {
       case 'elevenlabs':
         if (configuration?.elevenLabsConfig?.apiKey) {
-          return new EnhancedVoiceAIService(configuration.elevenLabsConfig.apiKey);
+          const voiceAI = getVoiceAIService();
+          voiceAI.updateApiKey(configuration.elevenLabsConfig.apiKey);
+          return voiceAI;
         } else {
           logger.warn('ElevenLabs selected as TTS provider but no API key available');
           return null;

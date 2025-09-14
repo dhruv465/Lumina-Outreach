@@ -1095,6 +1095,7 @@ export class DeepgramService extends EventEmitter {
    */
   public async validateApiKey(): Promise<boolean> {
     try {
+      logger.debug(`Deepgram API key being validated (masked): ${this.apiKey.substring(0, 5)}...${this.apiKey.substring(this.apiKey.length - 5)}`);
       // Use model compatibility service to validate and find compatible models
       const compatibleModels = await this.modelCompatibilityService.getCompatibleModels(this.apiKey);
       

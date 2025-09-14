@@ -12,7 +12,7 @@ import {
   SkipForward,
 } from "lucide-react";
 import WaveSurfer from "wavesurfer.js";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import {
   DropdownMenu,

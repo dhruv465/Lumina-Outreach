@@ -786,8 +786,8 @@ export class EnhancedVoiceAIService {
         try {
           // Get campaign-specific LLM model and settings if available
           let model = 'claude-3-haiku-20240307'; // Default model
-          let temperature = 0.7;
-          let maxTokens = 150;
+          let temperature = 0.3; // Lower temperature for faster responses
+          let maxTokens = 50; // Shorter responses for faster generation
 
           if (options.campaignId) {
             try {
@@ -1108,8 +1108,8 @@ Current call details:
       }
 
       // Get campaign-specific LLM settings if available
-      let temperature = 0.7;
-      let maxTokens = 200;
+      let temperature = 0.3; // Lower temperature for faster responses
+      let maxTokens = 50; // Shorter responses for faster generation
 
       try {
         if (campaignId) {

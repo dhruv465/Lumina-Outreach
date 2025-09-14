@@ -13,9 +13,9 @@ export class AudioStreamingService {
   private app: express.Application;
   private server: any;
   private streamManager: AudioStreamManager;
-  private readonly bufferSize: number = 4096; // Default buffer size (can be optimized)
-  private readonly maxBufferCount: number = 3; // Max number of buffers to queue
-  private readonly keepAliveInterval: number = 15000; // 15 seconds (like Deepgram Voice Agent)
+  private readonly bufferSize: number = 1024; // Optimized buffer size for ultra-low latency
+  private readonly maxBufferCount: number = 2; // Reduced buffer count for faster processing
+  private readonly keepAliveInterval: number = 5000; // 5 seconds for faster detection
   private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(port: number = 3002) {
@@ -61,7 +61,7 @@ export class AudioStreamingService {
         streamId, 
         bufferSize: this.bufferSize,
         channels: 1,
-        sampleRate: 16000,
+        sampleRate: 16000, // 16kHz for faster processing
         keepAliveInterval: this.keepAliveInterval
       });
 

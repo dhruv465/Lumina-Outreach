@@ -765,7 +765,6 @@ const initializeServices = async () => {
 
     // Campaign service
     const campaignService = new CampaignService(
-      elevenLabsApiKey,
       openAIApiKey,
       anthropicApiKey,
       googleSpeechApiKey,

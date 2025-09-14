@@ -85,12 +85,12 @@ export class TwilioWebSocketServer {
   // Optional feature flag to allow bi-directional outbound audio
   private readonly enableBidi: boolean = process.env.ENABLE_TWILIO_BIDI === 'true';
 
-  // Constants for intervals and sizes - optimized for connection stability
-  private readonly KEEP_ALIVE_INTERVAL = 10000; // 10 seconds (reduced for better persistence)
-  private readonly CONNECTION_HEALTH_CHECK_INTERVAL = 20000; // 20 seconds (more frequent monitoring)
-  private readonly AUDIO_CHUNK_SIZE = 8192; // 8KB chunks
-  private readonly PING_TIMEOUT = 5000; // 5 seconds timeout for ping responses
-  private readonly CONNECTION_TIMEOUT = 15000; // 15 seconds for initial connection timeout
+  // Constants for intervals and sizes - optimized for ultra-low latency
+  private readonly KEEP_ALIVE_INTERVAL = 5000; // 5 seconds for faster detection
+  private readonly CONNECTION_HEALTH_CHECK_INTERVAL = 10000; // 10 seconds for frequent monitoring
+  private readonly AUDIO_CHUNK_SIZE = 1024; // 1KB chunks for faster processing
+  private readonly PING_TIMEOUT = 2000; // 2 seconds timeout for ping responses
+  private readonly CONNECTION_TIMEOUT = 10000; // 10 seconds for initial connection timeout
 
   // For Twilio Media Streams, outbound audio must be 8kHz PCMU (µ-law), ~20ms frames (160 samples)
   public static readonly OUTBOUND_SAMPLES_PER_FRAME = 160;
@@ -107,7 +107,7 @@ export class TwilioWebSocketServer {
       clientTracking: true,
       // Add protocol compliance settings
       skipUTF8Validation: false, // Ensure proper UTF-8 validation
-      handshakeTimeout: 30000, // 30 seconds for handshake timeout
+      // handshakeTimeout: 30000, // 30 seconds for handshake timeout - not supported in this version
     });
 
     // Simplified upgrade handler matching minimal server approach

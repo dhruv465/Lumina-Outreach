@@ -1027,24 +1027,22 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
                   const audioChunk = Buffer.from(payload, 'base64');
                   audioBuffer.push(audioChunk);
 
-                  // Process accumulated audio when we have enough data (every ~1 second of audio)
+                  // Process accumulated audio when we have enough data (ultra-low latency)
                   const totalBufferSize = audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
-                  if (totalBufferSize >= 8192 && !isProcessingAudio) { // 8KB threshold
+                  if (totalBufferSize >= 1024 && !isProcessingAudio) { // 1KB threshold for faster processing
                         isProcessingAudio = true;
                         const completeAudio = Buffer.concat(audioBuffer);
                         audioBuffer = []; // Reset buffer
 
                         try {
-                              // Process the audio asynchronously to avoid blocking the WebSocket
-                              setImmediate(async () => {
-                                    try {
-                                          await processAudioChunk(completeAudio, callId!, conversationId!, sendAudioToTwilio);
-                                    } catch (error) {
+                              // Process audio immediately without setImmediate for lower latency
+                              processAudioChunk(completeAudio, callId!, conversationId!, sendAudioToTwilio)
+                                    .catch(error => {
                                           logger.error(`Error processing audio for call ${callId}:`, error);
-                                    } finally {
+                                    })
+                                    .finally(() => {
                                           isProcessingAudio = false;
-                                    }
-                              });
+                                    });
                         } catch (error) {
                               logger.error(`Error setting up audio processing for call ${callId}:`, error);
                               isProcessingAudio = false;

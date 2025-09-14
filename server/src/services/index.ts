@@ -210,6 +210,14 @@ export {
   advancedCampaignService
 };
 
+// Export optimized latency services
+export { optimizedRealTimeAudioPipeline } from './optimizedRealTimeAudioPipeline';
+export { ultraLowLatencyAudioPipeline } from './ultraLowLatencyAudioPipeline';
+export { enhancedBargeInDetectionService } from './enhancedBargeInDetectionService';
+export { realTimeCallStateMachine } from './realTimeCallStateMachine';
+export { latencyMonitoringService } from './latencyMonitoringService';
+export { connectionPoolService } from './connectionPoolService';
+
 // Export initialization function for post-database services
 export const initializeServicesAfterDB = async () => {
   try {

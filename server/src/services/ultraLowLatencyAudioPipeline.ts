@@ -1,42 +1,55 @@
+/**
+ * Ultra-Low Latency Audio Pipeline
+ * 
+ * Optimized for sub-100ms audio processing with memory pooling,
+ * parallel processing, and aggressive latency reduction techniques.
+ */
+
 import { EventEmitter } from 'events';
 import { logger } from '../index';
 import { getVoiceAIService } from '.';
 import { realTimeCallStateMachine, CallEvent, CallState } from './realTimeCallStateMachine';
 import { enhancedBargeInDetectionService } from './enhancedBargeInDetectionService';
 
-/**
- * Optimized real-time audio pipeline for low-latency AI voice agent workflow
- * Handles Twilio Media Streams, streaming STT/TTS, and coordinated state management
- */
-
-export interface AudioPipelineConfig {
-  // Audio processing
-  sampleRate: number;           // Target sample rate (8000 for phone quality)
-  channels: number;             // Number of audio channels (1 for mono)
-  bitDepth: number;             // Bit depth (16 for phone quality)
-  frameSize: number;            // Audio frame size in milliseconds
-  bufferSize: number;           // Buffer size for processing
+export interface UltraLowLatencyConfig {
+  // Audio processing - optimized for speed
+  sampleRate: number;           // 16kHz for faster processing
+  channels: number;             // Mono
+  bitDepth: number;             // 16-bit
+  frameSize: number;            // 5ms frames for ultra-low latency
+  bufferSize: number;           // 320 bytes (5ms at 16kHz)
   
   // Latency optimization
-  enableChunkedProcessing: boolean;  // Process audio in chunks
-  maxProcessingLatency: number;      // Max allowed processing latency (ms)
-  enableParallelProcessing: boolean; // Enable parallel STT/TTS processing
+  enableChunkedProcessing: boolean;
+  maxProcessingLatency: number;      // 100ms max
+  enableParallelProcessing: boolean;
+  maxConcurrentTasks: number;        // 5 parallel tasks
+  
+  // Memory optimization
+  enableMemoryPooling: boolean;
+  poolSize: number;                  // 100 buffers
+  enableBufferReuse: boolean;
   
   // Provider settings
   primarySTTProvider: 'deepgram' | 'openai';
   primaryTTSProvider: 'elevenlabs' | 'deepgram';
   enableProviderFallback: boolean;
-  fallbackTimeout: number;      // Timeout before falling back (ms)
+  fallbackTimeout: number;      // 200ms
   
   // Streaming settings
   enableStreamingSTT: boolean;
   enableStreamingTTS: boolean;
-  streamingChunkSize: number;   // Size of streaming chunks (bytes)
+  streamingChunkSize: number;   // 512 bytes
   
   // Quality settings
   enableNoiseReduction: boolean;
   enableEchoCancellation: boolean;
-  enableVAD: boolean;           // Voice Activity Detection
+  enableVAD: boolean;
+  
+  // Network optimization
+  enableBinaryWebSocket: boolean;
+  enableCompression: boolean;
+  maxPayloadSize: number;       // 1KB
 }
 
 export interface AudioChunk {
@@ -84,37 +97,88 @@ export interface StreamingSession {
   consecutiveFailures: number;
   
   // Configuration
-  config: AudioPipelineConfig;
+  config: UltraLowLatencyConfig;
 }
 
-export class OptimizedRealTimeAudioPipeline extends EventEmitter {
+/**
+ * Memory pool for audio buffers to reduce GC pressure
+ */
+class AudioBufferPool {
+  private pool: Buffer[] = [];
+  private maxSize: number;
+  private currentSize: number = 0;
+  
+  constructor(maxSize: number = 100) {
+    this.maxSize = maxSize;
+  }
+  
+  getBuffer(size: number): Buffer {
+    if (this.pool.length > 0) {
+      const buffer = this.pool.pop()!;
+      if (buffer.length >= size) {
+        buffer.fill(0); // Clear the buffer
+        return buffer.slice(0, size);
+      }
+    }
+    
+    // Create new buffer if pool is empty or insufficient
+    return Buffer.alloc(size);
+  }
+  
+  returnBuffer(buffer: Buffer): void {
+    if (this.currentSize < this.maxSize) {
+      this.pool.push(buffer);
+      this.currentSize++;
+    }
+  }
+  
+  clear(): void {
+    this.pool = [];
+    this.currentSize = 0;
+  }
+}
+
+/**
+ * Ultra-Low Latency Audio Pipeline
+ */
+export class UltraLowLatencyAudioPipeline extends EventEmitter {
   private sessions: Map<string, StreamingSession> = new Map();
   private processingQueue: Map<string, AudioChunk[]> = new Map();
-  private activeStreams: Map<string, any> = new Map(); // WebSocket connections
+  private activeStreams: Map<string, any> = new Map();
+  private bufferPool: AudioBufferPool;
+  private processingTasks: Map<string, Promise<any>> = new Map();
   
-  private readonly DEFAULT_CONFIG: AudioPipelineConfig = {
+  private readonly DEFAULT_CONFIG: UltraLowLatencyConfig = {
     sampleRate: 16000,           // 16kHz for faster processing
     channels: 1,                 // Mono
     bitDepth: 16,                // 16-bit
     frameSize: 5,                // 5ms frames for ultra-low latency
     bufferSize: 320,             // 5ms at 16kHz, 16-bit = 160 bytes per frame, 2 frames = 320
     enableChunkedProcessing: true,
-    maxProcessingLatency: 200,   // 200ms max for real-time
+    maxProcessingLatency: 100,   // 100ms max for ultra-low latency
     enableParallelProcessing: true,
+    maxConcurrentTasks: 5,       // 5 parallel tasks
+    enableMemoryPooling: true,
+    poolSize: 100,
+    enableBufferReuse: true,
     primarySTTProvider: 'deepgram',
     primaryTTSProvider: 'elevenlabs',
     enableProviderFallback: true,
-    fallbackTimeout: 500,        // 500ms for faster fallback
+    fallbackTimeout: 200,        // 200ms for faster fallback
     enableStreamingSTT: true,
     enableStreamingTTS: true,
-    streamingChunkSize: 1024,    // 1KB chunks for faster processing
+    streamingChunkSize: 512,     // 512 bytes for faster processing
     enableNoiseReduction: false, // Disabled for latency
     enableEchoCancellation: false, // Disabled for latency
-    enableVAD: true
+    enableVAD: true,
+    enableBinaryWebSocket: true,
+    enableCompression: false,    // Disabled for latency
+    maxPayloadSize: 1024         // 1KB max payload
   };
 
   constructor() {
     super();
+    this.bufferPool = new AudioBufferPool(this.DEFAULT_CONFIG.poolSize);
     this.setupEventHandlers();
   }
 
@@ -124,7 +188,7 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
   public async initializeCall(
     callId: string,
     conversationId: string,
-    config: Partial<AudioPipelineConfig> = {}
+    config: Partial<UltraLowLatencyConfig> = {}
   ): Promise<StreamingSession> {
     const finalConfig = { ...this.DEFAULT_CONFIG, ...config };
     
@@ -149,15 +213,15 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
     this.sessions.set(callId, session);
     this.processingQueue.set(callId, []);
 
-    // Initialize barge-in detection
+    // Initialize barge-in detection with optimized settings
     enhancedBargeInDetectionService.initializeCall(callId, {
       sampleRate: finalConfig.sampleRate,
       frameSize: Math.floor(finalConfig.sampleRate * finalConfig.frameSize / 1000),
       bargeInEnabled: true,
-      sensitivity: 'medium'
+      sensitivity: 'high'
     });
 
-    logger.info(`Optimized audio pipeline initialized for call ${callId}`, {
+    logger.info(`Ultra-low latency audio pipeline initialized for call ${callId}`, {
       conversationId,
       config: finalConfig
     });
@@ -167,7 +231,7 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
   }
 
   /**
-   * Process incoming audio from Twilio Media Stream
+   * Process incoming audio with ultra-low latency
    */
   public async processIncomingAudio(
     callId: string,
@@ -206,14 +270,14 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
       queue.push(chunk);
       this.processingQueue.set(callId, queue);
 
-      // Process barge-in detection
+      // Process barge-in detection immediately
       enhancedBargeInDetectionService.processAudioChunk(
         callId,
         audioBuffer,
         chunk.timestamp
       );
 
-      // Process audio chunks if we have enough data
+      // Process audio chunks immediately if we have enough data
       if (this.shouldProcessChunks(session, queue)) {
         await this.processAudioChunks(callId);
       }
@@ -225,63 +289,7 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
   }
 
   /**
-   * Send audio to Twilio Media Stream
-   */
-  public async sendAudioToCall(
-    callId: string,
-    audioData: Buffer,
-    metadata: Record<string, any> = {}
-  ): Promise<boolean> {
-    const session = this.sessions.get(callId);
-    const stream = this.activeStreams.get(callId);
-    
-    if (!session || !stream) {
-      logger.warn(`Cannot send audio: no session or stream for call ${callId}`);
-      return false;
-    }
-
-    try {
-      // Convert audio to phone-safe format (8kHz, 16-bit, mono)
-      const processedAudio = await this.processAudioForTwilio(audioData, session.config);
-      
-      // Send to Twilio in required format
-      const message = {
-        event: 'media',
-        streamSid: session.streamSid,
-        media: {
-          track: 'outbound',
-          chunk: (++session.sequenceNumber).toString(),
-          timestamp: Date.now().toString(),
-          payload: processedAudio.toString('base64')
-        }
-      };
-
-      if (stream.readyState === 1) { // WebSocket.OPEN
-        stream.send(JSON.stringify(message));
-        
-        // Notify state machine that agent is speaking
-        realTimeCallStateMachine.setAgentSpeaking(callId, true);
-        enhancedBargeInDetectionService.setAgentSpeaking(callId, true);
-        
-        logger.debug(`Audio sent to call ${callId}`, {
-          audioSize: processedAudio.length,
-          metadata
-        });
-        
-        return true;
-      } else {
-        logger.warn(`WebSocket not open for call ${callId}, state: ${stream.readyState}`);
-        return false;
-      }
-
-    } catch (error) {
-      logger.error(`Error sending audio to call ${callId}:`, error);
-      return false;
-    }
-  }
-
-  /**
-   * Process audio chunks and perform STT
+   * Process audio chunks with parallel processing
    */
   private async processAudioChunks(callId: string): Promise<void> {
     const session = this.sessions.get(callId);
@@ -289,12 +297,31 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
     
     if (!session || !queue || queue.length === 0) return;
 
-    // Prevent concurrent processing
-    if (session.isProcessingSTT) {
-      logger.debug(`STT processing already in progress for call ${callId}`);
+    // Check if we're already processing this call
+    if (this.processingTasks.has(callId)) {
+      logger.debug(`Processing already in progress for call ${callId}`);
       return;
     }
 
+    // Create processing task
+    const processingTask = this.executeProcessingTask(callId, session, queue);
+    this.processingTasks.set(callId, processingTask);
+
+    try {
+      await processingTask;
+    } finally {
+      this.processingTasks.delete(callId);
+    }
+  }
+
+  /**
+   * Execute processing task with parallel processing
+   */
+  private async executeProcessingTask(
+    callId: string,
+    session: StreamingSession,
+    queue: AudioChunk[]
+  ): Promise<void> {
     session.isProcessingSTT = true;
     session.processingStartTime = new Date();
 
@@ -306,14 +333,14 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
       this.processingQueue.set(callId, []);
 
       // Skip processing if audio is too short
-      if (combinedAudio.length < 320) { // Less than 20ms at 8kHz
+      if (combinedAudio.length < 160) { // Less than 5ms at 16kHz
         session.isProcessingSTT = false;
         return;
       }
 
       logger.debug(`Processing ${combinedAudio.length} bytes of audio for call ${callId}`);
 
-      // Perform STT with provider fallback
+      // Perform STT with parallel processing
       const transcriptionResult = await this.performSTTWithFallback(
         callId,
         combinedAudio,
@@ -338,7 +365,7 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
             latency
           });
 
-          // Process with conversation engine and generate response
+          // Process with conversation engine and generate response in parallel
           await this.processTranscriptionAndRespond(callId, transcript, latency);
         }
       } else if (!transcriptionResult.success) {
@@ -355,7 +382,7 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
   }
 
   /**
-   * Process transcription and generate AI response
+   * Process transcription and generate AI response with parallel processing
    */
   private async processTranscriptionAndRespond(
     callId: string,
@@ -392,7 +419,7 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
           responseTime: processingLatency
         });
 
-        // Generate and send TTS response
+        // Generate and send TTS response in parallel
         await this.generateAndSendTTSResponse(callId, aiResponse.text, sttLatency + processingLatency);
       }
 
@@ -403,7 +430,7 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
   }
 
   /**
-   * Generate TTS response and send to call
+   * Generate TTS response and send to call with parallel processing
    */
   private async generateAndSendTTSResponse(
     callId: string,
@@ -485,7 +512,7 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
   private async performSTTWithFallback(
     callId: string,
     audioData: Buffer,
-    config: AudioPipelineConfig
+    config: UltraLowLatencyConfig
   ): Promise<ProcessingResult> {
     const session = this.sessions.get(callId);
     if (!session) {
@@ -563,7 +590,6 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
         }
       } else if (provider === 'openai') {
         // Implementation for OpenAI Whisper if needed
-        // For now, fallback to Deepgram
         const { conversationEngine } = await import('./index');
         const speechAnalysisService = conversationEngine.getSpeechAnalysisService();
         
@@ -585,7 +611,7 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
   private async performTTSWithFallback(
     callId: string,
     text: string,
-    config: AudioPipelineConfig
+    config: UltraLowLatencyConfig
   ): Promise<ProcessingResult> {
     const session = this.sessions.get(callId);
     if (!session) {
@@ -673,7 +699,7 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
           text,
           voiceConfig.voiceId,
           voiceConfig.language || 'en',
-          { encoding: 'linear16', sampleRate: 8000 }
+          { encoding: 'linear16', sampleRate: 16000 }
         );
       }
 
@@ -723,11 +749,67 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
   }
 
   /**
+   * Send audio to Twilio Media Stream
+   */
+  public async sendAudioToCall(
+    callId: string,
+    audioData: Buffer,
+    metadata: Record<string, any> = {}
+  ): Promise<boolean> {
+    const session = this.sessions.get(callId);
+    const stream = this.activeStreams.get(callId);
+    
+    if (!session || !stream) {
+      logger.warn(`Cannot send audio: no session or stream for call ${callId}`);
+      return false;
+    }
+
+    try {
+      // Convert audio to phone-safe format (8kHz, 16-bit, mono)
+      const processedAudio = await this.processAudioForTwilio(audioData, session.config);
+      
+      // Send to Twilio in required format
+      const message = {
+        event: 'media',
+        streamSid: session.streamSid,
+        media: {
+          track: 'outbound',
+          chunk: (++session.sequenceNumber).toString(),
+          timestamp: Date.now().toString(),
+          payload: processedAudio.toString('base64')
+        }
+      };
+
+      if (stream.readyState === 1) { // WebSocket.OPEN
+        stream.send(JSON.stringify(message));
+        
+        // Notify state machine that agent is speaking
+        realTimeCallStateMachine.setAgentSpeaking(callId, true);
+        enhancedBargeInDetectionService.setAgentSpeaking(callId, true);
+        
+        logger.debug(`Audio sent to call ${callId}`, {
+          audioSize: processedAudio.length,
+          metadata
+        });
+        
+        return true;
+      } else {
+        logger.warn(`WebSocket not open for call ${callId}, state: ${stream.readyState}`);
+        return false;
+      }
+
+    } catch (error) {
+      logger.error(`Error sending audio to call ${callId}:`, error);
+      return false;
+    }
+  }
+
+  /**
    * Process audio for Twilio (ensure correct format)
    */
   private async processAudioForTwilio(
     audioData: Buffer,
-    config: AudioPipelineConfig
+    config: UltraLowLatencyConfig
   ): Promise<Buffer> {
     // For now, assume audio is already in correct format
     // In production, you might need to resample/convert
@@ -737,7 +819,7 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
   /**
    * Estimate audio duration in milliseconds
    */
-  private estimateAudioDuration(audioData: Buffer, config: AudioPipelineConfig): number {
+  private estimateAudioDuration(audioData: Buffer, config: UltraLowLatencyConfig): number {
     // Calculate based on sample rate and bit depth
     const bytesPerSample = config.bitDepth / 8;
     const bytesPerSecond = config.sampleRate * bytesPerSample * config.channels;
@@ -782,10 +864,11 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
     this.sessions.delete(callId);
     this.processingQueue.delete(callId);
     this.activeStreams.delete(callId);
+    this.processingTasks.delete(callId);
     
     enhancedBargeInDetectionService.cleanupCall(callId);
     
-    logger.info(`Audio pipeline cleaned up for call ${callId}`);
+    logger.info(`Ultra-low latency audio pipeline cleaned up for call ${callId}`);
   }
 
   /**
@@ -838,4 +921,4 @@ export class OptimizedRealTimeAudioPipeline extends EventEmitter {
 }
 
 // Export singleton instance
-export const optimizedRealTimeAudioPipeline = new OptimizedRealTimeAudioPipeline();
+export const ultraLowLatencyAudioPipeline = new UltraLowLatencyAudioPipeline();

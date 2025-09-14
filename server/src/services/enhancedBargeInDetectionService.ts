@@ -66,15 +66,15 @@ export class EnhancedBargeInDetectionService extends EventEmitter {
   private readonly DEFAULT_CONFIG: BargeInConfig = {
     energyThreshold: 0.01,
     silenceThreshold: 0.005,
-    minSpeechDuration: 300,  // 300ms
-    maxSilenceDuration: 1000, // 1 second
+    minSpeechDuration: 100,   // 100ms for faster detection
+    maxSilenceDuration: 500,  // 500ms for faster response
     bargeInEnabled: true,
-    bargeInGracePeriod: 500,  // 500ms grace period
-    maxBargeInPerMinute: 5,
-    sampleRate: 8000,         // 8kHz for phone audio
-    frameSize: 160,           // 20ms at 8kHz
-    bufferSize: 8192,
-    sensitivity: 'medium'
+    bargeInGracePeriod: 200,  // 200ms grace period for ultra-low latency
+    maxBargeInPerMinute: 10,  // Increased for more responsive detection
+    sampleRate: 16000,        // 16kHz for faster processing
+    frameSize: 80,            // 5ms at 16kHz
+    bufferSize: 1024,         // 1KB for faster processing
+    sensitivity: 'high'       // High sensitivity for faster detection
   };
 
   constructor() {

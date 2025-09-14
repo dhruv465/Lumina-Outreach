@@ -36,9 +36,10 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import CampaignForm from '@/components/campaigns/CampaignForm';
-import { Skeleton } from "@/components/ui/Skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // Types
+
 interface Campaign {
   _id: string;
   name: string;

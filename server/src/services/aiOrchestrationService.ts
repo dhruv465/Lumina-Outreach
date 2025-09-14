@@ -129,14 +129,14 @@ export class AIOrchestrationService extends EventEmitter {
   constructor(options: AIServiceOptions = {}) {
     super();
     
-    // Set default options
+    // Set default options optimized for ultra-low latency
     this.options = {
       cacheEnabled: true,
-      cacheTTL: 60 * 60, // 1 hour
-      defaultTimeout: 30000, // 30 seconds
-      retryAttempts: 2,
+      cacheTTL: 5 * 60, // 5 minutes for faster cache refresh
+      defaultTimeout: 5000, // 5 seconds for real-time processing
+      retryAttempts: 1, // Reduced retries for faster failure handling
       recordUsage: true,
-      useStreamingByDefault: false,
+      useStreamingByDefault: true, // Enable streaming by default
       ...options
     };
     
@@ -271,11 +271,11 @@ export class AIOrchestrationService extends EventEmitter {
         })).filter((p: any) => p.isEnabled && p.apiKey),
         defaultProvider: (config.llmConfig.defaultProvider?.toLowerCase() || 'openai') as LLMProvider,
         defaultModel: config.llmConfig.defaultModel,
-        timeoutMs: 30000,
+        timeoutMs: 5000, // 5 seconds for real-time processing
         retryConfig: {
-          maxRetries: this.options.retryAttempts || 2,
-          initialDelayMs: 1000,
-          maxDelayMs: 5000
+          maxRetries: this.options.retryAttempts || 1,
+          initialDelayMs: 200, // Faster initial retry
+          maxDelayMs: 1000 // Reduced max delay
         }
       };
       
@@ -1245,8 +1245,8 @@ export class AIOrchestrationService extends EventEmitter {
           }
         ],
         options: {
-          temperature: 0.2,
-          maxTokens: 150
+          temperature: 0.1, // Lower temperature for faster, more deterministic responses
+          maxTokens: 50 // Shorter responses for faster generation
         }
       });
       

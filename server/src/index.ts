@@ -59,12 +59,6 @@ dotenv.config();
 // Use phase-based logging for bootstrap phase
 const bootstrapLogger = phaseLogger("BOOTSTRAP");
 
-// Create logs directory if it doesn't exist
-import fs from "fs";
-if (!fs.existsSync("logs")) {
-  fs.mkdirSync("logs", { recursive: true });
-}
-
 // Initialize express app
 const app = express();
 const server = http.createServer(app);
@@ -92,25 +86,23 @@ const io = new SocketIOServer(server, {
 // This must be initialized AFTER Socket.IO to ensure proper upgrade handling
 const twilioWSServer = initializeTwilioWebSocketServer(server);
 const twilioWss = twilioWSServer.getWss();
-bootstrapLogger.info(
-  "Twilio WebSocket server initialized for robust framing"
-);
+bootstrapLogger.info("Twilio WebSocket server initialized for robust framing");
 
 // Initialize Deepgram WebSocket server (after Twilio WebSocket server)
 const deepgramWss = setupDeepgramWebSocketServer(server);
 bootstrapLogger.info("Deepgram WebSocket server initialized");
 
 // Centralized WebSocket upgrade handling
-server.on('upgrade', (request, socket, head) => {
-  const pathname = request.url || '/';
+server.on("upgrade", (request, socket, head) => {
+  const pathname = request.url || "/";
 
-  if (pathname.startsWith('/voice/stream')) {
+  if (pathname.startsWith("/voice/stream")) {
     twilioWss.handleUpgrade(request, socket, head, (ws) => {
-      twilioWss.emit('connection', ws, request);
+      twilioWss.emit("connection", ws, request);
     });
-  } else if (pathname.startsWith('/api/deepgram/ws')) {
+  } else if (pathname.startsWith("/api/deepgram/ws")) {
     deepgramWss.handleUpgrade(request, socket, head, (ws) => {
-      deepgramWss.emit('connection', ws, request);
+      deepgramWss.emit("connection", ws, request);
     });
   } else {
     socket.destroy();
@@ -374,7 +366,6 @@ if (process.env.NODE_ENV !== "production") {
 
 // Add optimized stream route
 
-
 // WebSocket routes
 app.use("/", streamRoutes);
 
@@ -504,8 +495,8 @@ const initializeServices = async () => {
       deepgramApiKey = config.deepgramConfig?.apiKey || "";
       logger.info(
         "Deepgram API key " +
-        (deepgramApiKey ? "found" : "not found") +
-        " in database configuration"
+          (deepgramApiKey ? "found" : "not found") +
+          " in database configuration"
       );
 
       // Initialize and validate Deepgram auto-configuration with graceful startup
@@ -754,6 +745,11 @@ const initializeServices = async () => {
             isEnabled: true,
           },
           {
+            name: "google",
+            apiKey: googleSpeechApiKey,
+            isEnabled: true,
+          },
+          {
             name: "anthropic",
             apiKey: anthropicApiKey,
             isEnabled: true,
@@ -773,23 +769,36 @@ const initializeServices = async () => {
 
     // Initialize RealTelephonyService with configuration
     try {
-      const { initializeTelephonyService } = require("./services/realTelephonyService");
+      const {
+        initializeTelephonyService,
+      } = require("./services/realTelephonyService");
 
       // Get Twilio configuration from database or environment
-      const twilioAccountSid = config?.twilioConfig?.accountSid || process.env.TWILIO_ACCOUNT_SID || '';
-      const twilioAuthToken = config?.twilioConfig?.authToken || process.env.TWILIO_AUTH_TOKEN || '';
-      const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || process.env.API_BASE_URL || 'http://localhost:8000';
+      const twilioAccountSid =
+        config?.twilioConfig?.accountSid ||
+        process.env.TWILIO_ACCOUNT_SID ||
+        "";
+      const twilioAuthToken =
+        config?.twilioConfig?.authToken || process.env.TWILIO_AUTH_TOKEN || "";
+      const webhookBaseUrl =
+        process.env.WEBHOOK_BASE_URL ||
+        process.env.API_BASE_URL ||
+        "http://localhost:8000";
 
       if (twilioAccountSid && twilioAuthToken) {
         initializeTelephonyService({
           accountSid: twilioAccountSid,
           authToken: twilioAuthToken,
-          webhookBaseUrl: webhookBaseUrl
+          webhookBaseUrl: webhookBaseUrl,
         });
         logger.info("Real telephony service initialized successfully");
       } else {
-        logger.warn("Twilio credentials not found - telephony service will be unavailable");
-        logger.info("To enable telephony features, configure Twilio credentials in the Configuration page");
+        logger.warn(
+          "Twilio credentials not found - telephony service will be unavailable"
+        );
+        logger.info(
+          "To enable telephony features, configure Twilio credentials in the Configuration page"
+        );
       }
     } catch (error) {
       logger.error("Failed to initialize telephony service:", error);
@@ -962,10 +971,12 @@ const startServer = async () => {
     const cloudinaryService = import("./utils/cloudinaryService").then(
       (m) => m.default
     );
-    cloudinaryService.then(service => {
-      service.testCloudinaryConnection().then(cloudinaryWorks => {
+    cloudinaryService.then((service) => {
+      service.testCloudinaryConnection().then((cloudinaryWorks) => {
         runtimeLogger.info(
-          `Cloudinary connection test result: ${cloudinaryWorks ? "SUCCESS" : "FAILED"}`
+          `Cloudinary connection test result: ${
+            cloudinaryWorks ? "SUCCESS" : "FAILED"
+          }`
         );
       });
     });
@@ -1200,7 +1211,6 @@ const gracefulShutdown = (signal: string) => {
       }
 
       // Clean up enhanced WebSocket connections
-
 
       // Close database connections
       logger.info("Closing database connection...");

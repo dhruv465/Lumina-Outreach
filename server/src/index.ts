@@ -3,6 +3,7 @@ import fastifyCors from "@fastify/cors";
 import fastifyHelmet from "@fastify/helmet";
 import fastifyRateLimit from "@fastify/rate-limit";
 
+import fastifyWebsocket from "@fastify/websocket";
 import http from "http";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
@@ -35,7 +36,7 @@ import userRoutes from "./routes/userRoutes";
 import voiceAIRoutes from "./routes/voiceAIRoutes";
 import healthRoutes from "./routes/healthRoutes";
 import audioStreamingRoutes from "./routes/audioStreamingRoutes";
-import { initializeTwilioWebSocketServer } from "./services/twilioWebSocketServer";
+import { TwilioStreamHandler } from "./services/twilioStreamHandler";
 import { getAIOrchestrationService } from "./services/aiOrchestrationService";
 import { AudioStreamingService } from "./services/audioStreamingService";
 import CampaignService from "./services/campaignService";
@@ -99,31 +100,24 @@ const io = new SocketIOServer(server, {
 // Initialize Audio Streaming Service
 const audioStreamingService = new AudioStreamingService(io);
 
-// Initialize WebSocket server for Twilio Media Streams
-// This must be initialized AFTER Socket.IO to ensure proper upgrade handling
-const twilioWSServer = initializeTwilioWebSocketServer(server);
-const twilioWss = twilioWSServer.getWss();
-bootstrapLogger.info("Twilio WebSocket server initialized for robust framing");
-
-// Initialize Deepgram WebSocket server (after Twilio WebSocket server)
+// Initialize Deepgram WebSocket server (it's a 'ws' server instance)
 const deepgramWss = setupDeepgramWebSocketServer(server);
 bootstrapLogger.info("Deepgram WebSocket server initialized");
 
-// Manually handle WebSocket upgrades
-server.on('upgrade', (request, socket, head) => {
-  const pathname = request.url || '/';
+// Register fastify-websocket plugin
+app.register(fastifyWebsocket);
 
-  if (pathname.startsWith('/voice/stream')) {
-    twilioWss.handleUpgrade(request, socket, head, (ws) => {
-      twilioWss.emit('connection', ws, request);
-    });
-  } else if (pathname.startsWith('/api/deepgram/ws')) {
-    deepgramWss.handleUpgrade(request, socket, head, (ws) => {
-      deepgramWss.emit('connection', ws, request);
-    });
-  }
-  // Socket.IO will handle its own upgrade requests.
-  // If no handler matches, the socket will be destroyed automatically.
+// Setup WebSocket routes
+app.register(async function (fastify) {
+  // Handle Twilio Media Streams
+  fastify.get('/voice/stream/:callId/:conversationId', { websocket: true }, (connection, req) => {
+    new TwilioStreamHandler(connection, req.raw);
+  });
+
+  // Handle Deepgram connections
+  fastify.get('/api/deepgram/ws', { websocket: true }, (connection, req) => {
+    deepgramWss.emit('connection', connection.socket, req.raw);
+  });
 });
 
 // Enhanced middleware setup for production

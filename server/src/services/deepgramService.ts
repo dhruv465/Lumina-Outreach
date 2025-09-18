@@ -109,6 +109,7 @@ export class DeepgramService extends EventEmitter {
   private apiKey: string;
   private client: DeepgramClient;
   private activeConnections: Map<string, any> = new Map();
+  private warnedConnections: Set<string> = new Set();
   private defaultModel: string = 'nova-2';
   private fallbackModels: string[] = ['nova', 'base'];
   private modelCompatibilityService: ModelCompatibilityService;
@@ -1016,8 +1017,12 @@ export class DeepgramService extends EventEmitter {
       // Check if connection is open before sending
       if (connection.isOpen || connection.getReadyState() === 1) { // 1 = OPEN
         connection.send(audioData);
+        this.warnedConnections.delete(connectionId);
       } else {
-        logger.warn(`Deepgram connection ${connectionId} is not open`);
+        if (!this.warnedConnections.has(connectionId)) {
+            logger.warn(`Deepgram connection ${connectionId} is not open`);
+            this.warnedConnections.add(connectionId);
+        }
       }
     } catch (error) {
       logger.error(`Error sending audio to Deepgram: ${getErrorMessage(error)}`);
@@ -1062,6 +1067,7 @@ export class DeepgramService extends EventEmitter {
       
       // Clean up the connection
       this.activeConnections.delete(connectionId);
+      this.warnedConnections.delete(connectionId);
     } catch (error) {
       logger.error(`Error closing Deepgram connection: ${getErrorMessage(error)}`);
       // Still clean up the connection even if closing failed

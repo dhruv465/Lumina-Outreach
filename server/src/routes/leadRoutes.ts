@@ -1,5 +1,4 @@
-import express from 'express';
-import { authenticate } from '../middleware/auth';
+import { FastifyInstance } from 'fastify';
 import { 
   uploadLeads, 
   getLeads, 
@@ -10,23 +9,21 @@ import {
   getLeadAnalytics,
   exportLeads
 } from '../controllers/leadController';
-import { upload } from '../middleware/fileUpload';
 
-const router = express.Router();
+const leadRoutes = async (fastify, opts: Record<string, any>) => {
+  fastify.addHook('onRequest', fastify.authenticate);
 
-// All routes are protected
-router.use(authenticate);
+  // Lead management routes
+  fastify.post('/', uploadLeads);
+  fastify.get('/', getLeads);
+  fastify.get('/analytics', getLeadAnalytics);
+  fastify.get('/export', exportLeads);
+  fastify.get('/:id', getLeadById);
+  fastify.put('/:id', updateLead);
+  fastify.delete('/:id', deleteLead);
 
-// Lead management routes
-router.post('/', uploadLeads);
-router.get('/', getLeads);
-router.get('/analytics', getLeadAnalytics);
-router.get('/export', exportLeads);
-router.get('/:id', getLeadById);
-router.put('/:id', updateLead);
-router.delete('/:id', deleteLead);
+  // CSV import route
+  fastify.post('/import/csv', importLeadsFromCSV);
+};
 
-// CSV import route
-router.post('/import/csv', upload.single('file'), importLeadsFromCSV);
-
-export default router;
+export default leadRoutes;

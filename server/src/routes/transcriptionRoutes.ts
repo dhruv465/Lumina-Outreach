@@ -1,6 +1,4 @@
-import express from 'express';
-import { authenticate } from '../middleware/auth';
-import multer from 'multer';
+import { FastifyInstance } from 'fastify';
 import {
   startTranscription,
   stopTranscription,
@@ -10,27 +8,22 @@ import {
   resetCircuit
 } from '../controllers/deepgramController';
 
-const router = express.Router();
+const transcriptionRoutes = async (fastify, opts: Record<string, any>) => {
+  fastify.addHook('onRequest', fastify.authenticate);
 
-// Memory storage for multer
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+  // Circuit breaker controls for operational staff
+  fastify.get('/circuit-status', getCircuitStatus);
+  fastify.post('/reset-circuit', resetCircuit);
 
-// All routes are protected with authentication
-router.use(authenticate);
+  // Transcription stream management
+  fastify.post('/transcription/:callId/start', startTranscription);
+  fastify.post('/transcription/:callId/stop', stopTranscription);
 
-// Circuit breaker controls for operational staff
-router.get('/circuit-status', getCircuitStatus);
-router.post('/reset-circuit', resetCircuit);
+  // Real-time audio processing
+  fastify.post('/audio/:connectionId', processAudio);
 
-// Transcription stream management
-router.post('/transcription/:callId/start', startTranscription);
-router.post('/transcription/:callId/stop', stopTranscription);
+  // File-based transcription
+  fastify.post('/transcribe-file', transcribeAudioFile);
+};
 
-// Real-time audio processing
-router.post('/audio/:connectionId', processAudio);
-
-// File-based transcription
-router.post('/transcribe-file', upload.single('audio'), transcribeAudioFile);
-
-export default router;
+export default transcriptionRoutes;

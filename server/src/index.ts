@@ -1,14 +1,13 @@
-import compression from "compression";
-import cors from "cors";
-import dotenv from "dotenv";
-import express from "express";
-import rateLimit from "express-rate-limit";
-import helmet from "helmet";
+import fastify from "fastify";
+import fastifyCors from "@fastify/cors";
+import fastifyHelmet from "@fastify/helmet";
+import fastifyRateLimit from "@fastify/rate-limit";
+
 import http from "http";
+import dotenv from "dotenv";
 import mongoose from "mongoose";
-import morgan from "morgan";
+
 import path from "path";
-import { RateLimiterMemory } from "rate-limiter-flexible";
 import { Server as SocketIOServer } from "socket.io";
 import aiOrchestrationRoutes from "./routes/aiOrchestrationRoutes";
 import aiRoutes from "./routes/aiRoutes";
@@ -35,8 +34,10 @@ import transcriptionRoutes from "./routes/transcriptionRoutes";
 import userRoutes from "./routes/userRoutes";
 import voiceAIRoutes from "./routes/voiceAIRoutes";
 import healthRoutes from "./routes/healthRoutes";
+import audioStreamingRoutes from "./routes/audioStreamingRoutes";
 import { initializeTwilioWebSocketServer } from "./services/twilioWebSocketServer";
 import { getAIOrchestrationService } from "./services/aiOrchestrationService";
+import { AudioStreamingService } from "./services/audioStreamingService";
 import CampaignService from "./services/campaignService";
 import ConversationEngineService from "./services/conversationEngineService";
 import { EnhancedVoiceAIService } from "./services/enhancedVoiceAIService";
@@ -50,6 +51,8 @@ import { connectToDatabase } from "./database/connection";
 import { healthCheckHandler, readinessCheckHandler } from "./health/service";
 import { initCloudinary } from "./utils/cloudinaryService";
 
+import { authenticate } from "./middleware/auth";
+
 // Import centralized logger utilities
 import logger, { phaseLogger } from "./utils/logger";
 
@@ -59,9 +62,20 @@ dotenv.config();
 // Use phase-based logging for bootstrap phase
 const bootstrapLogger = phaseLogger("BOOTSTRAP");
 
-// Initialize express app
-const app = express();
-const server = http.createServer(app);
+// Initialize fastify app
+const app = fastify({
+  serverFactory: (handler) => {
+    const server = http.createServer((req, res) => {
+      handler(req, res);
+    });
+
+    return server;
+  },
+});
+
+app.decorate("authenticate", authenticate);
+
+const server = app.server;
 // Find this section in your index.ts file:
 
 // Initialize Socket.IO server first (before other WebSocket servers)
@@ -82,6 +96,9 @@ const io = new SocketIOServer(server, {
   serveClient: false, // Don't serve the client files
 });
 
+// Initialize Audio Streaming Service
+const audioStreamingService = new AudioStreamingService(io);
+
 // Initialize WebSocket server for Twilio Media Streams
 // This must be initialized AFTER Socket.IO to ensure proper upgrade handling
 const twilioWSServer = initializeTwilioWebSocketServer(server);
@@ -92,21 +109,21 @@ bootstrapLogger.info("Twilio WebSocket server initialized for robust framing");
 const deepgramWss = setupDeepgramWebSocketServer(server);
 bootstrapLogger.info("Deepgram WebSocket server initialized");
 
-// Centralized WebSocket upgrade handling
-server.on("upgrade", (request, socket, head) => {
-  const pathname = request.url || "/";
+// Manually handle WebSocket upgrades
+server.on('upgrade', (request, socket, head) => {
+  const pathname = request.url || '/';
 
-  if (pathname.startsWith("/voice/stream")) {
+  if (pathname.startsWith('/voice/stream')) {
     twilioWss.handleUpgrade(request, socket, head, (ws) => {
-      twilioWss.emit("connection", ws, request);
+      twilioWss.emit('connection', ws, request);
     });
-  } else if (pathname.startsWith("/api/deepgram/ws")) {
+  } else if (pathname.startsWith('/api/deepgram/ws')) {
     deepgramWss.handleUpgrade(request, socket, head, (ws) => {
-      deepgramWss.emit("connection", ws, request);
+      deepgramWss.emit('connection', ws, request);
     });
-  } else {
-    socket.destroy();
   }
+  // Socket.IO will handle its own upgrade requests.
+  // If no handler matches, the socket will be destroyed automatically.
 });
 
 // Enhanced middleware setup for production
@@ -115,108 +132,59 @@ const corsOrigin =
 const isProduction = process.env.NODE_ENV === "production";
 
 // Trust proxy configuration for accurate IP detection
-app.set("trust proxy", ["loopback", "linklocal", "uniquelocal"]);
+
 
 // CORS configuration
-app.use(
-  cors({
-    origin: corsOrigin,
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
-    exposedHeaders: ["x-total-count", "x-page-count"],
-  })
-);
+app.register(fastifyCors, {
+  origin: corsOrigin,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
+  exposedHeaders: ["x-total-count", "x-page-count"],
+});
 
-// Security middleware
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https:", "data:"],
-        fontSrc: ["'self'", "https:", "data:", "blob:"],
-        imgSrc: ["'self'", "https:", "data:", "blob:"],
-        connectSrc: ["'self'", "ws:", "wss:", "https:"],
-        mediaSrc: ["'self'", "blob:", "data:"],
-        objectSrc: ["'none'"],
-        baseUri: ["'self'"],
-        formAction: ["'self'"],
-        frameAncestors: ["'none'"],
-        ...(isProduction ? { upgradeInsecureRequests: [] } : {}),
-      },
-    },
-    hsts: {
-      maxAge: 31536000,
-      includeSubDomains: true,
-      preload: true,
-    },
-    noSniff: true,
-    xssFilter: true,
-    referrerPolicy: { policy: "same-origin" },
-  })
-);
+// Register formbody to parse x-www-form-urlencoded
+app.register(require("@fastify/formbody"));
 
-// Compression middleware
-app.use(
-  compression({
-    filter: (req, res) => {
-      if (req.headers["x-no-compression"]) {
-        return false;
-      }
-      return compression.filter(req, res);
+app.register(fastifyHelmet, {
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https:", "data:"],
+      fontSrc: ["'self'", "https:", "data:", "blob:"],
+      imgSrc: ["'self'", "https:", "data:", "blob:"],
+      connectSrc: ["'self'", "ws:", "wss:", "https:"],
+      mediaSrc: ["'self'", "blob:", "data:"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'none'"],
+      ...(isProduction ? { upgradeInsecureRequests: [] } : {}),
     },
-    level: 6,
-    threshold: 1024,
-  })
-);
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+  },
+  noSniff: true,
+  xssFilter: true,
+  referrerPolicy: { policy: "same-origin" },
+});
 
-// Serve static files for audio
-app.use("/audio", express.static(path.join(__dirname, "../public/audio")));
-app.use(
-  "/fallbacks",
-  express.static(path.join(__dirname, "../public/fallbacks"))
-);
-
-// Body parsing middleware with limits
-app.use(
-  express.json({
-    limit: "10mb",
-    verify: (req, _res, buf) => {
-      if (buf && buf.length) {
-        (req as any).rawBody = buf;
-      }
-    },
-  })
-);
-app.use(
-  express.urlencoded({
-    extended: true,
-    limit: "10mb",
-  })
-);
-
-// Enhanced logging
-const morganFormat = isProduction ? "combined" : "dev";
-app.use(
-  morgan(morganFormat, {
-    stream: {
-      write: (message: string) => {
-        logger.info(message.trim(), { component: "http-access" });
-      },
-    },
-    skip: (req) => {
-      // Skip health check logs in production
-      return isProduction && req.url === "/health";
-    },
-  })
-);
+app.register(require('@fastify/static'), {
+  root: path.join(__dirname, '../public/audio'),
+  prefix: '/audio',
+});
+app.register(require('@fastify/static'), {
+  root: path.join(__dirname, '../public/fallbacks'),
+  prefix: '/fallbacks',
+  decorateReply: false,
+});
 
 // Trust proxy in production
-if (isProduction) {
-  app.set("trust proxy", 1);
-}
+
 
 // Enhanced rate limiting
 const rateLimitWindowMs = parseInt(
@@ -229,29 +197,11 @@ const rateLimitMax = parseInt(
 );
 
 // Global rate limiter
-const globalLimiter = rateLimit({
-  windowMs: rateLimitWindowMs,
+app.register(fastifyRateLimit, {
   max: rateLimitMax,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    error: "Too many requests from this IP, please try again later.",
-  },
-  handler: (req, res) => {
-    logger.warn(`Rate limit exceeded for IP: ${req.ip}`, {
-      ip: req.ip,
-      userAgent: req.get("User-Agent"),
-      url: req.url,
-    });
-    res.status(429).json({
-      error: "Too many requests from this IP, please try again later.",
-      retryAfter: Math.round(rateLimitWindowMs / 1000),
-    });
-  },
+  timeWindow: rateLimitWindowMs,
+  global: true,
 });
-
-// Apply global rate limiting
-app.use(globalLimiter);
 
 // Strict rate limiter for authentication endpoints
 const authLimitWindowMs = parseInt(
@@ -263,130 +213,74 @@ const authLimitMax = parseInt(
     : process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || "15"
 ); // Increased default to 15
 
-const authLimiter = rateLimit({
-  windowMs: authLimitWindowMs,
-  max: authLimitMax, // Use environment variable for auth attempts
-  standardHeaders: true,
-  legacyHeaders: false,
-  skipSuccessfulRequests: true,
-  message: {
-    error: "Too many authentication attempts, please try again later.",
-  },
-});
-
 // Advanced rate limiter for API abuse prevention
-const apiAbuseProtection = new RateLimiterMemory({
-  points: process.env.NODE_ENV === "development" ? 1000 : 50, // Significantly increased for development
-  duration: 60, // Per 60 seconds
-  blockDuration: process.env.NODE_ENV === "development" ? 5 : 300, // Significantly reduced for development
-});
 
-// Middleware for API abuse protection
-const apiAbuseMiddleware = async (
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction
-) => {
-  try {
-    await apiAbuseProtection.consume(req.ip);
-    next();
-  } catch (rejRes) {
-    const remainingPoints = rejRes.remainingPoints || 0;
-    const msBeforeNext = rejRes.msBeforeNext || 1000;
-
-    logger.warn(`API abuse detected for IP: ${req.ip}`, {
-      ip: req.ip,
-      remainingPoints,
-      msBeforeNext,
-      url: req.url,
-    });
-
-    res.set("Retry-After", String(Math.round(msBeforeNext / 1000)));
-    res.status(429).json({
-      error: "Too many requests. You have been temporarily blocked.",
-      retryAfter: Math.round(msBeforeNext / 1000),
-    });
-  }
-};
 
 // Enhanced health check route with system information
-app.get("/health", healthCheckHandler);
 
-// Readiness probe (for Kubernetes/Docker)
-app.get("/ready", readinessCheckHandler);
-
-// Friendly root route
-app.get("/", (_, res) => res.json({ message: "Lumina Outreach API is up 🚀" }));
 
 // Metrics endpoint removed
 
 // API Routes with enhanced security and monitoring
-app.use("/api/users/login", authLimiter); // Apply strict rate limiting to login
-app.use("/api/users/register", authLimiter); // Apply strict rate limiting to registration
-
-// Apply API abuse protection to all API routes
-app.use("/api", apiAbuseMiddleware);
-
-// Mount root webhook route to handle incoming Twilio webhooks (before API routes)
-// This is critical for receiving webhooks directly at the root path
-app.use("/", rootWebhookRoutes);
+app.register(rootWebhookRoutes, { prefix: "/" });
 
 // API Routes
-app.use("/api/users", userRoutes);
-app.use("/api/leads", leadRoutes);
-app.use("/api/campaigns", campaignRoutes);
-app.use("/api/calls", callRoutes);
-app.use("/api/dashboard", dashboardRoutes);
-app.use("/api/configuration", configurationRoutes);
-app.use("/api/lumina-outreach", voiceAIRoutes);
-app.use("/api/telephony", telephonyRoutes);
-app.use("/api/analytics", analyticsRoutes);
-app.use("/api/ai", aiRoutes); // Core AI routes
-app.use("/api/ai-orchestration", aiOrchestrationRoutes); // AI orchestration layer routes
-app.use("/api/knowledge", knowledgeRoutes); // Knowledge management routes
-app.use("/api/rag", ragRoutes); // RAG (Retrieval-Augmented Generation) routes
-app.use("/api/transcription", transcriptionRoutes);
-app.use("/api/deepgram-metrics", (req, res) => {
+app.register(userRoutes, {
+  prefix: "/api/users",
+  rateLimit: {
+    max: authLimitMax,
+    timeWindow: authLimitWindowMs,
+  },
+});
+app.register(leadRoutes, { prefix: "/api/leads" });
+app.register(campaignRoutes, { prefix: "/api/campaigns" });
+app.register(callRoutes, { prefix: "/api/calls" });
+app.register(dashboardRoutes, { prefix: "/api/dashboard" });
+app.register(configurationRoutes, { prefix: "/api/configuration" });
+app.register(voiceAIRoutes, { prefix: "/api/lumina-outreach" });
+app.register(telephonyRoutes, { prefix: "/api/telephony" });
+app.register(analyticsRoutes, { prefix: "/api/analytics" });
+app.register(aiRoutes, { prefix: "/api/ai" }); // Core AI routes
+app.register(aiOrchestrationRoutes, { prefix: "/api/ai-orchestration" }); // AI orchestration layer routes
+app.register(knowledgeRoutes, { prefix: "/api/knowledge" }); // Knowledge management routes
+app.register(ragRoutes, { prefix: "/api/rag" }); // RAG (Retrieval-Augmented Generation) routes
+app.register(transcriptionRoutes, { prefix: "/api/transcription" });
+app.get("/api/deepgram-metrics", (req, res) => {
   res
     .status(503)
-    .json({ error: "Deepgram metrics service temporarily unavailable" });
+    .send({ error: "Deepgram metrics service temporarily unavailable" });
 }); // Temporarily disabled Deepgram metrics routes
 // Monitoring API routes removed
-app.use("/api/deepgram", deepgramTestRoutes); // Deepgram testing routes
-app.use("/api/deepgram-tts", deepgramTTSRoutes); // Deepgram TTS routes
-app.use("/api/stt", sttRoutes); // Speech-to-Text testing routes
-app.use("/api/tts-provider", ttsProviderRoutes); // TTS Provider management routes
-app.use("/api/realtime", enhancedRealTimeRoutes); // Enhanced real-time call functionality
-app.use("/api", healthRoutes); // Health monitoring and resilience routes
+app.register(deepgramTestRoutes, { prefix: "/api/deepgram" }); // Deepgram testing routes
+app.register(deepgramTTSRoutes, { prefix: "/api/deepgram-tts" }); // Deepgram TTS routes
+app.register(sttRoutes, { prefix: "/api/stt" }); // Speech-to-Text testing routes
+app.register(ttsProviderRoutes, { prefix: "/api/tts-provider" }); // TTS Provider management routes
+app.register(enhancedRealTimeRoutes, { prefix: "/api/realtime" }); // Enhanced real-time call functionality
+app.register(healthRoutes, { prefix: "/api" }); // Health monitoring and resilience routes
+app.register(audioStreamingRoutes, { prefix: '/api/audio-streaming', audioStreamingService });
 
 // Debug routes only in development
 if (process.env.NODE_ENV !== "production") {
-  app.use("/api/debug", debugRoutes);
+  app.register(debugRoutes, { prefix: "/api/debug" });
 }
 
 // Add optimized stream route
 
 // WebSocket routes
-app.use("/", streamRoutes);
+app.register(streamRoutes, { prefix: "/" });
 
 // Enhanced global error handler
-app.use(
-  (
-    err: any,
-    req: express.Request,
-    res: express.Response,
-    _next: express.NextFunction
-  ) => {
+app.setErrorHandler((error, request, reply) => {
     const errorId = Math.random().toString(36).substring(7);
 
     logger.error("Unhandled error:", {
       errorId,
-      message: err.message,
-      stack: err.stack,
-      url: req.url,
-      method: req.method,
-      ip: req.ip,
-      userAgent: req.get("User-Agent"),
+      message: error.message,
+      stack: error.stack,
+      url: request.url,
+      method: request.method,
+      ip: request.ip,
+      userAgent: request.headers["user-agent"],
       timestamp: new Date().toISOString(),
     });
 
@@ -396,33 +290,32 @@ app.use(
     const errorResponse = {
       error: true,
       message: isDevelopment
-        ? err.message
+        ? error.message
         : "An internal server error occurred",
       errorId,
       timestamp: new Date().toISOString(),
       ...(isDevelopment && {
-        stack: err.stack,
-        details: err,
+        stack: error.stack,
+        details: error,
       }),
     };
 
-    const statusCode = err.statusCode || err.status || 500;
-    res.status(statusCode).json(errorResponse);
-  }
-);
+    const statusCode = error.statusCode || 500;
+    reply.status(statusCode).send(errorResponse);
+});
 
 // 404 handler
-app.use("*", (req: express.Request, res: express.Response) => {
-  logger.warn(`404 - Route not found: ${req.method} ${req.originalUrl}`, {
-    ip: req.ip,
-    userAgent: req.get("User-Agent"),
+app.setNotFoundHandler((request, reply) => {
+  logger.warn(`404 - Route not found: ${request.method} ${request.raw.originalUrl}`, {
+    ip: request.ip,
+    userAgent: request.headers["user-agent"],
   });
 
-  res.status(404).json({
+  reply.status(404).send({
     error: true,
     message: "Route not found",
-    path: req.originalUrl,
-    method: req.method,
+    path: request.raw.originalUrl,
+    method: request.method,
     timestamp: new Date().toISOString(),
   });
 });
@@ -1043,71 +936,15 @@ const startServer = async () => {
     logger.info("Services initialization completed");
 
     // Step 4: Start server
-    server.listen(PORT, HOST, () => {
-      logger.info("Server started successfully", {
-        port: PORT,
-        host: HOST,
-        environment: process.env.NODE_ENV,
-        version: process.env.npm_package_version || "1.0.0",
-        processId: process.pid,
-        nodeVersion: process.version,
-        uptime: process.uptime(),
-      });
-
-      // Log service URLs
-      logger.info("Service endpoints:", {
-        health: `http://${HOST}:${PORT}/health`,
-        ready: `http://${HOST}:${PORT}/ready`,
-        // metrics endpoint removed
-        api: `http://${HOST}:${PORT}/api`,
-      });
-
-      // Initialize cache preloading for optimized latency
-      try {
-        const { preloadAllVoices } = require("./utils/cachePreloader");
-        const { cacheSettings } = require("./config/latencyOptimization");
-
-        // Check if preloading is enabled
-        if (cacheSettings.preload.enabled) {
-          logger.info("Starting voice response cache preloading...");
-
-          // Start preloading with a delay to allow server to stabilize
-          setTimeout(() => {
-            preloadAllVoices()
-              .then((result) => {
-                logger.info(
-                  `Cache preloading completed: ${result.voiceCount} voices, ${result.phrasesLoaded} phrases`
-                );
-              })
-              .catch((error) => {
-                logger.error(`Cache preloading failed: ${error.message}`);
-              });
-          }, 5000); // 5-second delay before starting preload
-        } else {
-          logger.info(
-            "Voice response cache preloading disabled by configuration"
-          );
-        }
-      } catch (error) {
-        logger.error(`Error initializing cache preloading: ${error.message}`);
+    app.listen({ port: PORT, host: HOST }, (err, address) => {
+      if (err) {
+        logger.error("Failed to start server:", {
+          message: err.message,
+          stack: err.stack,
+        });
+        process.exit(1);
       }
-
-      // Initialize temporary file cleanup
-      try {
-        const { TempFileCleanup } = require("./utils/tempFileCleanup");
-
-        // Perform emergency cleanup of any existing temp files
-        TempFileCleanup.emergencyCleanup();
-
-        // Start periodic cleanup
-        TempFileCleanup.startPeriodicCleanup();
-
-        logger.info("Temporary file cleanup initialized");
-      } catch (error) {
-        logger.error(`Error initializing temp file cleanup: ${error.message}`);
-      }
-
-      // Monitoring and metrics systems removed
+      logger.info(`Server listening at ${address}`);
     });
 
     // Handle server errors
@@ -1156,7 +993,7 @@ process.on("unhandledRejection", (reason: any, promise: Promise<any>) => {
     // Give some time for the error to be logged
     setTimeout(() => {
       logger.error("Shutting down due to unhandled rejection");
-      gracefulShutdown("UNHANDLED_REJECTION");
+      gracefulShutdown("UNHANDLED_REjection");
     }, 1000);
   } else {
     gracefulShutdown("UNHANDLED_REJECTION");
@@ -1179,12 +1016,8 @@ const gracefulShutdown = (signal: string) => {
   logger.info(`Received ${signal}. Starting graceful shutdown...`);
 
   // Stop accepting new connections
-  server.close(async (error) => {
-    if (error) {
-      logger.error("Error during server shutdown:", error);
-    } else {
-      logger.info("HTTP server closed");
-    }
+  app.close(async () => {
+    logger.info("HTTP server closed");
 
     try {
       // Stop temp file cleanup process

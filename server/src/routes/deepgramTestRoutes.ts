@@ -4,110 +4,16 @@
  * Routes for testing Deepgram transcription in the browser
  */
 
-import express from 'express';
-import multer from 'multer';
+import { FastifyInstance } from 'fastify';
 import WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { getDeepgramService } from '../services/deepgramService';
 import logger from '../utils/logger';
 import { createRawTranscriptionStream, transcribeBuffer } from '../services/deepgramTranscriptionHelper';
 
-const router = express.Router();
-
-// Set up multer for file uploads
-const storage = multer.memoryStorage();
-const upload = multer({ 
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
-});
-
 // Keeps track of active WebSocket connections
 const activeConnections = new Map();
 
-/**
- * POST /api/deepgram/transcribe-file
- * 
- * Transcribe an uploaded audio file using Deepgram
- */
-router.post('/transcribe-file', upload.single('audio'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, error: 'No audio file provided' });
-    }
-
-    const deepgramService = getDeepgramService();
-    if (!deepgramService) {
-      return res.status(500).json({ success: false, error: 'Deepgram service not initialized' });
-    }
-
-    // Get parameters from the request
-    const language = req.body.language || 'en';
-    const model = req.body.model || 'nova-3';
-
-    logger.info(`Transcribing file ${req.file.originalname} with language=${language}, model=${model}`);
-    
-    const result = await transcribeBuffer(req.file.buffer, {
-      language,
-      model,
-      punctuate: true,
-      diarize: false
-    });
-
-    // Create a mock agent response for testing
-    let agentResponse = '';
-    try {
-      if (result.transcript) {
-        agentResponse = `Mock response to: "${result.transcript}"`;
-      }
-    } catch (agentError) {
-      logger.error(`Error getting agent response: ${agentError}`);
-    }
-
-    res.json({ 
-      success: true, 
-      transcript: result.transcript || '',
-      confidence: result.confidence || 0,
-      agentResponse
-    });
-  } catch (error) {
-    logger.error(`Error transcribing file: ${error}`);
-    res.status(500).json({ success: false, error: 'Failed to transcribe audio' });
-  }
-});
-
-/**
- * GET /api/deepgram/status
- * 
- * Get the status of the Deepgram service
- */
-router.get('/status', async (req, res) => {
-  try {
-    const deepgramService = getDeepgramService();
-    if (!deepgramService) {
-      return res.status(500).json({ success: false, error: 'Deepgram service not initialized' });
-    }
-
-    // Get Deepgram service status
-    const status = {
-      initialized: !!deepgramService,
-      apiKeyConfigured: deepgramService ? true : false,
-      models: {
-        defaultModel: 'nova-3',
-        availableModels: ['nova-3', 'nova-2', 'nova', 'enhanced']
-      }
-    };
-
-    res.json({ success: true, status });
-  } catch (error) {
-    logger.error(`Error getting Deepgram status: ${error}`);
-    res.status(500).json({ success: false, error: 'Failed to get Deepgram status' });
-  }
-});
-
-/**
- * Set up WebSocket server for real-time transcription
- * Uses noServer mode to avoid conflicts with Twilio WebSocket server
- */
 export function setupDeepgramWebSocketServer(server: any): WebSocket.Server {
   const wss = new WebSocket.Server({ 
     noServer: true,
@@ -269,4 +175,87 @@ export function setupDeepgramWebSocketServer(server: any): WebSocket.Server {
   return wss;
 }
 
-export default router;
+const deepgramTestRoutes = async (fastify, opts: Record<string, any>) => {
+  /**
+   * POST /api/deepgram/transcribe-file
+   * 
+   * Transcribe an uploaded audio file using Deepgram
+   */
+  fastify.post('/transcribe-file', async (request, reply) => {
+    try {
+      const data = await (request as any).file();
+      if (!data) {
+        return reply.code(400).send({ success: false, error: 'No audio file provided' });
+      }
+
+      const deepgramService = getDeepgramService();
+      if (!deepgramService) {
+        return reply.code(500).send({ success: false, error: 'Deepgram service not initialized' });
+      }
+
+      // Get parameters from the request
+      const language = (request.body as any).language || 'en';
+      const model = (request.body as any).model || 'nova-3';
+
+      logger.info(`Transcribing file ${data.filename} with language=${language}, model=${model}`);
+      
+      const result = await transcribeBuffer(await data.toBuffer(), {
+        language,
+        model,
+        punctuate: true,
+        diarize: false
+      });
+
+      // Create a mock agent response for testing
+      let agentResponse = '';
+      try {
+        if (result.transcript) {
+          agentResponse = `Mock response to: "${result.transcript}"`;
+        }
+      } catch (agentError) {
+        logger.error(`Error getting agent response: ${agentError}`);
+      }
+
+      reply.send({ 
+        success: true, 
+        transcript: result.transcript || '',
+        confidence: result.confidence || 0,
+        agentResponse
+      });
+    } catch (error) {
+      logger.error(`Error transcribing file: ${error}`);
+      reply.code(500).send({ success: false, error: 'Failed to transcribe audio' });
+    }
+  });
+
+  /**
+   * GET /api/deepgram/status
+   * 
+   * Get the status of the Deepgram service
+   */
+  fastify.get('/status', async (request, reply) => {
+    try {
+      const deepgramService = getDeepgramService();
+      if (!deepgramService) {
+        return reply.code(500).send({ success: false, error: 'Deepgram service not initialized' });
+      }
+
+      // Get Deepgram service status
+      const status = {
+        initialized: !!deepgramService,
+        apiKeyConfigured: deepgramService ? true : false,
+        models: {
+          defaultModel: 'nova-3',
+          availableModels: ['nova-3', 'nova-2', 'nova', 'enhanced']
+        }
+      };
+
+      reply.send({ success: true, status });
+    } catch (error) {
+      logger.error(`Error getting Deepgram status: ${error}`);
+      reply.code(500).send({ success: false, error: 'Failed to get Deepgram status' });
+    }
+  });
+};
+
+export default deepgramTestRoutes;

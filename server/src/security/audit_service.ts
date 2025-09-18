@@ -6,7 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
-import { Request, Response, NextFunction } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import * as uuid from 'uuid';
 import logger from '../utils/logger';
 
@@ -282,23 +282,23 @@ export class AuditService {
   }
 
   /**
-   * Create an audit middleware for Express
+   * Create an audit hook for Fastify
    */
-  public createMiddleware(options: {
+  public createFastifyHook(options: {
     excludePaths?: string[];
     sensitiveParams?: string[];
     sensitiveHeaders?: string[];
-    resourceTypeExtractor?: (req: Request) => string;
-    resourceIdExtractor?: (req: Request) => string;
-  } = {}): (req: Request, res: Response, next: NextFunction) => void {
-    return (req: Request, res: Response, next: NextFunction) => {
+    resourceTypeExtractor?: (req: FastifyRequest) => string;
+    resourceIdExtractor?: (req: FastifyRequest) => string;
+  } = {}): (req: FastifyRequest, reply: FastifyReply, done: Function) => void {
+    return (req: FastifyRequest, reply: FastifyReply, done: Function) => {
       if (!this.enabled) {
-        return next();
+        return done();
       }
       
       // Skip excluded paths
-      if (options.excludePaths && options.excludePaths.some(path => req.path.startsWith(path))) {
-        return next();
+      if (options.excludePaths && options.excludePaths.some(path => req.raw.url.startsWith(path))) {
+        return done();
       }
       
       // Generate request ID if not already present
@@ -322,7 +322,7 @@ export class AuditService {
       const requestDetails = this.sanitizeRequestDetails(req, options.sensitiveParams, options.sensitiveHeaders);
       
       // Determine action from method
-      const action = req.method;
+      const action = req.raw.method;
       
       // Create base audit event
       const baseEvent: Omit<AuditEvent, 'id' | 'timestamp' | 'type'> = {
@@ -335,21 +335,14 @@ export class AuditService {
         action,
         details: { request: requestDetails },
         requestId,
-        sessionId: (req as any).sessionID || ''
+        sessionId: (req as any).session?.id || ''
       };
       
-      // Capture original status code send method
-      const originalSend = res.send;
-      
-      // Override send method to capture response
-      res.send = function (body?: any) {
-        // Restore original functionality
-        res.send = originalSend;
-        
+      reply.raw.on('finish', () => {
         // Determine event type based on method and status code
         let eventType: AuditEventType;
         
-        switch (req.method) {
+        switch (req.raw.method) {
           case 'GET':
             eventType = AuditEventType.DATA_ACCESS;
             break;
@@ -368,10 +361,10 @@ export class AuditService {
         }
         
         // Add response details
-        const status = res.statusCode < 400 ? 'success' : 'failure';
+        const status = reply.raw.statusCode < 400 ? 'success' : 'failure';
         const responseDetails = {
-          statusCode: res.statusCode,
-          statusMessage: res.statusMessage
+          statusCode: reply.raw.statusCode,
+          statusMessage: reply.raw.statusMessage
         };
         
         // Log audit event
@@ -383,21 +376,18 @@ export class AuditService {
             response: responseDetails
           }
         });
-        
-        // Call original send
-        return originalSend.call(this, body);
-      };
+      });
       
-      next();
+      done();
     };
   }
 
   /**
    * Extract resource type from request
    */
-  private extractResourceType(req: Request): string {
+  private extractResourceType(req: FastifyRequest): string {
     // Try to extract from path
-    const pathParts = req.path.split('/').filter(Boolean);
+    const pathParts = req.raw.url.split('/').filter(Boolean);
     
     if (pathParts.length > 0) {
       // Handle common API patterns
@@ -414,9 +404,9 @@ export class AuditService {
   /**
    * Extract resource ID from request
    */
-  private extractResourceId(req: Request): string {
+  private extractResourceId(req: FastifyRequest): string {
     // Try to extract from path
-    const pathParts = req.path.split('/').filter(Boolean);
+    const pathParts = req.raw.url.split('/').filter(Boolean);
     
     // Look for ID pattern in path
     for (let i = 1; i < pathParts.length; i++) {
@@ -432,13 +422,13 @@ export class AuditService {
     }
     
     // Check for ID in query params
-    if (req.query.id) {
-      return req.query.id as string;
+    if ((req.query as any).id) {
+      return (req.query as any).id as string;
     }
     
     // Check for ID in body
-    if (req.body && req.body.id) {
-      return req.body.id;
+    if ((req.body as any) && (req.body as any).id) {
+      return (req.body as any).id;
     }
     
     return '';
@@ -448,13 +438,13 @@ export class AuditService {
    * Sanitize request details to remove sensitive information
    */
   private sanitizeRequestDetails(
-    req: Request,
+    req: FastifyRequest,
     sensitiveParams: string[] = [],
     sensitiveHeaders: string[] = []
   ): any {
     // Default sensitive parameters
     const defaultSensitiveParams = [
-      'password', 'passwordConfirmation', 'token', 'apiKey', 
+      'password', 'passwordConfirmation', 'token', 'apiKey',
       'secret', 'accessToken', 'refreshToken', 'creditCard',
       'cardNumber', 'cvv', 'ssn', 'socialSecurity'
     ];
@@ -470,7 +460,7 @@ export class AuditService {
     const allSensitiveHeaders = [...defaultSensitiveHeaders, ...sensitiveHeaders];
     
     // Sanitize query parameters
-    const sanitizedQuery = { ...req.query };
+    const sanitizedQuery = { ...(req.query as any) };
     for (const param of allSensitiveParams) {
       if (sanitizedQuery[param]) {
         sanitizedQuery[param] = '***REDACTED***';
@@ -480,7 +470,7 @@ export class AuditService {
     // Sanitize body
     let sanitizedBody: any = null;
     if (req.body) {
-      sanitizedBody = { ...req.body };
+      sanitizedBody = { ...(req.body as any) };
       this.redactSensitiveFields(sanitizedBody, allSensitiveParams);
     }
     
@@ -495,8 +485,8 @@ export class AuditService {
     }
     
     return {
-      method: req.method,
-      path: req.path,
+      method: req.raw.method,
+      path: req.raw.url,
       query: sanitizedQuery,
       body: sanitizedBody,
       headers: sanitizedHeaders

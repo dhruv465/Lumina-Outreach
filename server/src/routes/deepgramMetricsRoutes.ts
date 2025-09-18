@@ -3,23 +3,24 @@
  * Routes for Deepgram model metrics API
  */
 
-import express from 'express';
+import { FastifyInstance } from 'fastify';
 import * as deepgramMetricsController from '../controllers/deepgramMetricsController';
-import { authenticate } from '../middleware/auth';
 
-const router = express.Router();
+const deepgramMetricsRoutes = async (fastify, opts: Record<string, any>) => {
+  fastify.addHook('onRequest', fastify.authenticate);
 
-// Get metrics summary (requires authentication)
-router.get('/summary', authenticate, deepgramMetricsController.getMetricsSummary || ((req, res) => res.status(501).json({ error: 'Not implemented' })));
+  // Get metrics summary (requires authentication)
+  fastify.get('/summary', deepgramMetricsController.getMetricsSummary || ((req, res) => res.code(501).send({ error: 'Not implemented' })));
 
-// Get specific metrics (requires authentication)
-router.get('/model-usage', authenticate, deepgramMetricsController.getModelUsageMetrics || ((req, res) => res.status(501).json({ error: 'Not implemented' })));
-router.get('/model-validation', authenticate, deepgramMetricsController.getModelValidationMetrics || ((req, res) => res.status(501).json({ error: 'Not implemented' })));
-router.get('/fallbacks', authenticate, deepgramMetricsController.getFallbackMetrics || ((req, res) => res.status(501).json({ error: 'Not implemented' })));
-router.get('/account-tier', authenticate, deepgramMetricsController.getAccountTierMetrics || ((req, res) => res.status(501).json({ error: 'Not implemented' })));
-router.get('/alerts', authenticate, deepgramMetricsController.getRecentAlerts || ((req, res) => res.status(501).json({ error: 'Not implemented' })));
+  // Get specific metrics (requires authentication)
+  fastify.get('/model-usage', deepgramMetricsController.getModelUsageMetrics || ((req, res) => res.code(501).send({ error: 'Not implemented' })));
+  fastify.get('/model-validation', deepgramMetricsController.getModelValidationMetrics || ((req, res) => res.code(501).send({ error: 'Not implemented' })));
+  fastify.get('/fallbacks', deepgramMetricsController.getFallbackMetrics || ((req, res) => res.code(501).send({ error: 'Not implemented' })));
+  fastify.get('/account-tier', deepgramMetricsController.getAccountTierMetrics || ((req, res) => res.code(501).send({ error: 'Not implemented' })));
+  fastify.get('/alerts', deepgramMetricsController.getRecentAlerts || ((req, res) => res.code(501).send({ error: 'Not implemented' })));
 
-// Admin routes (requires admin authentication)
-router.post('/reset', authenticate, deepgramMetricsController.resetMetrics || ((req, res) => res.status(501).json({ error: 'Not implemented' })));
+  // Admin routes (requires admin authentication)
+  fastify.post('/reset', deepgramMetricsController.resetMetrics || ((req, res) => res.code(501).send({ error: 'Not implemented' })));
+};
 
-export default router;
+export default deepgramMetricsRoutes;

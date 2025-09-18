@@ -1,16 +1,13 @@
-import express from 'express';
-import { authenticate } from '../middleware/auth';
+import { FastifyInstance } from 'fastify';
 import { createUser, loginUser, getUserProfile, updateUserProfile, getAllUsers } from '../controllers/userController';
 
-const router = express.Router();
+const userRoutes = async (fastify, opts: Record<string, any>) => {
+  fastify.post('/register', createUser);
+  fastify.post('/login', loginUser);
 
-// Public routes
-router.post('/register', createUser);
-router.post('/login', loginUser);
+  fastify.get('/profile', { onRequest: [fastify.authenticate] }, getUserProfile);
+  fastify.put('/profile', { onRequest: [fastify.authenticate] }, updateUserProfile);
+  fastify.get('/', { onRequest: [fastify.authenticate] }, getAllUsers);
+};
 
-// Protected routes
-router.get('/profile', authenticate, getUserProfile);
-router.put('/profile', authenticate, updateUserProfile);
-router.get('/', authenticate, getAllUsers);
-
-export default router;
+export default userRoutes;

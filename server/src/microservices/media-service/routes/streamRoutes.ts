@@ -8,8 +8,9 @@ import { Worker } from 'worker_threads';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
-import { FastifyRequest, FastifyReply } from '../types/api';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { WebSocket } from 'ws';
+import { Server, IncomingMessage, ServerResponse } from 'http';
 
 // Helper function to get error message from unknown error
 function getErrorMessage(error: unknown): string {
@@ -29,7 +30,7 @@ interface StreamSession {
 }
 
 export function registerStreamRoutes(
-  server: FastifyInstance,
+  server: FastifyInstance<Server, IncomingMessage, ServerResponse, any, any>,
   redisClient: RedisClientType,
   workerPool: Map<string, Worker>
 ) {
@@ -140,7 +141,7 @@ export function registerStreamRoutes(
   }, 30000); // Every 30 seconds
   
   // WebSocket route for real-time audio streaming and processing
-  server.get('/stream', { websocket: true }, (connection: any, req: any) => {
+  server.get('/stream', { websocket: true }, (connection: { socket: WebSocket }, req: FastifyRequest) => {
     // Check circuit breaker
     if (!checkCircuitBreaker()) {
       connection.socket.send(JSON.stringify({
@@ -153,7 +154,7 @@ export function registerStreamRoutes(
     }
     
     // Extract query parameters
-    const url = new URL(req.url, `http://${req.hostname}`);
+    const url = new URL(req.raw.url, `http://${req.raw.socket.localAddress}`);
     const callId = url.searchParams.get('callId');
     const language = url.searchParams.get('language') || 'en';
     const samplingRate = parseInt(url.searchParams.get('samplingRate') || '16000', 10);
@@ -333,7 +334,7 @@ export function registerStreamRoutes(
   
   // Get active streaming sessions (admin only)
   server.get('/stream/sessions', {
-    preValidation: (request: any, reply: any, done: any) => {
+    preValidation: (request: FastifyRequest, reply: FastifyReply, done: Function) => {
       // Basic auth check for admin endpoints
       const authHeader = request.headers.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -371,7 +372,7 @@ export function registerStreamRoutes(
   
   // Get circuit breaker status (admin only)
   server.get('/stream/circuit-breaker', {
-    preValidation: (request: any, reply: any, done: any) => {
+    preValidation: (request: FastifyRequest, reply: FastifyReply, done: Function) => {
       // Basic auth check for admin endpoints
       const authHeader = request.headers.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -402,7 +403,7 @@ export function registerStreamRoutes(
   
   // Reset circuit breaker (admin only)
   server.post('/stream/circuit-breaker/reset', {
-    preValidation: (request: any, reply: any, done: any) => {
+    preValidation: (request: FastifyRequest, reply: FastifyReply, done: Function) => {
       // Basic auth check for admin endpoints
       const authHeader = request.headers.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {

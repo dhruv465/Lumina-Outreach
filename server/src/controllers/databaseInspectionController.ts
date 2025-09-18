@@ -1,7 +1,7 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import Call from '../models/Call';
 
-export const inspectDatabase = async (req: Request, res: Response) => {
+export const inspectDatabase = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     console.log('Debug: Checking database state...');
     
@@ -42,7 +42,7 @@ export const inspectDatabase = async (req: Request, res: Response) => {
       .lean();
     console.log('Recent calls:', recentCalls);
     
-    res.json({
+    res.send({
       totalCalls,
       callsWithStartTime,
       callsWithCreatedAt,
@@ -55,6 +55,6 @@ export const inspectDatabase = async (req: Request, res: Response) => {
     
   } catch (error) {
     console.error('Debug error:', error);
-    res.status(500).json({ error: 'Debug failed', details: error.message });
+    res.status(500).send({ error: 'Debug failed', details: error.message });
   }
 };

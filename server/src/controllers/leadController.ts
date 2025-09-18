@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import fs from 'fs';
 import csv from 'csv-parser';
 import Lead from '../models/Lead';
@@ -8,15 +8,15 @@ import { handleError } from '../utils/errorHandling';
 // @desc    Create single lead or upload multiple leads
 // @route   POST /api/leads
 // @access  Private
-export const uploadLeads = async (req: Request & { user?: any }, res: Response) => {
+export const uploadLeads = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     // Check if it's a bulk upload (with leads array) or single lead creation
-    const leads = req.body.leads;
+    const leads = (req.body as any).leads;
     
     if (leads && Array.isArray(leads)) {
       // Bulk upload - multiple leads
       if (leads.length === 0) {
-        return res.status(400).json({ message: 'No leads provided' });
+        return res.status(400).send({ message: 'No leads provided' });
       }
 
       // Validate each lead
@@ -34,16 +34,16 @@ export const uploadLeads = async (req: Request & { user?: any }, res: Response) 
         id: lead._id.toString(),
       }));
 
-      return res.status(201).json({
+      return res.status(201).send({
         message: `Successfully created ${createdLeads.length} leads`,
         leads: createdLeads,
       });
     } else {
       // Single lead creation - expect lead data directly in request body
-      const { name, phoneNumber, email, company, title, source, languagePreference, status, notes, tags } = req.body;
+      const { name, phoneNumber, email, company, title, source, languagePreference, status, notes, tags } = req.body as any;
 
       if (!name || !phoneNumber || !source) {
-        return res.status(400).json({ message: 'Name, phone number, and source are required' });
+        return res.status(400).send({ message: 'Name, phone number, and source are required' });
       }
 
       // Create single lead
@@ -68,35 +68,34 @@ export const uploadLeads = async (req: Request & { user?: any }, res: Response) 
         id: createdLeadDocument._id.toString(),
       };
 
-      return res.status(201).json({
+      return res.status(201).send({
         message: 'Lead created successfully',
         lead: createdLead,
       });
     }
   } catch (error) {
     logger.error('Error creating/uploading leads:', error);
-    return res.status(500).json({ message: 'Server error', error: handleError(error) });
+    return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
 
 // @desc    Get all leads with pagination and filtering
 // @route   GET /api/leads
 // @access  Private
-export const getLeads = async (req: Request & { user?: any }, res: Response) => {
+export const getLeads = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
+    const { page = 1, limit = 10, status, source, language, search } = req.query as any;
     const skip = (page - 1) * limit;
 
     // Build filter
     const filter: Record<string, any> = {};
-    if (req.query.status) filter.status = req.query.status;
-    if (req.query.source) filter.source = req.query.source;
-    if (req.query.language) filter.languagePreference = req.query.language;
+    if (status) filter.status = status;
+    if (source) filter.source = source;
+    if (language) filter.languagePreference = language;
 
     // Search by name or phone
-    if (req.query.search) {
-      const searchRegex = new RegExp(req.query.search as string, 'i');
+    if (search) {
+      const searchRegex = new RegExp(search as string, 'i');
       filter.$or = [
         { name: searchRegex },
         { phoneNumber: searchRegex },
@@ -119,7 +118,7 @@ export const getLeads = async (req: Request & { user?: any }, res: Response) => 
     // Get total count for pagination
     const total = await Lead.countDocuments(filter);
 
-    return res.status(200).json({
+    return res.status(200).send({
       leads,
       pagination: {
         page,
@@ -130,19 +129,19 @@ export const getLeads = async (req: Request & { user?: any }, res: Response) => 
     });
   } catch (error) {
     logger.error('Error getting leads:', error);
-    return res.status(500).json({ message: 'Server error', error: handleError(error) });
+    return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
 
 // @desc    Get lead by ID
 // @route   GET /api/leads/:id
 // @access  Private
-export const getLeadById = async (req: Request & { user?: any }, res: Response) => {
+export const getLeadById = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
-    const leadDocument = await Lead.findById(req.params.id);
+    const leadDocument = await Lead.findById((req.params as any).id);
 
     if (!leadDocument) {
-      return res.status(404).json({ message: 'Lead not found' });
+      return res.status(404).send({ message: 'Lead not found' });
     }
 
     // Transform lead to include both _id and id properties for client compatibility
@@ -151,24 +150,24 @@ export const getLeadById = async (req: Request & { user?: any }, res: Response) 
       id: leadDocument._id.toString(),
     };
 
-    return res.status(200).json(lead);
+    return res.status(200).send(lead);
   } catch (error) {
     logger.error('Error getting lead by ID:', error);
-    return res.status(500).json({ message: 'Server error', error: handleError(error) });
+    return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
 
 // @desc    Update lead
 // @route   PUT /api/leads/:id
 // @access  Private
-export const updateLead = async (req: Request & { user?: any }, res: Response) => {
+export const updateLead = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
-    const { name, phoneNumber, email, company, title, source, languagePreference, status, notes, tags } = req.body;
+    const { name, phoneNumber, email, company, title, source, languagePreference, status, notes, tags } = req.body as any;
 
-    const lead = await Lead.findById(req.params.id);
+    const lead = await Lead.findById((req.params as any).id);
 
     if (!lead) {
-      return res.status(404).json({ message: 'Lead not found' });
+      return res.status(404).send({ message: 'Lead not found' });
     }
 
     // Update fields
@@ -191,40 +190,41 @@ export const updateLead = async (req: Request & { user?: any }, res: Response) =
       id: updatedLeadDocument._id.toString(),
     };
 
-    return res.status(200).json(updatedLead);
+    return res.status(200).send(updatedLead);
   } catch (error) {
     logger.error('Error updating lead:', error);
-    return res.status(500).json({ message: 'Server error', error: handleError(error) });
+    return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
 
 // @desc    Delete lead
 // @route   DELETE /api/leads/:id
 // @access  Private
-export const deleteLead = async (req: Request & { user?: any }, res: Response) => {
+export const deleteLead = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
-    const lead = await Lead.findById(req.params.id);
+    const lead = await Lead.findById((req.params as any).id);
 
     if (!lead) {
-      return res.status(404).json({ message: 'Lead not found' });
+      return res.status(404).send({ message: 'Lead not found' });
     }
 
     await lead.deleteOne();
 
-    return res.status(200).json({ message: 'Lead deleted successfully' });
+    return res.status(200).send({ message: 'Lead deleted successfully' });
   } catch (error) {
     logger.error('Error deleting lead:', error);
-    return res.status(500).json({ message: 'Server error', error: handleError(error) });
+    return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
 
 // @desc    Import leads from CSV
 // @route   POST /api/leads/import/csv
 // @access  Private
-export const importLeadsFromCSV = async (req: Request & { user?: any, file?: Express.Multer.File }, res: Response): Promise<void> => {
+export const importLeadsFromCSV = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<void> => {
   try {
-    if (!req.file) {
-      res.status(400).json({ message: 'No file uploaded' });
+    const data = await (req as any).file();
+    if (!data) {
+      res.status(400).send({ message: 'No file uploaded' });
       return;
     }
 
@@ -232,7 +232,7 @@ export const importLeadsFromCSV = async (req: Request & { user?: any, file?: Exp
     const errors: any[] = [];
 
     // Parse CSV file
-    fs.createReadStream(req.file.path)
+    fs.createReadStream(data.filepath)
       .pipe(csv())
       .on('data', (data) => {
         // Validate required fields
@@ -256,38 +256,39 @@ export const importLeadsFromCSV = async (req: Request & { user?: any, file?: Exp
       })
       .on('end', async () => {
         // Delete file after processing
-        fs.unlinkSync(req.file!.path);
+        fs.unlinkSync(data.filepath);
 
         if (results.length === 0) {
-          res.status(400).json({ message: 'No valid leads found in CSV', errors });
+          res.status(400).send({ message: 'No valid leads found in CSV', errors });
           return;
         }
 
         // Create leads in database
         const createdLeads = await Lead.create(results);
 
-        res.status(201).json({
+        res.status(201).send({
           message: `Successfully imported ${createdLeads.length} leads`,
           errors: errors.length > 0 ? errors : undefined,
         });
       })
       .on('error', (error) => {
         // Delete file if there's an error
-        if (req.file?.path) fs.unlinkSync(req.file.path);
+        if (data.filepath) fs.unlinkSync(data.filepath);
         throw error;
       });
   } catch (error) {
     logger.error('Error importing leads from CSV:', error);
     // Delete file if there's an error
-    if (req.file?.path) fs.unlinkSync(req.file.path);
-    res.status(500).json({ message: 'Server error', error: handleError(error) });
+    const data = await (req as any).file();
+    if (data.filepath) fs.unlinkSync(data.filepath);
+    res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
 
 // @desc    Get lead analytics
 // @route   GET /api/leads/analytics
 // @access  Private
-export const getLeadAnalytics = async (_req: Request & { user?: any }, res: Response) => {
+export const getLeadAnalytics = async (_req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     // Get total count of leads
     const totalLeads = await Lead.countDocuments();
@@ -338,7 +339,7 @@ export const getLeadAnalytics = async (_req: Request & { user?: any }, res: Resp
       }
     ]);
 
-    return res.status(200).json({
+    return res.status(200).send({
       totalLeads,
       leadsByStatus,
       leadsBySource,
@@ -347,16 +348,16 @@ export const getLeadAnalytics = async (_req: Request & { user?: any }, res: Resp
     });
   } catch (error) {
     logger.error('Error getting lead analytics:', error);
-    return res.status(500).json({ message: 'Server error', error: handleError(error) });
+    return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
 
 // @desc    Export leads data to CSV, JSON, or Excel
 // @route   GET /api/leads/export
 // @access  Private
-export const exportLeads = async (req: Request & { user?: any }, res: Response) => {
+export const exportLeads = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
-    const { 
+    const {
       format = 'csv',
       status,
       source,
@@ -398,7 +399,7 @@ export const exportLeads = async (req: Request & { user?: any }, res: Response) 
     // Export based on requested format
     if (format === 'json') {
       // Send JSON
-      return res.status(200).json({ leads: exportData });
+      return res.status(200).send({ leads: exportData });
     } 
     else if (format === 'csv') {
       // Convert to CSV using a simple method without external dependencies
@@ -406,30 +407,17 @@ export const exportLeads = async (req: Request & { user?: any }, res: Response) 
       const csv = exportData.length 
         ? header + exportData.map((row: any) => 
             Object.values(row).map(value => 
-              `"${String(value).replace(/"/g, '""')}"`
+              `"${String(value).replace(new RegExp('"', 'g'), '""')}"`
             ).join(',')
           ).join('\n')
-        : header;
-      
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', 'attachment; filename=leads-export.csv');
+        : '';
+
+      res.header('Content-Type', 'text/csv');
+      res.header('Content-Disposition', 'attachment; filename=leads.csv');
       return res.status(200).send(csv);
     }
-    else if (format === 'xlsx') {
-      // For XLSX, we'll return JSON with a message to implement client-side Excel export
-      return res.status(200).json({ 
-        leads: exportData,
-        message: 'XLSX export is handled on the client side'
-      });
-    }
-    else {
-      return res.status(400).json({ message: 'Unsupported export format' });
-    }
   } catch (error) {
-    logger.error('Error in exportLeads:', error);
-    return res.status(500).json({
-      message: 'Server error',
-      error: handleError(error)
-    });
+    logger.error('Error exporting leads:', error);
+    return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };

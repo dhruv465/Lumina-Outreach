@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import WebSocket from 'ws';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
@@ -24,11 +24,11 @@ const twilio = require('twilio');
  * Handles Twilio voice webhook
  * This is where we set up the TwiML response and initiate the conversation
  */
-export async function handleTwilioVoiceWebhook(req: Request, res: Response): Promise<void> {
-      const callId = req.query.callId as string;
-      const twilioSid = req.body.CallSid;
-      const callStatus = req.body.CallStatus;
-      const machineDetection = req.body.AnsweredBy;
+export async function handleTwilioVoiceWebhook(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+      const callId = (req.query as any).callId as string;
+      const twilioSid = (req.body as any).CallSid;
+      const callStatus = (req.body as any).CallStatus;
+      const machineDetection = (req.body as any).AnsweredBy;
       try {
             logger.info(`Voice webhook called for call ${callId} with status ${callStatus}`, {
                   twilioSid,
@@ -103,8 +103,8 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                   }
 
                   twiml.hangup();
-                  res.type('text/xml');
-                  res.send(twiml.toString());
+                  reply.type('text/xml');
+                  reply.send(twiml.toString());
                   return;
             }
             // Update call with Twilio SID
@@ -196,12 +196,8 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                                           if (audioResult.method === 'tts') {
                                                 // Check if this is a chunked audio request
                                                 if (!(await handleChunkedAudioForTwiML(twiml, audioResult.url, 'en', { callId }))) {
-                                                      // Use TTS fallback chain instead of immediate Twilio voice
-                                                      const ttsResult = await synthesizeWithTTSChain(errorMessage, { callId, language: 'en' });
-                                                      if (ttsResult.shouldUseTwilioFallback) {
-                                                            const voiceConfig = ttsResult.twilioVoiceConfig || { voice: 'alice', language: 'en-US' };
-                                                            twiml.say(voiceConfig, errorMessage);
-                                                      }
+                                                      // Use regular TTS fallback
+                                                      twiml.say({ voice: 'alice', language: 'en-US' }, errorMessage);
                                                 }
                                           } else {
                                                 // Use Cloudinary URL or small base64 data
@@ -224,8 +220,8 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                         twiml.say({ voice: 'alice', language: 'en-US' }, errorMessage);
                   }
                   twiml.hangup();
-                  res.type('text/xml');
-                  res.send(twiml.toString());
+                  reply.type('text/xml');
+                  reply.send(twiml.toString());
                   return;
             }
 
@@ -260,7 +256,6 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                               logger.info(`🎤 Resolving initial greeting voice ID for call ${callId}: "${requestedVoiceId}"`);
 
                               // Get greeting text from campaign - prioritize openingMessage over initialPrompt
-                              logger.info(`Campaign data debug: initialPrompt="${campaign.initialPrompt || ''}", openingMessage="${campaign.openingMessage || ''}", campaignId=${campaign._id}`);
                               const formattedGreeting = campaign.openingMessage?.trim() || campaign.initialPrompt?.trim();
 
                               if (!formattedGreeting) {
@@ -316,7 +311,6 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                                           throw new Error(`Speech synthesis failed or returned empty content`);
                                     }
                               } catch (fileMethodError) {
-                                    // Fall back to adaptive voice method if file method fails
                                     logger.warn(`File synthesis method failed, trying adaptive method: ${fileMethodError}`);
 
                                     const voiceAIService = getVoiceAIService();
@@ -326,9 +320,7 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                                           language: campaign.primaryLanguage === 'hi' ? 'hi' : 'en'
                                     });
 
-                                    // Check if we got audio content back
                                     if (speechResponse && speechResponse.audioContent) {
-                                          // Process audio safely using helper function
                                           const audioResult = await processAudioForTwiML(
                                                 speechResponse.audioContent,
                                                 formattedGreeting,
@@ -336,19 +328,15 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                                           );
 
                                           if (audioResult.method === 'tts') {
-                                                // Check if this is a chunked audio request
                                                 if (!(await handleChunkedAudioForTwiML(twiml, audioResult.url, campaign.primaryLanguage, { callId, campaignId: campaign._id?.toString() }))) {
-                                                      // Use regular TTS fallback
                                                       twiml.say({ voice: 'alice', language: campaign.primaryLanguage === 'hi' ? 'hi-IN' : 'en-US' }, formattedGreeting);
                                                 }
                                           } else {
-                                                // Use Cloudinary URL or small base64 data
                                                 twiml.play(prepareUrlForTwilioPlay(audioResult.url));
                                                 useElevenLabs = true;
                                           }
                                     } else {
                                           logger.error(`⚠️ No audio content in speechResponse: ${JSON.stringify(speechResponse || {})}`);
-                                          // Use TTS fallback
                                           twiml.say({
                                                 voice: 'alice',
                                                 language: campaign.primaryLanguage === 'hi' ? 'hi-IN' : 'en-US'
@@ -365,10 +353,8 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                   logger.warn(`ElevenLabs not configured properly - enabled: ${!!configuration.elevenLabsConfig?.isEnabled}, apiKey exists: ${!!configuration.elevenLabsConfig?.apiKey}`);
             }
 
-            // Fallback if ElevenLabs failed
             if (!useElevenLabs) {
                   logger.info(`ElevenLabs failed for call ${callId}, using TTS fallback`);
-                  // Get greeting text from campaign - prioritize openingMessage over initialPrompt
                   const greetingText = campaign.openingMessage?.trim() || campaign.initialPrompt?.trim();
 
                   if (!greetingText) {
@@ -381,7 +367,6 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                   }, greetingText);
             }
 
-            // Check if we should use WebSocket streaming with Deepgram and new AI stack
             const deepgramEnabled = configuration?.deepgramConfig?.isEnabled;
             const flashModelEnabled = configuration?.elevenLabsConfig?.useFlashModel;
             const realtimeAPIEnabled = configuration?.llmConfig?.providers?.some(p => p.useRealtimeAPI);
@@ -397,16 +382,10 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
             if (useAdvancedStreaming) {
                   logger.info(`Using advanced WebSocket streaming for call ${callId} with features: Deepgram=${!!configuration?.deepgramConfig?.isEnabled}, Flash=${!!configuration?.elevenLabsConfig?.useFlashModel}, Realtime=${!!configuration?.llmConfig?.providers?.some(p => p.useRealtimeAPI)}`);
 
-                  // Now establish WebSocket connection for the conversation
                   const host = req.headers.host;
-                  // For WebSockets, we should use wss if using HTTPS/SSL or if ngrok
-                  // const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ||
-                  //       host?.includes('ngrok') || process.env.NODE_ENV === 'production' ?
-                  //       'wss' : 'ws';
-                  const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || `http${req.secure ? 's' : ''}://${host}`;
+                  const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || `http${req.raw.protocol === 'https' ? 's' : ''}://${host}`;
 
                   const baseUrl = webhookBaseUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
-                  // Use path segments instead of query parameters for Twilio Media Stream compatibility
                   const streamPath = `/voice/stream/${callId}/${conversationId}`;
                   const wsUrl = `${baseUrl}${streamPath}`;
 
@@ -417,7 +396,7 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                         callId,
                         conversationId,
                         fullUrl: wsUrl,
-                        secure: req.secure,
+                        secure: req.raw.protocol === 'https',
                         forwardedProto: req.headers['x-forwarded-proto']
                   });
 
@@ -426,7 +405,6 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                         url: wsUrl,
                         name: 'project-call-stream'
                   });
-                  // Add stream parameters for enhanced functionality
                   stream.parameter({
                         name: 'campaignId',
                         value: call.campaignId.toString()
@@ -435,7 +413,6 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                         name: 'leadId',
                         value: call.leadId.toString()
                   });
-                  // Add advanced features parameters
                   if (configuration?.deepgramConfig?.isEnabled) {
                         stream.parameter({
                               name: 'useDeepgram',
@@ -455,42 +432,36 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                         });
                   }
             } else {
-                  // Use traditional gather method with Twilio's built-in speech recognition
                   logger.info(`Using traditional gather method for call ${callId}`);
 
                   const gather = twiml.gather({
                         input: 'speech',
                         action: `${process.env.WEBHOOK_BASE_URL}/api/calls/gather?callId=${callId}&conversationId=${conversationId}`,
                         method: 'POST',
-                        speechTimeout: 5,  // Increased from 3 to 5 seconds for better speech detection
+                        speechTimeout: 5,
                         speechModel: 'phone_call',
-                        timeout: 20,  // Increased from 10 to 20 seconds to give user more time to respond
-                        numDigits: 1  // Allow for backup DTMF input
+                        timeout: 20,
+                        numDigits: 1
                   });
 
-                  // Add a brief pause to let the greeting audio finish
-                  gather.pause({ length: 2 }); // Increased pause to ensure greeting completes
+                  gather.pause({ length: 2 });
 
-                  // Add a prompt for user to respond within the gather
                   const promptMessage = "Please feel free to share your thoughts or let me know if you have any questions.";
                   gather.say({
                         voice: 'alice',
                         language: campaign.primaryLanguage === 'hi' ? 'hi-IN' : 'en-US'
                   }, promptMessage);
 
-                  // IMPORTANT: Only add timeout fallback AFTER gather - this handles cases where user doesn't speak at all
-                  // Get message from configuration for timeout handling
                   const config = await Configuration.findOne();
                   const noResponseMessage = config?.errorMessages?.noSpeechDetected || "I didn't hear anything. Let me try once more - please speak when you're ready.";
 
-                  // Give one more chance with another gather after no response
                   const secondGather = twiml.gather({
                         input: 'speech',
                         action: `${process.env.WEBHOOK_BASE_URL}/api/calls/gather?callId=${callId}&conversationId=${conversationId}`,
                         method: 'POST',
                         speechTimeout: 5,
                         speechModel: 'phone_call',
-                        timeout: 25  // Even longer timeout for second attempt
+                        timeout: 25
                   });
 
                   secondGather.say({
@@ -498,13 +469,10 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                         language: campaign.primaryLanguage === 'hi' ? 'hi-IN' : 'en-US'
                   }, noResponseMessage);
 
-                  // Only hang up after giving user multiple chances to respond
                   const goodbyeMessage = config?.callResponses?.goodbye || "Thank you for your time. Goodbye.";
 
-                  // Determine the default LLM provider and pass its key
                   const defaultLlmProviderName = configuration?.llmConfig?.defaultProvider;
                   const defaultLlmProvider = configuration?.llmConfig?.providers?.find(p => p.name === defaultLlmProviderName);
-                  // Use ElevenLabs for goodbye message - only after multiple timeout attempts
                   const usedElevenLabs = await synthesizeVoiceResponse(
                         twiml,
                         goodbyeMessage,
@@ -512,7 +480,7 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                               voiceId: campaign?.voiceConfiguration?.voiceId,
                               language: campaign.primaryLanguage === 'hi' ? 'hi' : 'en',
                               campaignId: campaign?._id?.toString(),
-                              fallbackBehavior: 'tts' // Use Twilio TTS as fallback instead of empty audio
+                              fallbackBehavior: 'tts'
                         }
                   );
 
@@ -523,17 +491,15 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                   twiml.hangup();
             }
 
-            // Log TwiML for debugging
             const twimlString = twiml.toString();
             const twimlLength = twimlString.length;
             const twimlSizeKB = Math.round(twimlLength / 1024 * 100) / 100;
 
-            // Check TwiML size to warn about potential issues
-            if (twimlLength > 61440) { // 60KB - CRITICAL warning
+            if (twimlLength > 61440) {
                   logger.error(`⚠️ CRITICAL: TwiML response for call ${callId} is dangerously close to Twilio's 64KB limit at ${twimlSizeKB}KB!`);
-            } else if (twimlLength > 51200) { // 50KB - Warning level
+            } else if (twimlLength > 51200) {
                   logger.warn(`⚠️ WARNING: TwiML response for call ${callId} is large (${twimlSizeKB}KB) - approaching Twilio's 64KB limit`);
-            } else if (twimlLength > 30720) { // 30KB - Info level
+            } else if (twimlLength > 30720) {
                   logger.info(`ℹ️ NOTE: TwiML response for call ${callId} is moderately large (${twimlSizeKB}KB)`);
             }
 
@@ -549,37 +515,33 @@ export async function handleTwilioVoiceWebhook(req: Request, res: Response): Pro
                   unusualActivityDetected: configuration?.elevenLabsConfig?.unusualActivityDetected || false
             });
 
-            // Send the TwiML response
-            res.type('text/xml');
-            res.send(twimlString);
+            reply.type('text/xml');
+            reply.send(twimlString);
 
       } catch (error) {
             logger.error(`Error in voice webhook for call ${callId}:`, error);
 
-            // Send fallback TwiML
             const twiml = new twilio.twiml.VoiceResponse();
 
-            // Get message from configuration
             const config = await Configuration.findOne();
             const errorMessage = config?.errorMessages?.technicalIssue || 'We apologize, but there was a technical issue. Please try again later.';
 
-            // Use ElevenLabs for error message
             await synthesizeVoiceResponse(twiml, errorMessage, {});
             twiml.hangup();
 
-            res.type('text/xml');
-            res.send(twiml.toString());
+            reply.type('text/xml');
+            reply.send(twiml.toString());
       }
 }
 /**
  * Handles Twilio status callback webhook
  * This is used to track call progress and completion
  */
-export async function handleTwilioStatusWebhook(req: Request, res: Response): Promise<void> {
-      const callId = req.query.callId as string;
-      const callStatus = req.body.CallStatus;
-      const callDuration = req.body.CallDuration;
-      const recordingUrl = req.body.RecordingUrl;
+export async function handleTwilioStatusWebhook(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+      const callId = (req.query as any).callId as string;
+      const callStatus = (req.body as any).CallStatus;
+      const callDuration = (req.body as any).CallDuration;
+      const recordingUrl = (req.body as any).RecordingUrl;
       try {
             logger.info(`Status webhook called for call ${callId} with status ${callStatus}`, {
                   body: req.body,
@@ -619,27 +581,27 @@ export async function handleTwilioStatusWebhook(req: Request, res: Response): Pr
                   case 'failed':
                         await Call.findByIdAndUpdate(callId, {
                               status: 'failed',
-                              failureCode: req.body.ErrorCode || '',
+                              failureCode: (req.body as any).ErrorCode || '',
                               endTime: new Date(),
                               updatedAt: new Date()
                         });
                         break;
             }
 
-            res.sendStatus(200);
+            reply.code(200).send('OK');
       } catch (error) {
             logger.error(`Error in status webhook for call ${callId}:`, error);
-            res.status(500).send('Error processing status update');
+            reply.code(500).send('Error processing status update');
       }
 }
 /**
  * Handles Twilio gather action webhook
  * This processes speech input from the caller
  */
-export async function handleTwilioGatherWebhook(req: Request, res: Response): Promise<void> {
-      const callId = req.query.callId as string;
-      const conversationId = req.query.conversationId as string;
-      const speechResult = req.body.SpeechResult;
+export async function handleTwilioGatherWebhook(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+      const callId = (req.query as any).callId as string;
+      const conversationId = (req.query as any).conversationId as string;
+      const speechResult = (req.body as any).SpeechResult;
       let useElevenLabs = false;
       // Get webhook base URL from environment variable only
       const baseUrl = process.env.WEBHOOK_BASE_URL;
@@ -656,8 +618,8 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
             // Use ElevenLabs for error message
             await synthesizeVoiceResponse(twiml, errorMessage, {});
             twiml.hangup();
-            res.type('text/xml');
-            res.send(twiml.toString());
+            reply.type('text/xml');
+            reply.send(twiml.toString());
             return;
       }
       try {
@@ -829,7 +791,7 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                               method: 'POST',
                               speechTimeout: 5,
                               speechModel: 'phone_call',
-                              timeout: 25  // Increased from 20 to 25 for final attempt
+                              timeout: 25  // Even longer timeout for final attempt
                         });
                   } else {
                         // End the call gracefully
@@ -861,8 +823,8 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
                   });
 
                   // Send the TwiML response
-                  res.type('text/xml');
-                  res.send(twimlString);
+                  reply.type('text/xml');
+                  reply.send(twimlString);
 
             } else {
                   // No speech detected, try again with more patience
@@ -924,18 +886,18 @@ export async function handleTwilioGatherWebhook(req: Request, res: Response): Pr
             await synthesizeVoiceResponse(twiml, errorMessage, {});
             twiml.hangup();
 
-            res.type('text/xml');
-            res.send(twiml.toString());
+            reply.type('text/xml');
+            reply.send(twiml.toString());
       }
 }
 /**
  * Handles Twilio stream webhook via WebSocket
  * Processes real-time audio streams from the call
  */
-export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
+export function handleTwilioStreamWebhook(ws: WebSocket, req: FastifyRequest) {
       // Log warning about legacy route usage
       logger.info('Legacy Twilio /stream route in use; dedicated TwilioWebSocketServer is recommended', {
-            url: req.url,
+            url: req.raw.url,
             userAgent: req.headers['user-agent']
       });
 
@@ -986,7 +948,7 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
                   streamSid = msg.streamSid || msg.start?.streamSid;
 
                   // Extract callId and conversationId from URL path or custom parameters
-                  const urlPath = req.url || '';
+                  const urlPath = req.raw.url || '';
                   // Support legacy paths and the new simplified path
                   const pathMatch = urlPath.match(/\/voice\/(?:optimized-stream|low-latency|stream)\/([^\/]+)\/([^\/\?]+)/);
                   if (pathMatch) {
@@ -1000,7 +962,7 @@ export function handleTwilioStreamWebhook(ws: WebSocket, req: Request) {
                               const qConversationId = parsed.searchParams.get('conversationId');
                               if (qCallId) callId = qCallId;
                               if (qConversationId) conversationId = qConversationId;
-                        } catch { }
+                        } catch { } // Ignore URL parsing errors
                         // Fall back to Twilio customParameters sent in the start event
                         if (msg.start?.customParameters) {
                               callId = callId || msg.start.customParameters.callId;
@@ -1114,7 +1076,7 @@ async function processAudioChunk(
                         const transcriptionResult = await speechAnalysisService.transcribeAudio(audioData);
                         transcribedText = transcriptionResult.transcript || '';
 
-                        logger.info(`Deepgram transcription for call ${callId}: "${transcribedText.substring(0, 100)}..."`);
+                        logger.info(`Deepgram transcription for call ${callId}: "${transcribedText.substring(0, 100)}"...`);
                   } catch (deepgramError) {
                         logger.error(`Deepgram transcription failed for call ${callId}:`, deepgramError);
                   }
@@ -1129,7 +1091,7 @@ async function processAudioChunk(
             // Process the transcribed text with conversation engine
             const aiResponse = await conversationEngine.processUserInput(conversationId, transcribedText);
 
-            logger.info(`AI response for call ${callId}: "${aiResponse.text.substring(0, 100)}..."`);
+            logger.info(`AI response for call ${callId}: "${aiResponse.text.substring(0, 100)}"...`);
 
             // Generate speech from AI response
             await generateAndSendAudioResponse(aiResponse.text, callId, session, config, sendAudioToTwilio);

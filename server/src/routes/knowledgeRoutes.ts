@@ -3,267 +3,107 @@
  * which allows users to upload, organize, and manage documents for the RAG system.
  */
 
-import express, { Request } from 'express';
+import { FastifyInstance } from 'fastify';
 import * as knowledgeController from '../controllers/knowledgeController';
-import { authenticate } from '../middleware/auth';
-import { validateRequest } from '../middleware/validationMiddleware';
-import { apiRateLimit } from '../middleware/rateLimitMiddleware';
-import multer from 'multer';
 
-// Extend the Express Request interface to include fileValidationError
-declare global {
-  namespace Express {
-    interface Request {
-      fileValidationError?: string;
-    }
-  }
-}
+const knowledgeRoutes = async (fastify, opts: Record<string, any>) => {
+  fastify.addHook('onRequest', fastify.authenticate);
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, './uploads/documents');
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const fileExtension = file.originalname.split('.').pop();
-    cb(null, `${file.fieldname}-${uniqueSuffix}.${fileExtension}`);
-  }
-});
+  // Document Management
+  fastify.post(
+    '/documents',
+    knowledgeController.uploadDocuments
+  );
 
-const upload = multer({ 
-  storage: storage,
-  limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    // Allow common document types
-    const allowedTypes = [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'text/plain',
-      'text/csv',
-      'application/json',
-      'text/markdown'
-    ];
-    
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      // Passing null as first parameter and false as second to reject file
-      cb(null, false);
-      // Set a custom property on the request object to indicate validation error
-      req.fileValidationError = 'File type not supported. Please upload PDF, Word, Text, CSV, JSON, or Markdown files.';
-    }
-  }
-});
+  fastify.get(
+    '/documents',
+    knowledgeController.getDocuments
+  );
 
-const router = express.Router();
+  fastify.get(
+    '/documents/:id',
+    knowledgeController.getDocumentById
+  );
 
-// Apply middleware to all routes
-router.use(authenticate);
-router.use(apiRateLimit);
+  fastify.put(
+    '/documents/:id',
+    knowledgeController.updateDocument
+  );
 
-// Document Management
-router.post(
-  '/documents',
-  upload.array('documents', 10),
-  knowledgeController.uploadDocuments
-);
+  fastify.delete(
+    '/documents/:id',
+    knowledgeController.deleteDocument
+  );
 
-router.get(
-  '/documents',
-  knowledgeController.getDocuments
-);
+  // Content Chunks
+  fastify.get(
+    '/chunks',
+    knowledgeController.getChunks
+  );
 
-router.get(
-  '/documents/:id',
-  validateRequest({
-    params: {
-      id: {
-        type: 'string',
-        required: true,
-        message: 'Document ID is required'
-      }
-    }
-  }),
-  knowledgeController.getDocumentById
-);
+  fastify.get(
+    '/chunks/:id',
+    knowledgeController.getChunkById
+  );
 
-router.put(
-  '/documents/:id',
-  validateRequest({
-    params: {
-      id: {
-        type: 'string',
-        required: true,
-        message: 'Document ID is required'
-      }
-    }
-  }),
-  knowledgeController.updateDocument
-);
+  fastify.put(
+    '/chunks/:id',
+    knowledgeController.updateChunk
+  );
 
-router.delete(
-  '/documents/:id',
-  validateRequest({
-    params: {
-      id: {
-        type: 'string',
-        required: true,
-        message: 'Document ID is required'
-      }
-    }
-  }),
-  knowledgeController.deleteDocument
-);
+  // Categories
+  fastify.get(
+    '/categories',
+    knowledgeController.getCategories
+  );
 
-// Content Chunks
-router.get(
-  '/chunks',
-  knowledgeController.getChunks
-);
+  fastify.post(
+    '/categories',
+    knowledgeController.createCategory
+  );
 
-router.get(
-  '/chunks/:id',
-  validateRequest({
-    params: {
-      id: {
-        type: 'string',
-        required: true,
-        message: 'Chunk ID is required'
-      }
-    }
-  }),
-  knowledgeController.getChunkById
-);
+  fastify.put(
+    '/categories/:id',
+    knowledgeController.updateCategory
+  );
 
-router.put(
-  '/chunks/:id',
-  validateRequest({
-    params: {
-      id: {
-        type: 'string',
-        required: true,
-        message: 'Chunk ID is required'
-      }
-    },
-    body: {
-      content: {
-        type: 'string',
-        required: true,
-        message: 'Content is required'
-      }
-    }
-  }),
-  knowledgeController.updateChunk
-);
+  fastify.delete(
+    '/categories/:id',
+    knowledgeController.deleteCategory
+  );
 
-// Categories
-router.get(
-  '/categories',
-  knowledgeController.getCategories
-);
+  // Tags
+  fastify.get(
+    '/tags',
+    knowledgeController.getTags
+  );
 
-router.post(
-  '/categories',
-  validateRequest({
-    body: {
-      name: {
-        type: 'string',
-        required: true,
-        message: 'Category name is required'
-      }
-    }
-  }),
-  knowledgeController.createCategory
-);
+  fastify.post(
+    '/tags',
+    knowledgeController.createTag
+  );
 
-router.put(
-  '/categories/:id',
-  validateRequest({
-    params: {
-      id: {
-        type: 'string',
-        required: true,
-        message: 'Category ID is required'
-      }
-    },
-    body: {
-      name: {
-        type: 'string',
-        required: true,
-        message: 'Category name is required'
-      }
-    }
-  }),
-  knowledgeController.updateCategory
-);
+  // Search
+  fastify.post(
+    '/search',
+    knowledgeController.searchKnowledge
+  );
 
-router.delete(
-  '/categories/:id',
-  validateRequest({
-    params: {
-      id: {
-        type: 'string',
-        required: true,
-        message: 'Category ID is required'
-      }
-    }
-  }),
-  knowledgeController.deleteCategory
-);
+  // Analytics
+  fastify.get(
+    '/analytics/usage',
+    knowledgeController.getUsageAnalytics
+  );
 
-// Tags
-router.get(
-  '/tags',
-  knowledgeController.getTags
-);
+  fastify.get(
+    '/analytics/performance',
+    knowledgeController.getPerformanceAnalytics
+  );
 
-router.post(
-  '/tags',
-  validateRequest({
-    body: {
-      name: {
-        type: 'string',
-        required: true,
-        message: 'Tag name is required'
-      }
-    }
-  }),
-  knowledgeController.createTag
-);
+  fastify.get(
+    '/analytics/gaps',
+    knowledgeController.getKnowledgeGaps
+  );
+};
 
-// Search
-router.post(
-  '/search',
-  validateRequest({
-    body: {
-      query: {
-        type: 'string',
-        required: true,
-        message: 'Search query is required'
-      }
-    }
-  }),
-  knowledgeController.searchKnowledge
-);
-
-// Analytics
-router.get(
-  '/analytics/usage',
-  knowledgeController.getUsageAnalytics
-);
-
-router.get(
-  '/analytics/performance',
-  knowledgeController.getPerformanceAnalytics
-);
-
-router.get(
-  '/analytics/gaps',
-  knowledgeController.getKnowledgeGaps
-);
-
-export default router;
+export default knowledgeRoutes;

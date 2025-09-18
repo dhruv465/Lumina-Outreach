@@ -8,9 +8,10 @@ import { FastifyInstance } from 'fastify';
 import { RedisClientType } from 'redis';
 import { Db, ObjectId } from 'mongodb';
 import { ICampaign } from '../../types/campaign';
+import { Server, IncomingMessage, ServerResponse } from 'http';
 
 export function registerROIRoutes(
-  server: FastifyInstance,
+  server: FastifyInstance<Server, IncomingMessage, ServerResponse, any, any>,
   db: Db,
   redisClient: RedisClientType
 ) {

@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import Configuration from '../models/Configuration';
 import { getDeepgramService } from '../services/deepgramService';
 import { logger } from '../index';
@@ -49,7 +49,7 @@ function createTestWAVBuffer(): Buffer {
  * Test Deepgram ASR connectivity endpoint
  * Performs a quick reachability check using a short silent WAV buffer
  */
-export async function testDeepgramASRConnection(req: Request, res: Response) {
+export async function testDeepgramASRConnection(req: FastifyRequest, res: FastifyReply) {
   const startTime = Date.now();
   // Define timeout ID at the function scope level
   let timeoutId: NodeJS.Timeout;
@@ -60,7 +60,7 @@ export async function testDeepgramASRConnection(req: Request, res: Response) {
     // Set a timeout for the request (5 seconds)
     timeoutId = setTimeout(() => {
       logger.warn('Deepgram ASR connectivity test timed out after 5 seconds');
-      res.status(504).json({
+      res.status(504).send({
         success: false,
         message: 'ASR connectivity test timed out after 5 seconds',
         latencyMs: Date.now() - startTime
@@ -76,7 +76,7 @@ export async function testDeepgramASRConnection(req: Request, res: Response) {
     const config = await Configuration.findOne();
     
     if (!config) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'No configuration found. Please set up your configuration first.'
       });
@@ -86,7 +86,7 @@ export async function testDeepgramASRConnection(req: Request, res: Response) {
     const asrApiKey = (config as any).asrConfig?.apiKey || config.deepgramConfig?.apiKey;
     
     if (!asrApiKey) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Deepgram ASR API key not configured. Please configure your Deepgram API key in the system settings.'
       });
@@ -110,7 +110,7 @@ export async function testDeepgramASRConnection(req: Request, res: Response) {
         logger.info('Deepgram service initialized dynamically for ASR test');
       } catch (initError) {
         logger.error(`Failed to initialize Deepgram service: ${getErrorMessage(initError)}`);
-        return res.status(500).json({
+        return res.status(500).send({
           success: false,
           message: 'Deepgram ASR service could not be initialized. Please check your configuration and restart the service.'
         });
@@ -168,13 +168,13 @@ export async function testDeepgramASRConnection(req: Request, res: Response) {
       responseStructure = 'Object response';
       
       // Check if result structure contains transcript directly or needs to be extracted from nested properties
-      if (transcriptionResult.transcript !== undefined) {
+      if ((transcriptionResult as any).transcript !== undefined) {
         // Direct transcript property exists
-        transcript = transcriptionResult.transcript || '';
+        transcript = (transcriptionResult as any).transcript || '';
         responseStructure = 'Direct transcript property';
-      } else if (transcriptionResult.result?.results?.channels) {
+      } else if ((transcriptionResult as any).result?.results?.channels) {
         // Extract from nested structure similar to the deepgramService.ts implementation
-        const channels = transcriptionResult.result.results.channels;
+        const channels = (transcriptionResult as any).result.results.channels;
         const result = channels && channels.length > 0 && channels[0].alternatives && channels[0].alternatives.length > 0 
           ? channels[0].alternatives[0] 
           : null;
@@ -202,7 +202,7 @@ export async function testDeepgramASRConnection(req: Request, res: Response) {
     
     // Return success response with specified format
     // Even if transcript is empty, consider it a success if we got a response from the service
-    res.status(200).json({
+    res.status(200).send({
       success: true,
       message: 'ASR reachable',
       transcript,
@@ -229,7 +229,7 @@ export async function testDeepgramASRConnection(req: Request, res: Response) {
         errorMessage.includes('not initialized') ||
         errorMessage.includes('API key')) {
       // Configuration issues
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: `Configuration error: ${errorMessage}`
       });
@@ -242,14 +242,14 @@ export async function testDeepgramASRConnection(req: Request, res: Response) {
         errorMessage.includes('ENOTFOUND') ||
         errorMessage.includes('ECONNREFUSED')) {
       // Deepgram call errors
-      return res.status(502).json({
+      return res.status(502).send({
         success: false,
         message: `Deepgram service error: ${errorMessage}`
       });
     }
 
     // Unexpected errors
-    res.status(500).json({
+    res.status(500).send({
       success: false,
       message: `Unexpected error during ASR connectivity test: ${errorMessage}`
     });

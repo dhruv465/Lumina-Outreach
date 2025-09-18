@@ -2,10 +2,6 @@ import http from 'http';
 import { WebSocketServer, WebSocket, RawData } from 'ws';
 import { parse as parseUrl } from 'url';
 import url from 'url';
-import { Request } from 'express';
-import { ParamsDictionary } from 'express-serve-static-core';
-import { ParsedQs } from 'qs';
-
 
 // Extend WebSocket interface to include isAlive property
 interface ExtendedWebSocket extends WebSocket {

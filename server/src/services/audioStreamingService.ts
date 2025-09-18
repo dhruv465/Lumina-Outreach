@@ -1,56 +1,33 @@
-import { Server } from 'socket.io';
-import { createServer } from 'http';
-import express from 'express';
+import { Server, Socket } from 'socket.io';
 import logger from '../utils/logger';
 import { AudioStreamManager } from './audioStreamManager';
 
 /**
- * Dedicated WebSocket server for audio streaming with optimized performance
+ * Dedicated WebSocket service for audio streaming with optimized performance
  * This service handles audio streaming with minimal latency
  */
 export class AudioStreamingService {
   private io: Server;
-  private app: express.Application;
-  private server: any;
   private streamManager: AudioStreamManager;
   private readonly bufferSize: number = 1024; // Optimized buffer size for ultra-low latency
   private readonly maxBufferCount: number = 2; // Reduced buffer count for faster processing
   private readonly keepAliveInterval: number = 5000; // 5 seconds for faster detection
   private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
 
-  constructor(port: number = 3002) {
-    this.app = express();
-    this.server = createServer(this.app);
-    this.io = new Server(this.server, {
-      cors: {
-        origin: '*',
-        methods: ['GET', 'POST']
-      },
-      maxHttpBufferSize: 1e6, // 1MB
-      transports: ['websocket'] // Force WebSocket for lower latency
-    });
-
+  constructor(io: Server) {
+    this.io = io;
     // Initialize audio stream manager
     this.streamManager = new AudioStreamManager({
       bufferSize: this.bufferSize,
       maxBufferCount: this.maxBufferCount
     });
 
-    this.setupRoutes();
     this.setupSocketHandlers();
-    this.server.listen(port, () => {
-      logger.info(`Audio streaming server listening on port ${port}`);
-    });
-  }
-
-  private setupRoutes() {
-    this.app.get('/health', (req, res) => {
-      res.status(200).json({ status: 'ok', uptime: process.uptime() });
-    });
+    logger.info('Audio streaming service initialized');
   }
 
   private setupSocketHandlers() {
-    this.io.on('connection', (socket) => {
+    this.io.on('connection', (socket: Socket) => {
       logger.info(`New audio streaming connection: ${socket.id}`);
       
       // Create a new stream for this connection
@@ -157,7 +134,8 @@ export class AudioStreamingService {
       logger.debug(`Keep-alive cleared for socket ${socketId}`);
     }
   }
-}
 
-// Export singleton instance for direct use
-export const audioStreamingService = new AudioStreamingService();
+  public getHealthStatus() {
+    return { status: 'ok', uptime: process.uptime() };
+  }
+}

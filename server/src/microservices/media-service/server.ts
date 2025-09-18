@@ -5,7 +5,7 @@
  * and speech-to-text transcription with optimized latency.
  */
 
-import fastify, { FastifyInstance } from 'fastify';
+import fastify, { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyMultipart from '@fastify/multipart';
 import fastifyCors from '@fastify/cors';
@@ -18,6 +18,7 @@ import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import pino from 'pino';
+import { Server, IncomingMessage, ServerResponse } from 'http';
 
 // Load environment variables
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -35,7 +36,7 @@ const logger = pino({
 });
 
 // Initialize the Fastify server
-const server: FastifyInstance = fastify({
+const server: FastifyInstance<Server, IncomingMessage, ServerResponse, any, any> = fastify({
   logger,
   trustProxy: true,
   bodyLimit: 50 * 1024 * 1024, // 50MB limit for audio uploads
@@ -125,7 +126,7 @@ for (let i = 0; i < maxWorkers; i++) {
 }
 
 // Health check endpoint
-server.get('/health', async (request: any, reply: any) => {
+server.get('/health', async (request: FastifyRequest, reply: FastifyReply) => {
   return { status: 'ok', timestamp: new Date().toISOString() };
 });
 

@@ -4,14 +4,15 @@
  * Provides predictive models and forecasting for call performance
  */
 
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { RedisClientType } from 'redis';
 import { Db } from 'mongodb';
 import SimpleLinearRegression from 'ml-regression-simple-linear';
 import * as math from 'mathjs';
+import { Server, IncomingMessage, ServerResponse } from 'http';
 
 export function registerPredictiveRoutes(
-  server: FastifyInstance,
+  server: FastifyInstance<Server, IncomingMessage, ServerResponse, any, any>,
   db: Db,
   redisClient: RedisClientType
 ) {

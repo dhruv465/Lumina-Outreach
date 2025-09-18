@@ -1,5 +1,4 @@
-import express from 'express';
-import { authenticate } from '../middleware/auth';
+import { FastifyInstance } from 'fastify';
 import {
   getSystemConfiguration,
   updateSystemConfiguration,
@@ -31,62 +30,54 @@ import {
   updateModelConfiguration,
   suggestOptimalConfiguration
 } from '../controllers/modelManagementController';
-import { logger } from '../index';
 
-const router = express.Router();
+const configurationRoutes = async (fastify, opts: Record<string, any>) => {
+  fastify.addHook('onRequest', fastify.authenticate);
 
-// Log middleware for configuration routes
-router.use((req, res, next) => {
-  logger.info(`Configuration route: ${req.method} ${req.originalUrl}`);
-  next();
-});
+  // Configuration routes
+  fastify.get('/', getSystemConfiguration);
+  fastify.put('/', updateSystemConfiguration);
+  fastify.get('/llm-options', getLLMOptions);
+  fastify.get('/voice-options', getVoiceOptions);
 
-// All routes are protected
-router.use(authenticate);
+  // LLM model listing routes
+  fastify.get('/llm-models', getAllLLMModels);
+  fastify.get('/llm-models/:provider', getProviderLLMModels);
+  fastify.post('/llm-models/dynamic', getDynamicProviderModels);
 
-// Configuration routes
-router.get('/', getSystemConfiguration);
-router.put('/', updateSystemConfiguration);
-router.get('/llm-options', getLLMOptions);
-router.get('/voice-options', getVoiceOptions);
+  // API key management
+  fastify.delete('/api-key/:provider/:name?', deleteApiKey);
 
-// LLM model listing routes
-router.get('/llm-models', getAllLLMModels);
-router.get('/llm-models/:provider', getProviderLLMModels);
-router.post('/llm-models/dynamic', getDynamicProviderModels);
+  // Connection tests
+  fastify.post('/test-llm', testLLMConnection);
+  fastify.post('/test-llm-chat', testLLMChat);
+  fastify.post('/test-twilio', testTwilioConnection);
+  fastify.post('/test-elevenlabs', testElevenLabsConnection);
+  fastify.post('/test-deepgram-tts', testDeepgramTTSConnection);
+  fastify.post('/test-deepgram', testDeepgramASRConnection);
+  fastify.post('/test-voice', testVoiceSynthesis);
+  fastify.post('/test-call', makeTestCall);
+  fastify.post('/verify/elevenlabs', verifyElevenLabsApiKey);
+  fastify.post('/verify/deepgram-tts', verifyDeepgramTTSApiKey);
 
-// API key management
-router.delete('/api-key/:provider/:name?', deleteApiKey);
+  // Deepgram auto-configuration routes
+  fastify.post('/deepgram/auto-configure', autoConfigureDeepgramModel);
+  fastify.post('/deepgram/validate', validateDeepgramConfiguration);
+  fastify.get('/deepgram/status', getDeepgramValidationStatus);
+  fastify.post('/deepgram/test-model', testDeepgramModelCompatibility);
 
-// Connection tests
-router.post('/test-llm', testLLMConnection);
-router.post('/test-llm-chat', testLLMChat);
-router.post('/test-twilio', testTwilioConnection);
-router.post('/test-elevenlabs', testElevenLabsConnection);
-router.post('/test-deepgram-tts', testDeepgramTTSConnection);
-router.post('/test-deepgram', testDeepgramASRConnection);
-router.post('/test-voice', testVoiceSynthesis);
-router.post('/test-call', makeTestCall);
-router.post('/verify/elevenlabs', verifyElevenLabsApiKey);
-router.post('/verify/deepgram-tts', verifyDeepgramTTSApiKey);
+  // Enhanced Deepgram configuration routes
+  fastify.get('/deepgram/suggested-models', getSuggestedDeepgramModels);
+  fastify.post('/deepgram/validate-config', validateCompleteDeepgramConfiguration);
+  fastify.post('/deepgram/batch-test-models', batchTestDeepgramModels);
 
-// Deepgram auto-configuration routes
-router.post('/deepgram/auto-configure', autoConfigureDeepgramModel);
-router.post('/deepgram/validate', validateDeepgramConfiguration);
-router.get('/deepgram/status', getDeepgramValidationStatus);
-router.post('/deepgram/test-model', testDeepgramModelCompatibility);
+  // Model management API endpoints
+  fastify.post('/models/test', testModelCompatibility);
+  fastify.get('/models/available', getAvailableModels);
+  fastify.post('/models/batch-test', batchTestModels);
+  fastify.get('/models/registry', getModelRegistry);
+  fastify.put('/models/update', updateModelConfiguration);
+  fastify.post('/models/suggest-optimal', suggestOptimalConfiguration);
+};
 
-// Enhanced Deepgram configuration routes
-router.get('/deepgram/suggested-models', getSuggestedDeepgramModels);
-router.post('/deepgram/validate-config', validateCompleteDeepgramConfiguration);
-router.post('/deepgram/batch-test-models', batchTestDeepgramModels);
-
-// Model management API endpoints
-router.post('/models/test', testModelCompatibility);
-router.get('/models/available', getAvailableModels);
-router.post('/models/batch-test', batchTestModels);
-router.get('/models/registry', getModelRegistry);
-router.put('/models/update', updateModelConfiguration);
-router.post('/models/suggest-optimal', suggestOptimalConfiguration);
-
-export default router;
+export default configurationRoutes;

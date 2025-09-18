@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { 
   ModelCompatibilityService, 
   getModelCompatibilityService,
@@ -23,12 +23,12 @@ import { getErrorMessage } from '../utils/logger';
  * @route   POST /api/configuration/models/test
  * @access  Private
  */
-export const testModelCompatibility = async (req: Request, res: Response) => {
+export const testModelCompatibility = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { apiKey, model } = req.body;
+    const { apiKey, model } = req.body as any;
 
     if (!apiKey || !model) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'API key and model name are required'
       });
@@ -42,13 +42,13 @@ export const testModelCompatibility = async (req: Request, res: Response) => {
     // Test model access
     const testResult = await configValidator.testModelAccess(apiKey, model);
     
-    return res.status(200).json({
+    return res.status(200).send({
       success: true,
       result: testResult
     });
   } catch (error) {
     logger.error(`Error testing model compatibility: ${getErrorMessage(error)}`);
-    return res.status(500).json({
+    return res.status(500).send({
       success: false,
       message: 'Failed to test model compatibility',
       error: getErrorMessage(error)
@@ -61,13 +61,13 @@ export const testModelCompatibility = async (req: Request, res: Response) => {
  * @route   GET /api/configuration/models/available
  * @access  Private
  */
-export const getAvailableModels = async (req: Request, res: Response) => {
+export const getAvailableModels = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     // Get current configuration
     const config = await Configuration.findOne();
     
     if (!config || !config.deepgramConfig || !config.deepgramConfig.apiKey) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Deepgram API key not configured'
       });
@@ -84,7 +84,7 @@ export const getAvailableModels = async (req: Request, res: Response) => {
     // Get account capabilities
     const capabilities = await modelService.getAccountCapabilities(apiKey);
     
-    return res.status(200).json({
+    return res.status(200).send({
       success: true,
       tier: capabilities.tier,
       availableModels: capabilities.availableModels,
@@ -93,7 +93,7 @@ export const getAvailableModels = async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error(`Error getting available models: ${getErrorMessage(error)}`);
-    return res.status(500).json({
+    return res.status(500).send({
       success: false,
       message: 'Failed to get available models',
       error: getErrorMessage(error)
@@ -106,12 +106,12 @@ export const getAvailableModels = async (req: Request, res: Response) => {
  * @route   POST /api/configuration/models/batch-test
  * @access  Private
  */
-export const batchTestModels = async (req: Request, res: Response) => {
+export const batchTestModels = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { apiKey, models } = req.body;
+    const { apiKey, models } = req.body as any;
 
     if (!apiKey || !models || !Array.isArray(models)) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'API key and array of models are required'
       });
@@ -131,13 +131,13 @@ export const batchTestModels = async (req: Request, res: Response) => {
       ...result
     }));
     
-    return res.status(200).json({
+    return res.status(200).send({
       success: true,
       results: resultsArray
     });
   } catch (error) {
     logger.error(`Error batch testing models: ${getErrorMessage(error)}`);
-    return res.status(500).json({
+    return res.status(500).send({
       success: false,
       message: 'Failed to batch test models',
       error: getErrorMessage(error)
@@ -150,13 +150,13 @@ export const batchTestModels = async (req: Request, res: Response) => {
  * @route   GET /api/configuration/models/registry
  * @access  Private
  */
-export const getModelRegistry = async (_req: Request, res: Response) => {
+export const getModelRegistry = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     // Get current configuration
     const config = await Configuration.findOne();
     
     if (!config || !config.deepgramConfig || !config.deepgramConfig.apiKey) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Deepgram API key not configured'
       });
@@ -173,13 +173,13 @@ export const getModelRegistry = async (_req: Request, res: Response) => {
     // Get model registry
     const registry = modelService.getModelRegistry();
     
-    return res.status(200).json({
+    return res.status(200).send({
       success: true,
       registry
     });
   } catch (error) {
     logger.error(`Error getting model registry: ${getErrorMessage(error)}`);
-    return res.status(500).json({
+    return res.status(500).send({
       success: false,
       message: 'Failed to get model registry',
       error: getErrorMessage(error)
@@ -192,22 +192,22 @@ export const getModelRegistry = async (_req: Request, res: Response) => {
  * @route   PUT /api/configuration/models/update
  * @access  Private
  */
-export const updateModelConfiguration = async (req: Request, res: Response) => {
+export const updateModelConfiguration = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { model, fallbackModels, autoFallback } = req.body;
+    const { model, fallbackModels, autoFallback } = req.body as any;
     
     // Get current configuration
     const config = await Configuration.findOne();
     
     if (!config) {
-      return res.status(404).json({
+      return res.status(404).send({
         success: false,
         message: 'Configuration not found'
       });
     }
     
     if (!config.deepgramConfig || !config.deepgramConfig.apiKey) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Deepgram API key not configured'
       });
@@ -223,7 +223,7 @@ export const updateModelConfiguration = async (req: Request, res: Response) => {
       const modelTest = await configValidator.testModelAccess(apiKey, model);
       
       if (!modelTest.isAccessible) {
-        return res.status(400).json({
+        return res.status(400).send({
           success: false,
           message: `Primary model '${model}' is not accessible`,
           error: modelTest.error
@@ -267,7 +267,7 @@ export const updateModelConfiguration = async (req: Request, res: Response) => {
     // Save configuration
     await config.save();
     
-    return res.status(200).json({
+    return res.status(200).send({
       success: true,
       message: 'Model configuration updated successfully',
       config: {
@@ -280,7 +280,7 @@ export const updateModelConfiguration = async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error(`Error updating model configuration: ${getErrorMessage(error)}`);
-    return res.status(500).json({
+    return res.status(500).send({
       success: false,
       message: 'Failed to update model configuration',
       error: getErrorMessage(error)
@@ -293,12 +293,12 @@ export const updateModelConfiguration = async (req: Request, res: Response) => {
  * @route   POST /api/configuration/models/suggest-optimal
  * @access  Private
  */
-export const suggestOptimalConfiguration = async (req: Request, res: Response) => {
+export const suggestOptimalConfiguration = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { apiKey, preferences } = req.body;
+    const { apiKey, preferences } = req.body as any;
     
     if (!apiKey) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'API key is required'
       });
@@ -310,13 +310,13 @@ export const suggestOptimalConfiguration = async (req: Request, res: Response) =
     // Get optimal configuration suggestion
     const suggestion = await configValidator.suggestOptimalConfiguration(apiKey, preferences);
     
-    return res.status(200).json({
+    return res.status(200).send({
       success: true,
       suggestion
     });
   } catch (error) {
     logger.error(`Error suggesting optimal configuration: ${getErrorMessage(error)}`);
-    return res.status(500).json({
+    return res.status(500).send({
       success: false,
       message: 'Failed to suggest optimal configuration',
       error: getErrorMessage(error)

@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import Call from '../models/Call';
 import Lead from '../models/Lead';
 import Campaign from '../models/Campaign';
@@ -24,33 +24,33 @@ const voiceAIService = getVoiceAIService();
 // @desc    Initiate a new AI call to a lead
 // @route   POST /api/calls/initiate
 // @access  Private
-export const initiateCall = async (req: Request & { user?: any }, res: Response): Promise<Response> => {
+export const initiateCall = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
-    const { leadId, campaignId, scheduleTime, notes } = req.body;
+    const { leadId, campaignId, scheduleTime, notes } = req.body as any;
 
     // Log the received request for debugging
     logger.info('Call initiate request:', { 
       body: req.body, 
-      leadId: req.body.leadId, 
-      campaignId: req.body.campaignId 
+      leadId: (req.body as any).leadId, 
+      campaignId: (req.body as any).campaignId 
     });
 
     if (!leadId || !campaignId) {
       logger.error('Missing required fields:', { leadId, campaignId });
-      return res.status(400).json({ message: 'Lead ID and Campaign ID are required' });
+      return res.status(400).send({ message: 'Lead ID and Campaign ID are required' });
     }
 
     // Check if lead and campaign exist
     const lead = await Lead.findById(leadId);
     if (!lead) {
       logger.error(`Lead not found with ID: ${leadId}`);
-      return res.status(404).json({ message: 'Lead not found' });
+      return res.status(404).send({ message: 'Lead not found' });
     }
 
     const campaign = await Campaign.findById(campaignId);
     if (!campaign) {
       logger.error(`Campaign not found with ID: ${campaignId}`);
-      return res.status(404).json({ message: 'Campaign not found' });
+      return res.status(404).send({ message: 'Campaign not found' });
     }
 
     // Get system configuration
@@ -59,13 +59,13 @@ export const initiateCall = async (req: Request & { user?: any }, res: Response)
     
     if (!isDemoMode && (!configuration || !configuration.twilioConfig.isEnabled)) {
       logger.error('Twilio not configured:', { configuration: configuration?.twilioConfig });
-      return res.status(400).json({ message: 'Twilio is not configured or enabled' });
+      return res.status(400).send({ message: 'Twilio is not configured or enabled' });
     }
 
     // Check if we have an active script
     const activeScript = campaign.script.versions.find(version => version.isActive);
     if (!activeScript) {
-      return res.status(400).json({ message: 'No active script found for this campaign' });
+      return res.status(400).send({ message: 'No active script found for this campaign' });
     }
 
     // Create a new call record first (before using it in TwiML)
@@ -88,7 +88,7 @@ export const initiateCall = async (req: Request & { user?: any }, res: Response)
     // If call is scheduled for future, we're done
     if (scheduleTime) {
       await newCall.save();
-      return res.status(201).json({
+      return res.status(201).send({
         message: 'Call scheduled successfully',
         call: newCall
       });
@@ -106,7 +106,7 @@ export const initiateCall = async (req: Request & { user?: any }, res: Response)
       
       if (!baseUrl) {
         logger.error('WEBHOOK_BASE_URL environment variable is not set');
-        return res.status(500).json({
+        return res.status(500).send({
           success: false,
           message: 'Server configuration error: webhook base URL not configured'
         });
@@ -155,7 +155,7 @@ export const initiateCall = async (req: Request & { user?: any }, res: Response)
       
       // Save the failed call and return error
       await newCall.save();
-      return res.status(500).json({
+      return res.status(500).send({
         message: 'Failed to initiate call',
         error: handleError(error)
       });
@@ -163,13 +163,13 @@ export const initiateCall = async (req: Request & { user?: any }, res: Response)
 
     await newCall.save();
 
-    return res.status(201).json({
+    return res.status(201).send({
       message: 'Call initiated successfully',
       call: newCall
     });
   } catch (error) {
     logger.error('Error in initiateCall:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -180,7 +180,7 @@ export const initiateCall = async (req: Request & { user?: any }, res: Response)
 // @desc    Get call history with filtering and pagination
 // @route   GET /api/calls
 // @access  Private
-export const getCallHistory = async (req: Request & { user?: any }, res: Response): Promise<Response> => {
+export const getCallHistory = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
     const { 
       page = 1, 
@@ -191,7 +191,7 @@ export const getCallHistory = async (req: Request & { user?: any }, res: Respons
       startDate,
       endDate,
       outcome
-    } = req.query;
+    } = req.query as any;
 
     // Use unified analytics service for consistent call history
     const result = await unifiedAnalyticsService.getCallHistory({
@@ -205,10 +205,10 @@ export const getCallHistory = async (req: Request & { user?: any }, res: Respons
       outcome: outcome as string
     });
 
-    return res.status(200).json(result);
+    return res.status(200).send(result);
   } catch (error) {
     logger.error('Error in getCallHistory:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -218,20 +218,20 @@ export const getCallHistory = async (req: Request & { user?: any }, res: Respons
 // @desc    Get detailed information about a specific call
 // @route   GET /api/calls/:id
 // @access  Private
-export const getCallById = async (req: Request, res: Response): Promise<Response> => {
+export const getCallById = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
-    const call = await Call.findById(req.params.id)
+    const call = await Call.findById((req.params as any).id)
       .populate('leadId', 'name phoneNumber company email title')
       .populate('campaignId', 'name description goal');
 
     if (!call) {
-      return res.status(404).json({ message: 'Call not found' });
+      return res.status(404).send({ message: 'Call not found' });
     }
 
-    return res.status(200).json({ call });
+    return res.status(200).send({ call });
   } catch (error) {
     logger.error('Error in getCallById:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: (error as Error).message
     });
@@ -266,19 +266,19 @@ async function getTwilioRecordingUrl(call: any, client: twilio.Twilio): Promise<
 // @desc    Get call recording URL
 // @route   GET /api/calls/:id/recording
 // @access  Private
-export const getCallRecording = async (req: Request, res: Response): Promise<Response> => {
+export const getCallRecording = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
-    const call = await Call.findById(req.params.id);
+    const call = await Call.findById((req.params as any).id);
 
     if (!call) {
-      return res.status(404).json({ message: 'Call not found' });
+      return res.status(404).send({ message: 'Call not found' });
     }
 
     if (!(call as any).recordingUrl) {
-      return res.status(404).json({ message: 'No recording available for this call' });
+      return res.status(404).send({ message: 'No recording available for this call' });
     }
 
-    const isStream = req.query.stream === 'true';
+    const isStream = (req.query as any).stream === 'true';
     
     if (isStream) {
       const configuration = await Configuration.findOne();
@@ -297,7 +297,7 @@ export const getCallRecording = async (req: Request, res: Response): Promise<Res
           hasAccountSid: !!configuration?.twilioConfig?.accountSid,
           hasAuthToken: !!configuration?.twilioConfig?.authToken
         });
-        return res.status(500).json({ 
+        return res.status(500).send({ 
           message: 'Twilio configuration not found or incomplete',
           details: {
             hasConfiguration: !!configuration,
@@ -319,7 +319,7 @@ export const getCallRecording = async (req: Request, res: Response): Promise<Res
 
         if (!twilioRecordingUrl) {
           logger.error('Recording not found in Twilio for call:', call._id);
-          return res.status(404).json({ message: 'Recording not found in Twilio' });
+          return res.status(404).send({ message: 'Recording not found in Twilio' });
         }
 
         const axios = require('axios');
@@ -347,11 +347,11 @@ export const getCallRecording = async (req: Request, res: Response): Promise<Res
           contentLength: response.headers['content-length']
         });
         
-        res.set('Content-Type', response.headers['content-type']);
-        res.set('Content-Length', response.headers['content-length']);
-        res.set('Accept-Ranges', 'bytes');
+        res.header('Content-Type', response.headers['content-type']);
+        res.header('Content-Length', response.headers['content-length']);
+        res.header('Accept-Ranges', 'bytes');
         
-        return response.data.pipe(res);
+        return res.send(response.data);
       } catch (error) {
         logger.error('Error streaming recording:', error);
         
@@ -366,14 +366,14 @@ export const getCallRecording = async (req: Request, res: Response): Promise<Res
           });
           
           if (axiosError.response.status === 401) {
-            return res.status(401).json({
+            return res.status(401).send({
               message: 'Authentication failed with Twilio',
               error: 'Invalid Twilio credentials'
             });
           }
         }
         
-        return res.status(500).json({
+        return res.status(500).send({
           message: 'Error streaming recording',
           error: (error as Error).message,
           details: (error as any).response ? {
@@ -384,13 +384,13 @@ export const getCallRecording = async (req: Request, res: Response): Promise<Res
       }
     } else {
       const streamUrl = `/api/calls/${call._id}/recording?stream=true`;
-      return res.status(200).json({ 
+      return res.status(200).send({ 
         recordingUrl: streamUrl
       });
     }
   } catch (error) {
     logger.error('Error in getCallRecording:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: (error as Error).message
     });
@@ -400,25 +400,25 @@ export const getCallRecording = async (req: Request, res: Response): Promise<Res
 // @desc    Get call transcript
 // @route   GET /api/calls/:id/transcript
 // @access  Private
-export const getCallTranscript = async (req: Request, res: Response): Promise<Response> => {
+export const getCallTranscript = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
-    const call = await Call.findById(req.params.id);
+    const call = await Call.findById((req.params as any).id);
 
     if (!call) {
-      return res.status(404).json({ message: 'Call not found' });
+      return res.status(404).send({ message: 'Call not found' });
     }
 
     if (!(call as any).transcript) {
-      return res.status(404).json({ message: 'No transcript available for this call' });
+      return res.status(404).send({ message: 'No transcript available for this call' });
     }
 
-    return res.status(200).json({ 
+    return res.status(200).send({ 
       transcript: (call as any).transcript,
       conversationLog: (call as any).conversationLog
     });
   } catch (error) {
     logger.error('Error in getCallTranscript:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: (error as Error).message
     });
@@ -428,17 +428,17 @@ export const getCallTranscript = async (req: Request, res: Response): Promise<Re
 // @desc    Schedule a callback for a lead
 // @route   POST /api/calls/:id/schedule-callback
 // @access  Private
-export const scheduleCallback = async (req: Request & { user?: any }, res: Response): Promise<Response> => {
+export const scheduleCallback = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
-    const { dateTime, notes } = req.body;
+    const { dateTime, notes } = req.body as any;
 
     if (!dateTime) {
-      return res.status(400).json({ message: 'Callback date and time are required' });
+      return res.status(400).send({ message: 'Callback date and time are required' });
     }
 
-    const call = await Call.findById(req.params.id);
+    const call = await Call.findById((req.params as any).id);
     if (!call) {
-      return res.status(404).json({ message: 'Call not found' });
+      return res.status(404).send({ message: 'Call not found' });
     }
 
     // Update call with callback information
@@ -453,13 +453,13 @@ export const scheduleCallback = async (req: Request & { user?: any }, res: Respo
     // Schedule callback in a real implementation would involve 
     // setting up a job to trigger at the specified time
 
-    return res.status(200).json({
+    return res.status(200).send({
       message: 'Callback scheduled successfully',
       callback: (call as any).callback
     });
   } catch (error) {
     logger.error('Error in scheduleCallback:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: (error as Error).message
     });
@@ -469,9 +469,9 @@ export const scheduleCallback = async (req: Request & { user?: any }, res: Respo
 // @desc    Get call analytics (metrics and statistics)
 // @route   GET /api/calls/analytics
 // @access  Private
-export const getCallAnalytics = async (req: Request, res: Response): Promise<Response> => {
+export const getCallAnalytics = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
-    const { campaignId, startDate, endDate } = req.query;
+    const { campaignId, startDate, endDate } = req.query as any;
 
     // Parse dates
     const start = startDate ? new Date(startDate as string) : undefined;
@@ -487,13 +487,13 @@ export const getCallAnalytics = async (req: Request, res: Response): Promise<Res
       )
     ]);
 
-    return res.status(200).json({
+    return res.status(200).send({
       summary,
       callsByDay
     });
   } catch (error) {
     logger.error('Error in getCallAnalytics:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: (error as Error).message
     });
@@ -503,7 +503,7 @@ export const getCallAnalytics = async (req: Request, res: Response): Promise<Res
 // @desc    Export call data to CSV, JSON, or Excel
 // @route   GET /api/calls/export
 // @access  Private
-export const exportCalls = async (req: Request & { user?: any }, res: Response): Promise<Response> => {
+export const exportCalls = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
     const { 
       format = 'csv',
@@ -513,7 +513,7 @@ export const exportCalls = async (req: Request & { user?: any }, res: Response):
       startDate,
       endDate,
       outcome
-    } = req.query;
+    } = req.query as any;
 
     // Build query
     const query: any = {};
@@ -556,7 +556,7 @@ export const exportCalls = async (req: Request & { user?: any }, res: Response):
     // Export based on requested format
     if (format === 'json') {
       // Send JSON
-      return res.status(200).json({ calls: exportData });
+      return res.status(200).send({ calls: exportData });
     } 
     else if (format === 'csv') {
       // Convert to CSV using a simple method without external dependencies
@@ -569,24 +569,24 @@ export const exportCalls = async (req: Request & { user?: any }, res: Response):
           ).join('\n')
         : header;
       
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', 'attachment; filename=calls-export.csv');
+      res.header('Content-Type', 'text/csv');
+      res.header('Content-Disposition', 'attachment; filename=calls-export.csv');
       return res.status(200).send(csv);
     }
     else if (format === 'xlsx') {
       // For XLSX, we'll return JSON with a message to implement client-side Excel export
       // In a real implementation, you would use a library like exceljs
-      return res.status(200).json({ 
+      return res.status(200).send({ 
         calls: exportData,
         message: 'XLSX export is handled on the client side'
       });
     }
     else {
-      return res.status(400).json({ message: 'Unsupported export format' });
+      return res.status(400).send({ message: 'Unsupported export format' });
     }
   } catch (error) {
     logger.error('Error in exportCalls:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: (error as Error).message
     });
@@ -596,15 +596,15 @@ export const exportCalls = async (req: Request & { user?: any }, res: Response):
 // @desc    Sync all Twilio recordings
 // @route   POST /api/calls/sync-recordings
 // @access  Private (Admin only)
-export const syncTwilioRecordings = async (req: Request & { user?: any }, res: Response): Promise<Response> => {
+export const syncTwilioRecordings = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
     // Temporarily allow all authenticated users (remove this check later for production)
     if (!req.user) {
-      return res.status(403).json({ message: 'Authentication required' });
+      return res.status(403).send({ message: 'Authentication required' });
     }
 
     // Get days parameter from request (default to 30)
-    const days = req.body.days ? parseInt(req.body.days, 10) : 30;
+    const days = (req.body as any).days ? parseInt((req.body as any).days, 10) : 30;
     
     // Import the service
     const { twilioRecordingsService } = await import('../services/twilioRecordingsService');
@@ -612,14 +612,14 @@ export const syncTwilioRecordings = async (req: Request & { user?: any }, res: R
     // Sync recordings
     const result = await twilioRecordingsService.syncAllRecordings(days);
     
-    return res.status(200).json({
+    return res.status(200).send({
       success: true,
       message: `Successfully synced ${result.matchedRecordings} recordings out of ${result.totalRecordings} total recordings`,
       data: result
     });
   } catch (error) {
     logger.error('Error in syncTwilioRecordings:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: (error as Error).message
     });
@@ -629,22 +629,22 @@ export const syncTwilioRecordings = async (req: Request & { user?: any }, res: R
 // @desc    Get call recording details from Twilio
 // @route   GET /api/calls/:id/recording-details
 // @access  Private
-export const getCallRecordingDetails = async (req: Request, res: Response): Promise<Response> => {
+export const getCallRecordingDetails = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
-    const call = await Call.findById(req.params.id);
+    const call = await Call.findById((req.params as any).id);
 
     if (!call) {
-      return res.status(404).json({ message: 'Call not found' });
+      return res.status(404).send({ message: 'Call not found' });
     }
 
     if (!call.twilioSid) {
-      return res.status(404).json({ message: 'No Twilio SID found for this call' });
+      return res.status(404).send({ message: 'No Twilio SID found for this call' });
     }
 
     // Get Twilio configuration
     const configuration = await Configuration.findOne();
     if (!configuration || !configuration.twilioConfig || !configuration.twilioConfig.accountSid || !configuration.twilioConfig.authToken) {
-      return res.status(500).json({ message: 'Twilio configuration not found' });
+      return res.status(500).send({ message: 'Twilio configuration not found' });
     }
 
     // Initialize Twilio client
@@ -657,7 +657,7 @@ export const getCallRecordingDetails = async (req: Request, res: Response): Prom
     const recordings = await client.recordings.list({ callSid: call.twilioSid });
 
     if (recordings.length === 0) {
-      return res.status(404).json({ message: 'No recordings found for this call' });
+      return res.status(404).send({ message: 'No recordings found for this call' });
     }
 
     // Get the most recent recording
@@ -677,7 +677,7 @@ export const getCallRecordingDetails = async (req: Request, res: Response): Prom
       });
     }
 
-    return res.status(200).json({
+    return res.status(200).send({
       success: true,
       recording: {
         sid: latestRecording.sid,
@@ -692,7 +692,7 @@ export const getCallRecordingDetails = async (req: Request, res: Response): Prom
     });
   } catch (error) {
     logger.error('Error in getCallRecordingDetails:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: (error as Error).message
     });

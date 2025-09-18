@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import Call from '../models/Call';
 import Lead from '../models/Lead';
 import Campaign from '../models/Campaign';
@@ -9,15 +9,15 @@ import { unifiedAnalyticsService } from '../services/unifiedAnalyticsService';
 // @desc    Get dashboard overview
 // @route   GET /api/dashboard/overview
 // @access  Private
-export const getDashboardOverview = async (req: Request & { user?: any }, res: Response) => {
+export const getDashboardOverview = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     // Use unified analytics service for consistent metrics
     const overview = await unifiedAnalyticsService.getDashboardOverview(req.user?.id);
     
-    res.status(200).json(overview);
+    res.status(200).send(overview);
   } catch (error) {
     logger.error('Error in getDashboardOverview:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -27,7 +27,7 @@ export const getDashboardOverview = async (req: Request & { user?: any }, res: R
 // @desc    Get call metrics
 // @route   GET /api/dashboard/call-metrics
 // @access  Private
-export const getCallMetrics = async (_req: Request & { user?: any }, res: Response) => {
+export const getCallMetrics = async (_req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     // Use unified analytics service for consistent call metrics
     const metrics = await unifiedAnalyticsService.getCallMetrics();
@@ -44,14 +44,14 @@ export const getCallMetrics = async (_req: Request & { user?: any }, res: Respon
       count
     }));
     
-    res.status(200).json({
+    res.status(200).send({
       statusDistribution: callStatusDistribution,
       outcomeDistribution: callOutcomeDistribution,
       averageDuration: metrics.averageDuration
     });
   } catch (error) {
     logger.error('Error in getCallMetrics:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -61,7 +61,7 @@ export const getCallMetrics = async (_req: Request & { user?: any }, res: Respon
 // @desc    Get lead metrics
 // @route   GET /api/dashboard/lead-metrics
 // @access  Private
-export const getLeadMetrics = async (_req: Request & { user?: any }, res: Response) => {
+export const getLeadMetrics = async (_req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     // Get lead source distribution
     const leadSourceDistribution = await Lead.aggregate([
@@ -79,14 +79,14 @@ export const getLeadMetrics = async (_req: Request & { user?: any }, res: Respon
       { $group: { _id: '$source', count: { $sum: 1 } } }
     ]);
     
-    res.status(200).json({
+    res.status(200).send({
       sourceDistribution: leadSourceDistribution,
       statusDistribution: leadStatusDistribution,
       conversionBySource: leadConversionBySource
     });
   } catch (error) {
     logger.error('Error in getLeadMetrics:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -96,7 +96,7 @@ export const getLeadMetrics = async (_req: Request & { user?: any }, res: Respon
 // @desc    Get agent performance metrics
 // @route   GET /api/dashboard/agent-performance
 // @access  Private
-export const getAgentPerformance = async (_req: Request & { user?: any }, res: Response) => {
+export const getAgentPerformance = async (_req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     // Fetch actual agent performance data from database
     const callsData = await Call.find({}).sort('-createdAt').limit(200);
@@ -136,10 +136,10 @@ export const getAgentPerformance = async (_req: Request & { user?: any }, res: R
       }
     };
     
-    res.status(200).json(performanceData);
+    res.status(200).send(performanceData);
   } catch (error) {
     logger.error('Error in getAgentPerformance:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -149,7 +149,7 @@ export const getAgentPerformance = async (_req: Request & { user?: any }, res: R
 // @desc    Get geographical distribution of calls
 // @route   GET /api/dashboard/geographical
 // @access  Private
-export const getGeographicalDistribution = async (_req: Request & { user?: any }, res: Response) => {
+export const getGeographicalDistribution = async (_req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     // Get geographical distribution from the database
     const geoData = await Call.aggregate([
@@ -166,8 +166,8 @@ export const getGeographicalDistribution = async (_req: Request & { user?: any }
         $group: {
           _id: '$leadData.region',
           count: { $sum: 1 },
-          successful: { 
-            $sum: { $cond: [{ $eq: ['$outcome', 'successful'] }, 1, 0] } 
+          successful: {
+            $sum: { $cond: [{ $eq: ['$outcome', 'successful'] }, 1, 0] }
           }
         }
       },
@@ -182,10 +182,10 @@ export const getGeographicalDistribution = async (_req: Request & { user?: any }
       { $sort: { count: -1 } }
     ]);
     
-    res.status(200).json(geoData);
+    res.status(200).send(geoData);
   } catch (error) {
     logger.error('Error in getGeographicalDistribution:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -195,7 +195,7 @@ export const getGeographicalDistribution = async (_req: Request & { user?: any }
 // @desc    Get time series data for dashboard charts
 // @route   GET /api/dashboard/time-series
 // @access  Private
-export const getTimeSeriesData = async (req: Request & { user?: any }, res: Response) => {
+export const getTimeSeriesData = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     const { metric, period = 'week' } = req.query as { metric?: string; period?: string };
     
@@ -241,7 +241,7 @@ export const getTimeSeriesData = async (req: Request & { user?: any }, res: Resp
         {
           $group: {
             _id: {
-              $dateToString: { 
+              $dateToString: {
                 format: period === 'week' ? '%Y-%m-%d' : period === 'month' ? '%Y-%U' : '%Y-%m',
                 date: '$createdAt'
               }
@@ -257,7 +257,7 @@ export const getTimeSeriesData = async (req: Request & { user?: any }, res: Resp
         {
           $group: {
             _id: {
-              $dateToString: { 
+              $dateToString: {
                 format: period === 'week' ? '%Y-%m-%d' : period === 'month' ? '%Y-%U' : '%Y-%m',
                 date: '$createdAt'
               }
@@ -274,7 +274,7 @@ export const getTimeSeriesData = async (req: Request & { user?: any }, res: Resp
         {
           $group: {
             _id: {
-              $dateToString: { 
+              $dateToString: {
                 format: period === 'week' ? '%Y-%m-%d' : period === 'month' ? '%Y-%U' : '%Y-%m',
                 date: '$createdAt'
               }
@@ -297,10 +297,10 @@ export const getTimeSeriesData = async (req: Request & { user?: any }, res: Resp
       ]
     };
     
-    res.status(200).json(chartData);
+    res.status(200).send(chartData);
   } catch (error) {
     logger.error('Error in getTimeSeriesData:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -310,7 +310,7 @@ export const getTimeSeriesData = async (req: Request & { user?: any }, res: Resp
 // @desc    Export dashboard data
 // @route   GET /api/dashboard/export
 // @access  Private
-export const exportDashboardData = async (req: Request & { user?: any }, res: Response) => {
+export const exportDashboardData = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     const { format = 'json' } = req.query as { format?: string };
     
@@ -342,7 +342,7 @@ export const exportDashboardData = async (req: Request & { user?: any }, res: Re
     };
     
     if (format === 'json') {
-      return res.status(200).json(exportData);
+      return res.status(200).send(exportData);
     } else if (format === 'csv') {
       // Convert to CSV
       let csv = 'Data Type,Category,Count\n';
@@ -362,18 +362,19 @@ export const exportDashboardData = async (req: Request & { user?: any }, res: Re
       csv += `Overview,Total Leads,${leadCount}\n`;
       csv += `Overview,Total Campaigns,${campaignCount}\n`;
       
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', 'attachment; filename=dashboard-export.csv');
+      res.header('Content-Type', 'text/csv');
+      res.header('Content-Disposition', 'attachment; filename=dashboard-export.csv');
       return res.status(200).send(csv);
     } else {
-      return res.status(400).json({ message: 'Unsupported export format' });
+      return res.status(400).send({ message: 'Unsupported export format' });
     }
   } catch (error) {
     logger.error('Error in exportDashboardData:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
     return;
   }
 };
+

@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { callAnalyticsService } from '../services';
 import { unifiedAnalyticsService } from '../services/unifiedAnalyticsService';
 import logger from '../utils/logger';
@@ -6,27 +6,24 @@ import logger from '../utils/logger';
 /**
  * Get call timeline metrics
  */
-export const getCallTimeline = async (req: Request, res: Response): Promise<void> => {
+export const getCallTimeline = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
-    const interval = (req.query.interval as 'hour' | 'day' | 'week' | 'month') || 'day';
-    const campaignId = req.query.campaignId as string;
+    const { startDate, endDate, interval, campaignId } = req.query as any;
     
     const timeline = await callAnalyticsService.getCallTimeline(
-      startDate,
-      endDate,
-      interval,
+      startDate ? new Date(startDate) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+      endDate ? new Date(endDate) : new Date(),
+      interval || 'day',
       campaignId
     );
     
-    res.json({
+    reply.send({
       success: true,
       data: timeline
     });
   } catch (error) {
     logger.error('Error getting call timeline:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve call timeline data'
     });
@@ -36,25 +33,23 @@ export const getCallTimeline = async (req: Request, res: Response): Promise<void
 /**
  * Get campaign performance metrics
  */
-export const getCampaignPerformance = async (req: Request, res: Response): Promise<void> => {
+export const getCampaignPerformance = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
-    const campaignIds = req.query.campaignIds ? (req.query.campaignIds as string).split(',') : undefined;
+    const { startDate, endDate, campaignIds } = req.query as any;
     
     const performance = await callAnalyticsService.getCampaignPerformanceMetrics(
-      startDate,
-      endDate,
-      campaignIds
+      startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+      endDate ? new Date(endDate) : new Date(),
+      campaignIds ? campaignIds.split(',') : undefined
     );
     
-    res.json({
+    reply.send({
       success: true,
       data: performance
     });
   } catch (error) {
     logger.error('Error getting campaign performance:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve campaign performance data'
     });
@@ -64,25 +59,23 @@ export const getCampaignPerformance = async (req: Request, res: Response): Promi
 /**
  * Get call distribution metrics
  */
-export const getCallDistribution = async (req: Request, res: Response): Promise<void> => {
+export const getCallDistribution = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
-    const campaignId = req.query.campaignId as string;
+    const { startDate, endDate, campaignId } = req.query as any;
     
     const distribution = await callAnalyticsService.getCallDistributionMetrics(
-      startDate,
-      endDate,
+      startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+      endDate ? new Date(endDate) : new Date(),
       campaignId
     );
     
-    res.json({
+    reply.send({
       success: true,
       data: distribution
     });
   } catch (error) {
     logger.error('Error getting call distribution:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve call distribution data'
     });
@@ -92,25 +85,23 @@ export const getCallDistribution = async (req: Request, res: Response): Promise<
 /**
  * Get conversation metrics
  */
-export const getConversationMetrics = async (req: Request, res: Response): Promise<void> => {
+export const getConversationMetrics = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
-    const campaignId = req.query.campaignId as string;
+    const { startDate, endDate, campaignId } = req.query as any;
     
     const metrics = await callAnalyticsService.getConversationMetrics(
-      startDate,
-      endDate,
+      startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+      endDate ? new Date(endDate) : new Date(),
       campaignId
     );
     
-    res.json({
+    reply.send({
       success: true,
       data: metrics
     });
   } catch (error) {
     logger.error('Error getting conversation metrics:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve conversation metrics data'
     });
@@ -120,19 +111,18 @@ export const getConversationMetrics = async (req: Request, res: Response): Promi
 /**
  * Get detailed metrics for a specific call
  */
-export const getDetailedCallMetrics = async (req: Request, res: Response): Promise<void> => {
+export const getDetailedCallMetrics = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+  const { id } = req.params as any;
   try {
-    const callId = req.params.id;
+    const metrics = await callAnalyticsService.getDetailedCallMetrics(id);
     
-    const metrics = await callAnalyticsService.getDetailedCallMetrics(callId);
-    
-    res.json({
+    reply.send({
       success: true,
       data: metrics
     });
   } catch (error) {
-    logger.error(`Error getting detailed metrics for call ${req.params.id}:`, error);
-    res.status(500).json({
+    logger.error(`Error getting detailed metrics for call ${id}:`, error);
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve detailed call metrics'
     });
@@ -142,7 +132,7 @@ export const getDetailedCallMetrics = async (req: Request, res: Response): Promi
 /**
  * Get system health and monitoring metrics
  */
-export const getSystemHealth = async (_req: Request, res: Response): Promise<void> => {
+export const getSystemHealth = async (_req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
     // This would use the callMonitoring service to get system health
     // For now, we'll return a mock response
@@ -156,13 +146,13 @@ export const getSystemHealth = async (_req: Request, res: Response): Promise<voi
       lastUpdated: new Date()
     };
     
-    res.json({
+    reply.send({
       success: true,
       data: health
     });
   } catch (error) {
     logger.error('Error getting system health:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve system health data'
     });
@@ -172,19 +162,17 @@ export const getSystemHealth = async (_req: Request, res: Response): Promise<voi
 /**
  * Get unified call metrics for analytics page
  */
-export const getUnifiedCallMetrics = async (req: Request, res: Response): Promise<void> => {
+export const getUnifiedCallMetrics = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
-    const campaignId = req.query.campaignId as string;
+    const { startDate, endDate, campaignId } = req.query as any;
     
     // Use unified analytics service for consistent metrics
     const [metrics, timeline] = await Promise.all([
-      unifiedAnalyticsService.getCallMetrics(startDate, endDate, campaignId),
-      unifiedAnalyticsService.getCallTimeline(startDate, endDate, campaignId)
+      unifiedAnalyticsService.getCallMetrics(startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), endDate ? new Date(endDate) : new Date(), campaignId),
+      unifiedAnalyticsService.getCallTimeline(startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), endDate ? new Date(endDate) : new Date(), campaignId)
     ]);
     
-    res.json({
+    reply.send({
       success: true,
       data: {
         summary: metrics,
@@ -193,7 +181,7 @@ export const getUnifiedCallMetrics = async (req: Request, res: Response): Promis
     });
   } catch (error) {
     logger.error('Error getting unified call metrics:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve unified call metrics'
     });

@@ -8,12 +8,11 @@ import { Worker } from 'worker_threads';
 import fs from 'fs';
 import path from 'path';
 import { Readable } from 'stream';
-import { FastifyRequest, FastifyReply, AppError } from '../types/api';
+import { FastifyRequest, FastifyReply } from 'fastify'; // Corrected import
 import { v4 as uuidv4 } from 'uuid';
 import { pipeline } from 'stream/promises';
-
 export function registerAudioRoutes(
-  server: FastifyInstance,
+  server,
   redisClient: RedisClientType,
   workerPool: Map<string, Worker>
 ) {

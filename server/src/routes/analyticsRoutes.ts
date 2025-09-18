@@ -1,5 +1,4 @@
-import express from 'express';
-import { authenticate } from '../middleware/auth';
+import { FastifyInstance } from 'fastify';
 import {
   getCallTimeline,
   getCampaignPerformance,
@@ -10,18 +9,16 @@ import {
   getUnifiedCallMetrics
 } from '../controllers/analyticsController';
 
-const router = express.Router();
+const analyticsRoutes = async (fastify, opts: Record<string, any>) => {
+  fastify.addHook('onRequest', fastify.authenticate);
 
-// All routes should be authenticated
-router.use(authenticate);
+  fastify.get('/unified-metrics', getUnifiedCallMetrics);
+  fastify.get('/call-timeline', getCallTimeline);
+  fastify.get('/campaign-performance', getCampaignPerformance);
+  fastify.get('/call-distribution', getCallDistribution);
+  fastify.get('/conversation-metrics', getConversationMetrics);
+  fastify.get('/calls/:id/metrics', getDetailedCallMetrics);
+  fastify.get('/system-health', getSystemHealth);
+};
 
-// Analytics routes
-router.get('/unified-metrics', getUnifiedCallMetrics);
-router.get('/call-timeline', getCallTimeline);
-router.get('/campaign-performance', getCampaignPerformance);
-router.get('/call-distribution', getCallDistribution);
-router.get('/conversation-metrics', getConversationMetrics);
-router.get('/calls/:id/metrics', getDetailedCallMetrics);
-router.get('/system-health', getSystemHealth);
-
-export default router;
+export default analyticsRoutes;

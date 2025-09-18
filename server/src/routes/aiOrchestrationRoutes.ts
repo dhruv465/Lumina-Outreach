@@ -5,7 +5,7 @@
  * voice synthesis, and context retrieval.
  */
 
-import express from 'express';
+import { FastifyInstance } from 'fastify';
 import {
   getServiceStatus,
   generateChatResponse,
@@ -14,18 +14,49 @@ import {
   retrieveContext,
   updateConfiguration
 } from '../controllers/aiOrchestrationController';
-import { authenticate } from '../middleware/auth';
 
-const router = express.Router();
+export default async function (fastify, options: Record<string, any>) {
+  // Protected routes (require authentication)
+  fastify.route({
+    method: 'GET',
+    url: '/status',
+    preHandler: [fastify.authenticate],
+    handler: getServiceStatus,
+  });
 
-// Protected routes (require authentication)
-router.get('/status', authenticate, getServiceStatus);
-router.post('/chat', authenticate, generateChatResponse);
-router.post('/stream-chat', authenticate, streamChatResponse);
-router.post('/voice', authenticate, synthesizeVoice);
-router.post('/context', authenticate, retrieveContext);
+  fastify.route({
+    method: 'POST',
+    url: '/chat',
+    preHandler: [fastify.authenticate],
+    handler: generateChatResponse,
+  });
 
-// Admin-only routes
-router.put('/config', authenticate, updateConfiguration);
+  fastify.route({
+    method: 'POST',
+    url: '/stream-chat',
+    preHandler: [fastify.authenticate],
+    handler: streamChatResponse,
+  });
 
-export default router;
+  fastify.route({
+    method: 'POST',
+    url: '/voice',
+    preHandler: [fastify.authenticate],
+    handler: synthesizeVoice,
+  });
+
+  fastify.route({
+    method: 'POST',
+    url: '/context',
+    preHandler: [fastify.authenticate],
+    handler: retrieveContext,
+  });
+
+  // Admin-only routes
+  fastify.route({
+    method: 'PUT',
+    url: '/config',
+    preHandler: [fastify.authenticate],
+    handler: updateConfiguration,
+  });
+}

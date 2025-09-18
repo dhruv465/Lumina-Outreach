@@ -5,7 +5,7 @@
  * voice synthesis, and RAG operations.
  */
 
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { getAIOrchestrationService } from '../services/aiOrchestrationAdapter';
 import { getRAGSystem } from '../services/rag/ragSystem';
 import { getLLMService } from '../services';
@@ -14,12 +14,12 @@ import { logger } from '../index';
 // @desc    Get AI service status
 // @route   GET /api/ai-orchestration/status
 // @access  Private
-export const getServiceStatus = async (req: Request, res: Response) => {
+export const getServiceStatus = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const orchestrationService = getAIOrchestrationService();
     const metrics = orchestrationService.getMetrics();
     
-    res.json({
+    reply.send({
       status: 'operational',
       providers: orchestrationService.getActiveProviders(),
       metrics,
@@ -28,7 +28,7 @@ export const getServiceStatus = async (req: Request, res: Response) => {
   } catch (error) {
     logger.error(`Error getting AI service status: ${error instanceof Error ? error.message : String(error)}`);
     
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       message: 'Failed to get AI service status',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -39,12 +39,12 @@ export const getServiceStatus = async (req: Request, res: Response) => {
 // @desc    Generate chat response
 // @route   POST /api/ai-orchestration/chat
 // @access  Private
-export const generateChatResponse = async (req: Request, res: Response) => {
+export const generateChatResponse = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { messages, options } = req.body;
+    const { messages, options } = req.body as { messages: any[], options: any };
     
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({
+      return reply.code(400).send({
         success: false,
         message: 'Messages array is required and must not be empty'
       });
@@ -53,14 +53,14 @@ export const generateChatResponse = async (req: Request, res: Response) => {
     const orchestrationService = getAIOrchestrationService();
     const response = await orchestrationService.processLLM(messages, options);
     
-    res.json({
+    reply.send({
       success: true,
       response
     });
   } catch (error) {
     logger.error(`Error generating chat response: ${error instanceof Error ? error.message : String(error)}`);
     
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       message: 'Failed to generate chat response',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -71,12 +71,12 @@ export const generateChatResponse = async (req: Request, res: Response) => {
 // @desc    Stream chat response
 // @route   POST /api/ai-orchestration/stream-chat
 // @access  Private
-export const streamChatResponse = async (req: Request, res: Response) => {
+export const streamChatResponse = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { messages, options } = req.body;
+    const { messages, options } = req.body as { messages: any[], options: any };
     
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({
+      return reply.code(400).send({
         success: false,
         message: 'Messages array is required and must not be empty'
       });
@@ -85,23 +85,23 @@ export const streamChatResponse = async (req: Request, res: Response) => {
     const orchestrationService = getAIOrchestrationService();
     
     // Set up SSE
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
+    reply.raw.setHeader('Content-Type', 'text/event-stream');
+    reply.raw.setHeader('Cache-Control', 'no-cache');
+    reply.raw.setHeader('Connection', 'keep-alive');
     
     // Stream response
     const streamOptions = {
       ...options,
       onChunk: (chunk: string) => {
-        res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+        reply.raw.write(`data: ${JSON.stringify({ chunk })}\n\n`);
       },
       onComplete: (fullResponse: string) => {
-        res.write(`data: ${JSON.stringify({ done: true, fullResponse })}\n\n`);
-        res.end();
+        reply.raw.write(`data: ${JSON.stringify({ done: true, fullResponse })}\n\n`);
+        reply.raw.end();
       },
       onError: (error: Error) => {
-        res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
-        res.end();
+        reply.raw.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+        reply.raw.end();
       }
     };
     
@@ -109,24 +109,24 @@ export const streamChatResponse = async (req: Request, res: Response) => {
   } catch (error) {
     logger.error(`Error streaming chat response: ${error instanceof Error ? error.message : String(error)}`);
     
-    res.write(`data: ${JSON.stringify({
+    reply.raw.write(`data: ${JSON.stringify({
       error: error instanceof Error ? error.message : 'Unknown error',
       done: true
     })}\n\n`);
     
-    res.end();
+    reply.raw.end();
   }
 };
 
 // @desc    Synthesize voice
 // @route   POST /api/ai-orchestration/voice
 // @access  Private
-export const synthesizeVoice = async (req: Request, res: Response) => {
+export const synthesizeVoice = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { text, voiceId, options } = req.body;
+    const { text, voiceId, options } = req.body as { text: string, voiceId: string, options: any };
     
     if (!text || typeof text !== 'string') {
-      return res.status(400).json({
+      return reply.code(400).send({
         success: false,
         message: 'Text is required and must be a string'
       });
@@ -137,12 +137,12 @@ export const synthesizeVoice = async (req: Request, res: Response) => {
     
     // Check if the result is a Buffer
     if (Buffer.isBuffer(audioResult)) {
-      res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Content-Disposition', 'attachment; filename="voice.mp3"');
-      res.send(audioResult);
+      reply.header('Content-Type', 'audio/mpeg');
+      reply.header('Content-Disposition', 'attachment; filename="voice.mp3"');
+      reply.send(audioResult);
     } else {
       // Handle case where result is a URL or path
-      res.json({
+      reply.send({
         success: true,
         audioUrl: audioResult
       });
@@ -150,7 +150,7 @@ export const synthesizeVoice = async (req: Request, res: Response) => {
   } catch (error) {
     logger.error(`Error synthesizing voice: ${error instanceof Error ? error.message : String(error)}`);
     
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       message: 'Failed to synthesize voice',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -161,12 +161,12 @@ export const synthesizeVoice = async (req: Request, res: Response) => {
 // @desc    Retrieve context
 // @route   POST /api/ai-orchestration/context
 // @access  Private
-export const retrieveContext = async (req: Request, res: Response) => {
+export const retrieveContext = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { query, options } = req.body;
+    const { query, options } = req.body as { query: string, options: any };
     
     if (!query || typeof query !== 'string') {
-      return res.status(400).json({
+      return reply.code(400).send({
         success: false,
         message: 'Query is required and must be a string'
       });
@@ -176,7 +176,7 @@ export const retrieveContext = async (req: Request, res: Response) => {
     const ragService = getRAGSystem();
     const result = await ragService.generateEnhancedPrompt(query, [], options);
     
-    res.json({
+    reply.send({
       success: true,
       results: result.retrievalResults.documents,
       augmentedPrompt: result.augmentedPrompt
@@ -184,7 +184,7 @@ export const retrieveContext = async (req: Request, res: Response) => {
   } catch (error) {
     logger.error(`Error retrieving context: ${error instanceof Error ? error.message : String(error)}`);
     
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       message: 'Failed to retrieve context',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -195,12 +195,12 @@ export const retrieveContext = async (req: Request, res: Response) => {
 // @desc    Update AI orchestration configuration
 // @route   PUT /api/ai-orchestration/config
 // @access  Private/Admin
-export const updateConfiguration = async (req: Request, res: Response) => {
+export const updateConfiguration = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { config } = req.body;
+    const { config } = req.body as { config: any };
     
     if (!config || typeof config !== 'object') {
-      return res.status(400).json({
+      return reply.code(400).send({
         success: false,
         message: 'Configuration object is required'
       });
@@ -210,12 +210,12 @@ export const updateConfiguration = async (req: Request, res: Response) => {
     const success = orchestrationService.updateConfig(config);
     
     if (success) {
-      res.json({
+      reply.send({
         success: true,
         message: 'Configuration updated successfully'
       });
     } else {
-      res.status(400).json({
+      reply.code(400).send({
         success: false,
         message: 'Failed to update configuration'
       });
@@ -223,7 +223,7 @@ export const updateConfiguration = async (req: Request, res: Response) => {
   } catch (error) {
     logger.error(`Error updating configuration: ${error instanceof Error ? error.message : String(error)}`);
     
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       message: 'Failed to update configuration',
       error: error instanceof Error ? error.message : 'Unknown error'

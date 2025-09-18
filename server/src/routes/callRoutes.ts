@@ -1,5 +1,4 @@
-import express from 'express';
-import { authenticate } from '../middleware/auth';
+import { FastifyInstance } from 'fastify';
 import {
   initiateCall,
   getCallHistory,
@@ -21,27 +20,27 @@ import {
 } from '../services/webhookHandlers';
 import { handleRecordingWebhook } from '../controllers/telephonyController';
 
-const router = express.Router();
+const callRoutes = async (fastify, opts: Record<string, any>) => {
+  // Webhook routes - MUST BE FIRST and not authenticated (for Twilio callbacks)
+  // These routes need to match exactly what's being called in callController.ts
+  fastify.post('/voice-webhook', handleTwilioVoiceWebhook);
+  fastify.post('/status-webhook', handleTwilioStatusWebhook);
+  fastify.post('/gather', handleTwilioGatherWebhook);
+  fastify.post('/stream', handleTwilioStreamWebhook);
+  fastify.post('/recording-webhook', handleRecordingWebhook); // Use proper recording webhook handler
 
-// Webhook routes - MUST BE FIRST and not authenticated (for Twilio callbacks)
-// These routes need to match exactly what's being called in callController.ts
-router.post('/voice-webhook', handleTwilioVoiceWebhook);
-router.post('/status-webhook', handleTwilioStatusWebhook);
-router.post('/gather', handleTwilioGatherWebhook);
-router.post('/stream', handleTwilioStreamWebhook);
-router.post('/recording-webhook', handleRecordingWebhook); // Use proper recording webhook handler
+  // Call management routes (protected)
+  fastify.post('/initiate', { onRequest: [fastify.authenticate] }, initiateCall);
+  fastify.get('/', { onRequest: [fastify.authenticate] }, getCallHistory);
+  fastify.get('/analytics', { onRequest: [fastify.authenticate] }, getCallAnalytics);
+  fastify.get('/export', { onRequest: [fastify.authenticate] }, exportCalls);
+  fastify.get('/:id', { onRequest: [fastify.authenticate] }, getCallById);
+  fastify.get('/:id/recording', { onRequest: [fastify.authenticate] }, getCallRecording);
+  fastify.get('/:id/recording-details', { onRequest: [fastify.authenticate] }, getCallRecordingDetails);
+  fastify.get('/:id/transcript', { onRequest: [fastify.authenticate] }, getCallTranscript);
+  fastify.put('/:id/status', { onRequest: [fastify.authenticate] }, updateCallStatus);
+  fastify.post('/:id/schedule-callback', { onRequest: [fastify.authenticate] }, scheduleCallback);
+  fastify.post('/sync-recordings', { onRequest: [fastify.authenticate] }, syncTwilioRecordings);
+};
 
-// Call management routes (protected)
-router.post('/initiate', authenticate, initiateCall);
-router.get('/', authenticate, getCallHistory);
-router.get('/analytics', authenticate, getCallAnalytics);
-router.get('/export', authenticate, exportCalls);
-router.get('/:id', authenticate, getCallById);
-router.get('/:id/recording', authenticate, getCallRecording);
-router.get('/:id/recording-details', authenticate, getCallRecordingDetails);
-router.get('/:id/transcript', authenticate, getCallTranscript);
-router.put('/:id/status', authenticate, updateCallStatus);
-router.post('/:id/schedule-callback', authenticate, scheduleCallback);
-router.post('/sync-recordings', authenticate, syncTwilioRecordings);
-
-export default router;
+export default callRoutes;

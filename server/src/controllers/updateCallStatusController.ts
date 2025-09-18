@@ -1,33 +1,33 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import Call from '../models/Call';
 
 // @desc    Update call status
 // @route   PUT /api/calls/:id/status
 // @access  Private
-export const updateCallStatus = async (req: Request & { user?: any }, res: Response): Promise<Response> => {
+export const updateCallStatus = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
-    const { status, notes } = req.body;
+    const { status, notes } = req.body as any;
     
     if (!status) {
-      return res.status(400).json({ message: 'Status is required' });
+      return res.status(400).send({ message: 'Status is required' });
     }
     
     // Valid statuses
     const validStatuses = ['Initiated', 'Ringing', 'In-Progress', 'Completed', 'Failed', 'No-Answer', 'Busy'];
     if (!validStatuses.includes(status)) {
-      return res.status(400).json({ 
+      return res.status(400).send({ 
         message: 'Invalid status',
         validStatuses
       });
     }
     
     // Find call
-    const call = await Call.findById(req.params.id)
+    const call = await Call.findById((req.params as any).id)
       .populate('lead', 'name phoneNumber')
       .populate('campaign', 'name');
       
     if (!call) {
-      return res.status(404).json({ message: 'Call not found' });
+      return res.status(404).send({ message: 'Call not found' });
     }
     
     // Update status
@@ -54,13 +54,13 @@ export const updateCallStatus = async (req: Request & { user?: any }, res: Respo
     // Notification functionality has been removed
     console.log('Call status updated:', call._id, 'to', status);
     
-    return res.status(200).json({
+    return res.status(200).send({
       message: `Call status updated to ${status}`,
       call
     });
   } catch (error) {
     console.error('Error in updateCallStatus:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: (error as Error).message
     });

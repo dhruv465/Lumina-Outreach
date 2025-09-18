@@ -1,5 +1,4 @@
-import express from 'express';
-import { authenticate } from '../middleware/auth';
+import { FastifyInstance } from 'fastify';
 import {
   createCampaign,
   getCampaigns,
@@ -19,35 +18,34 @@ import {
   validateScriptCompliance
 } from '../controllers/campaignController';
 
-const router = express.Router();
+const campaignRoutes = async (fastify, opts: Record<string, any>) => {
+  fastify.addHook('onRequest', fastify.authenticate);
 
-// All routes are protected
-router.use(authenticate);
+  // Campaign management routes
+  fastify.post('/', createCampaign);
+  fastify.get('/', getCampaigns);
+  fastify.get('/analytics', getCampaignAnalytics);
+  fastify.get('/:id', getCampaignById);
+  fastify.put('/:id', updateCampaign);
+  fastify.delete('/:id', deleteCampaign);
 
-// Campaign management routes
-router.post('/', createCampaign);
-router.get('/', getCampaigns);
-router.get('/analytics', getCampaignAnalytics);
-router.get('/:id', getCampaignById);
-router.put('/:id', updateCampaign);
-router.delete('/:id', deleteCampaign);
+  // Script generation and testing
+  fastify.post('/:id/generate-script', generateScript);
+  fastify.post('/:id/generate-advanced-script', generateAdvancedScript);
+  fastify.post('/:id/test-script', testScript);
 
-// Script generation and testing
-router.post('/:id/generate-script', generateScript);
-router.post('/:id/generate-advanced-script', generateAdvancedScript);
-router.post('/:id/test-script', testScript);
+  // Script templates
+  fastify.post('/templates', createScriptTemplate);
+  fastify.get('/templates', getScriptTemplates);
 
-// Script templates
-router.post('/templates', createScriptTemplate);
-router.get('/templates', getScriptTemplates);
+  // A/B Testing
+  fastify.post('/:id/ab-test', createABTest);
+  fastify.get('/:id/ab-tests', getCampaignABTests);
+  fastify.get('/ab-test/:testId/results', getABTestResults);
+  fastify.put('/ab-test/:testId/metrics', updateABTestMetrics);
 
-// A/B Testing
-router.post('/:id/ab-test', createABTest);
-router.get('/:id/ab-tests', getCampaignABTests);
-router.get('/ab-test/:testId/results', getABTestResults);
-router.put('/ab-test/:testId/metrics', updateABTestMetrics);
+  // Compliance
+  fastify.post('/validate-compliance', validateScriptCompliance);
+};
 
-// Compliance
-router.post('/validate-compliance', validateScriptCompliance);
-
-export default router;
+export default campaignRoutes;

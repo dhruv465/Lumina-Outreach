@@ -1,5 +1,4 @@
-import express from 'express';
-import { authenticate } from '../middleware/auth';
+import { FastifyInstance } from 'fastify';
 import {
   getDashboardOverview,
   getCallMetrics,
@@ -10,18 +9,17 @@ import {
   exportDashboardData
 } from '../controllers/dashboardController';
 
-const router = express.Router();
+const dashboardRoutes = async (fastify, opts: Record<string, any>) => {
+  fastify.addHook('onRequest', fastify.authenticate);
 
-// All routes are protected
-router.use(authenticate);
+  // Dashboard routes
+  fastify.get('/overview', getDashboardOverview);
+  fastify.get('/call-metrics', getCallMetrics);
+  fastify.get('/lead-metrics', getLeadMetrics);
+  fastify.get('/agent-performance', getAgentPerformance);
+  fastify.get('/geographical-distribution', getGeographicalDistribution);
+  fastify.get('/time-series', getTimeSeriesData);
+  fastify.get('/export', exportDashboardData);
+};
 
-// Dashboard routes
-router.get('/overview', getDashboardOverview);
-router.get('/call-metrics', getCallMetrics);
-router.get('/lead-metrics', getLeadMetrics);
-router.get('/agent-performance', getAgentPerformance);
-router.get('/geographical-distribution', getGeographicalDistribution);
-router.get('/time-series', getTimeSeriesData);
-router.get('/export', exportDashboardData);
-
-export default router;
+export default dashboardRoutes;

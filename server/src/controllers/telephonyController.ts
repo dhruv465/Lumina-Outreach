@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { logger } from '../index';
 import { handleError } from '../utils/errorHandling';
 import { RealTelephonyService, getTelephonyService } from '../services/realTelephonyService';
@@ -15,7 +15,7 @@ const getTelephonyServiceSafely = (): RealTelephonyService => {
 // @desc    Queue a new call
 // @route   POST /api/telephony/queue-call
 // @access  Private
-export const queueCall = async (req: Request & { user?: any }, res: Response) => {
+export const queueCall = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     const {
       leadId,
@@ -26,10 +26,10 @@ export const queueCall = async (req: Request & { user?: any }, res: Response) =>
       priority = 'medium',
       scheduledAt,
       maxRetries = 3
-    } = req.body;
+    } = req.body as any;
 
     if (!leadId || !campaignId || !phoneNumber) {
-      return res.status(400).json({
+      return res.status(400).send({
         message: 'Lead ID, campaign ID, and phone number are required'
       });
     }
@@ -37,16 +37,16 @@ export const queueCall = async (req: Request & { user?: any }, res: Response) =>
     const callbackUrl = `${process.env.API_BASE_URL || 'http://localhost:8000'}/api/telephony`;
 
     const telephonyService = getTelephonyServiceSafely();
-    const callId = await telephonyService.makeCall(req.body.to, req.body.from, callbackUrl, {});
+    const callId = await telephonyService.makeCall((req.body as any).to, (req.body as any).from, callbackUrl, {});
 
-    res.status(201).json({
+    res.status(201).send({
       success: true,
       callId,
       message: 'Call queued successfully'
     });
   } catch (error) {
     logger.error('Error in queueCall:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Failed to queue call',
       error: handleError(error)
     });
@@ -56,7 +56,7 @@ export const queueCall = async (req: Request & { user?: any }, res: Response) =>
 // @desc    Handle Twilio voice webhook
 // @route   POST /api/telephony/voice-webhook
 // @access  Public (Twilio webhook)
-export const handleVoiceWebhook = async (req: Request, res: Response) => {
+export const handleVoiceWebhook = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const telephonyService = getTelephonyServiceSafely();
     await telephonyService.handleWebhook('voice', req.body);
@@ -74,7 +74,7 @@ export const handleVoiceWebhook = async (req: Request, res: Response) => {
 // @desc    Handle Twilio status webhook
 // @route   POST /api/telephony/status-webhook
 // @access  Public (Twilio webhook)
-export const handleStatusWebhook = async (req: Request, res: Response) => {
+export const handleStatusWebhook = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const telephonyService = getTelephonyServiceSafely();
     await telephonyService.handleWebhook('status', req.body);
@@ -87,7 +87,7 @@ export const handleStatusWebhook = async (req: Request, res: Response) => {
 // @desc    Handle Twilio recording webhook
 // @route   POST /api/telephony/recording-webhook
 // @access  Public (Twilio webhook)
-export const handleRecordingWebhook = async (req: Request, res: Response) => {
+export const handleRecordingWebhook = async (req: FastifyRequest, res: FastifyReply) => {
   try {
   } catch (error) {
     logger.error('Error in handleRecordingWebhook:', error);
@@ -98,13 +98,13 @@ export const handleRecordingWebhook = async (req: Request, res: Response) => {
 // @desc    Get call queue status
 // @route   GET /api/telephony/queue
 // @access  Private
-export const getCallQueue = async (req: Request & { user?: any }, res: Response) => {
+export const getCallQueue = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     const telephonyService = getTelephonyServiceSafely();
     const queue = await telephonyService.getActiveCalls();
     const activeConversations = await telephonyService.getActiveCalls();
 
-    res.json({
+    res.send({
       success: true,
       queue: {
         pending: queue.length,
@@ -122,7 +122,7 @@ export const getCallQueue = async (req: Request & { user?: any }, res: Response)
     });
   } catch (error) {
     logger.error('Error in getCallQueue:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Failed to fetch call queue',
       error: handleError(error)
     });
@@ -132,20 +132,20 @@ export const getCallQueue = async (req: Request & { user?: any }, res: Response)
 // @desc    Get telephony metrics
 // @route   GET /api/telephony/metrics
 // @access  Private
-export const getTelephonyMetrics = async (req: Request & { user?: any }, res: Response) => {
+export const getTelephonyMetrics = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
-    const { timeRange = '24h' } = req.query;
+    const { timeRange = '24h' } = req.query as any;
     const telephonyService = getTelephonyServiceSafely();
     const metrics = await telephonyService.getCallData(timeRange as string);
 
-    res.json({
+    res.send({
       success: true,
       metrics,
       timeRange
     });
   } catch (error) {
     logger.error('Error in getTelephonyMetrics:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Failed to fetch telephony metrics',
       error: handleError(error)
     });
@@ -155,20 +155,20 @@ export const getTelephonyMetrics = async (req: Request & { user?: any }, res: Re
 // @desc    Pause/stop a call
 // @route   PUT /api/telephony/calls/:callId/pause
 // @access  Private
-export const pauseCall = async (req: Request & { user?: any }, res: Response) => {
+export const pauseCall = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
-    const { callId } = req.params;
+    const { callId } = req.params as any;
     
     const telephonyService = getTelephonyServiceSafely();
     await telephonyService.endCall(callId);
     
-    res.json({
+    res.send({
       success: true,
       message: 'Call paused successfully'
     });
   } catch (error) {
     logger.error('Error in pauseCall:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Failed to pause call',
       error: handleError(error)
     });
@@ -178,7 +178,7 @@ export const pauseCall = async (req: Request & { user?: any }, res: Response) =>
 // @desc    Bulk queue calls for campaign
 // @route   POST /api/telephony/bulk-queue
 // @access  Private
-export const bulkQueueCalls = async (req: Request & { user?: any }, res: Response) => {
+export const bulkQueueCalls = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     const { 
       campaignId, 
@@ -188,10 +188,10 @@ export const bulkQueueCalls = async (req: Request & { user?: any }, res: Respons
       priority = 'medium',
       scheduledAt,
       staggerInterval = 60 // seconds between calls
-    } = req.body;
+    } = req.body as any;
 
     if (!campaignId || !leadIds || !Array.isArray(leadIds)) {
-      return res.status(400).json({
+      return res.status(400).send({
         message: 'Campaign ID and lead IDs array are required'
       });
     }
@@ -210,7 +210,7 @@ export const bulkQueueCalls = async (req: Request & { user?: any }, res: Respons
         const phoneNumber = `+1234567890${i}`; // Placeholder
 
         const telephonyService = getTelephonyServiceSafely();
-        const callId = await telephonyService.makeCall(req.body.to, req.body.from, callbackUrl, {});
+        const callId = await telephonyService.makeCall((req.body as any).to, (req.body as any).from, callbackUrl, {});
 
         results.push({
           leadId,
@@ -222,7 +222,7 @@ export const bulkQueueCalls = async (req: Request & { user?: any }, res: Respons
         results.push({
           leadId: leadIds[i],
           status: 'failed',
-          error: error.message
+          error: (error as any).message
         });
       }
     }
@@ -230,7 +230,7 @@ export const bulkQueueCalls = async (req: Request & { user?: any }, res: Respons
     const successCount = results.filter(r => r.status === 'queued').length;
     const failCount = results.filter(r => r.status === 'failed').length;
 
-    res.json({
+    res.send({
       success: true,
       summary: {
         total: leadIds.length,
@@ -241,7 +241,7 @@ export const bulkQueueCalls = async (req: Request & { user?: any }, res: Respons
     });
   } catch (error) {
     logger.error('Error in bulkQueueCalls:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Bulk call queueing failed',
       error: handleError(error)
     });

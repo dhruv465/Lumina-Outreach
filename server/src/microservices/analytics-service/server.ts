@@ -14,6 +14,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import pino from 'pino';
 import { v4 as uuidv4 } from 'uuid';
+import { Server, IncomingMessage, ServerResponse } from 'http';
 
 // Load environment variables
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -31,7 +32,7 @@ const logger = pino({
 });
 
 // Initialize the Fastify server
-const server: FastifyInstance = fastify({
+const server: FastifyInstance<Server, IncomingMessage, ServerResponse, any, any> = fastify({
   logger,
   trustProxy: true,
 });

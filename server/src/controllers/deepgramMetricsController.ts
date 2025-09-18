@@ -3,25 +3,25 @@
  * Controller for Deepgram model metrics API endpoints
  */
 
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { DeepgramModelMetrics } from '../monitoring/deepgramModelMetrics';
 import logger from '../utils/logger';
 
 /**
  * Get Deepgram model metrics summary
  */
-export const getMetricsSummary = async (req: Request, res: Response) => {
+export const getMetricsSummary = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const metrics = DeepgramModelMetrics.getInstance();
     const summary = metrics.getMetricsSummary();
     
-    res.status(200).json({
+    reply.code(200).send({
       success: true,
       data: summary
     });
   } catch (error) {
     logger.error('Error retrieving Deepgram metrics summary:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve metrics summary'
     });
@@ -31,18 +31,18 @@ export const getMetricsSummary = async (req: Request, res: Response) => {
 /**
  * Get model usage metrics
  */
-export const getModelUsageMetrics = async (req: Request, res: Response) => {
+export const getModelUsageMetrics = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const metrics = DeepgramModelMetrics.getInstance();
     const summary = metrics.getMetricsSummary();
     
-    res.status(200).json({
+    reply.code(200).send({
       success: true,
       data: summary.modelUsage
     });
   } catch (error) {
     logger.error('Error retrieving model usage metrics:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve model usage metrics'
     });
@@ -52,18 +52,18 @@ export const getModelUsageMetrics = async (req: Request, res: Response) => {
 /**
  * Get model validation metrics
  */
-export const getModelValidationMetrics = async (req: Request, res: Response) => {
+export const getModelValidationMetrics = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const metrics = DeepgramModelMetrics.getInstance();
     const summary = metrics.getMetricsSummary();
     
-    res.status(200).json({
+    reply.code(200).send({
       success: true,
       data: summary.modelValidation
     });
   } catch (error) {
     logger.error('Error retrieving model validation metrics:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve model validation metrics'
     });
@@ -73,18 +73,18 @@ export const getModelValidationMetrics = async (req: Request, res: Response) => 
 /**
  * Get fallback metrics
  */
-export const getFallbackMetrics = async (req: Request, res: Response) => {
+export const getFallbackMetrics = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const metrics = DeepgramModelMetrics.getInstance();
     const summary = metrics.getMetricsSummary();
     
-    res.status(200).json({
+    reply.code(200).send({
       success: true,
       data: summary.fallbacks
     });
   } catch (error) {
     logger.error('Error retrieving fallback metrics:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve fallback metrics'
     });
@@ -94,18 +94,18 @@ export const getFallbackMetrics = async (req: Request, res: Response) => {
 /**
  * Get account tier metrics
  */
-export const getAccountTierMetrics = async (req: Request, res: Response) => {
+export const getAccountTierMetrics = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const metrics = DeepgramModelMetrics.getInstance();
     const summary = metrics.getMetricsSummary();
     
-    res.status(200).json({
+    reply.code(200).send({
       success: true,
       data: summary.accountTier
     });
   } catch (error) {
     logger.error('Error retrieving account tier metrics:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve account tier metrics'
     });
@@ -115,18 +115,18 @@ export const getAccountTierMetrics = async (req: Request, res: Response) => {
 /**
  * Get recent alerts
  */
-export const getRecentAlerts = async (req: Request, res: Response) => {
+export const getRecentAlerts = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const metrics = DeepgramModelMetrics.getInstance();
     const summary = metrics.getMetricsSummary();
     
-    res.status(200).json({
+    reply.code(200).send({
       success: true,
       data: summary.alerts
     });
   } catch (error) {
     logger.error('Error retrieving recent alerts:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve recent alerts'
     });
@@ -136,23 +136,23 @@ export const getRecentAlerts = async (req: Request, res: Response) => {
 /**
  * Reset metrics (admin only)
  */
-export const resetMetrics = async (req: Request, res: Response) => {
+export const resetMetrics = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const metrics = DeepgramModelMetrics.getInstance();
     metrics.resetMetrics();
     
     logger.info('Deepgram metrics reset by admin', {
-      userId: req.body.userId || 'unknown',
-      reason: req.body.reason || 'manual reset'
+      userId: (req.body as any).userId || 'unknown',
+      reason: (req.body as any).reason || 'manual reset'
     });
     
-    res.status(200).json({
+    reply.code(200).send({
       success: true,
       message: 'Metrics reset successfully'
     });
   } catch (error) {
     logger.error('Error resetting Deepgram metrics:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to reset metrics'
     });
@@ -162,10 +162,10 @@ export const resetMetrics = async (req: Request, res: Response) => {
 /**
  * Get alert metrics (stub implementation)
  */
-export const getAlertMetrics = async (req: Request, res: Response) => {
+export const getAlertMetrics = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     // Stub implementation
-    res.status(200).json({
+    reply.code(200).send({
       success: true,
       data: {
         totalAlerts: 0,
@@ -176,7 +176,7 @@ export const getAlertMetrics = async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error('Error getting alert metrics:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to get alert metrics'
     });
@@ -186,10 +186,10 @@ export const getAlertMetrics = async (req: Request, res: Response) => {
 /**
  * Get performance stats (stub implementation)
  */
-export const getPerformanceStats = async (req: Request, res: Response) => {
+export const getPerformanceStats = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     // Stub implementation
-    res.status(200).json({
+    reply.code(200).send({
       success: true,
       data: {
         cpuUsage: 25.5,
@@ -200,7 +200,7 @@ export const getPerformanceStats = async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error('Error getting performance stats:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to get performance stats'
     });
@@ -210,10 +210,10 @@ export const getPerformanceStats = async (req: Request, res: Response) => {
 /**
  * Get metrics health (stub implementation)
  */
-export const getMetricsHealth = async (req: Request, res: Response) => {
+export const getMetricsHealth = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     // Stub implementation
-    res.status(200).json({
+    reply.code(200).send({
       success: true,
       data: {
         status: 'healthy',
@@ -227,7 +227,7 @@ export const getMetricsHealth = async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error('Error getting metrics health:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to get metrics health'
     });

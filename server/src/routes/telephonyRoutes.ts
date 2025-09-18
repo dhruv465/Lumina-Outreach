@@ -1,5 +1,4 @@
-import express from 'express';
-import { authenticate } from '../middleware/auth';
+import { FastifyInstance } from 'fastify';
 import {
   queueCall,
   handleVoiceWebhook,
@@ -11,21 +10,21 @@ import {
   bulkQueueCalls
 } from '../controllers/telephonyController';
 
-const router = express.Router();
+const telephonyRoutes = async (fastify, opts: Record<string, any>) => {
+  // Webhook routes (public, no authentication needed for Twilio)
+  fastify.post('/voice-webhook', handleVoiceWebhook);
+  fastify.post('/status-webhook', handleStatusWebhook);
+  fastify.post('/recording-webhook', handleRecordingWebhook);
 
-// Webhook routes (public, no authentication needed for Twilio)
-router.post('/voice-webhook', handleVoiceWebhook);
-router.post('/status-webhook', handleStatusWebhook);
-router.post('/recording-webhook', handleRecordingWebhook);
+  // Protected routes
+  fastify.addHook('onRequest', fastify.authenticate);
 
-// Protected routes
-router.use(authenticate);
+  // Call management
+  fastify.post('/queue-call', queueCall);
+  fastify.post('/bulk-queue', bulkQueueCalls);
+  fastify.get('/queue', getCallQueue);
+  fastify.get('/metrics', getTelephonyMetrics);
+  fastify.put('/calls/:callId/pause', pauseCall);
+};
 
-// Call management
-router.post('/queue-call', queueCall);
-router.post('/bulk-queue', bulkQueueCalls);
-router.get('/queue', getCallQueue);
-router.get('/metrics', getTelephonyMetrics);
-router.put('/calls/:callId/pause', pauseCall);
-
-export default router;
+export default telephonyRoutes;

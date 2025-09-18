@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { logger } from '../index';
 import Call from '../models/Call';
 import EventEmitter from 'events';
@@ -14,17 +14,17 @@ dashboardEventEmitter.setMaxListeners(100);
  * Uses EventSource on the client side to maintain persistent connection
  * Transmits metrics, states, and updates in near real-time (sub-second)
  */
-export const setupDashboardSSE = (req: Request, res: Response): void => {
-  const clientId = req.query.clientId as string;
+export const setupDashboardSSE = (req: FastifyRequest, res: FastifyReply): void => {
+  const clientId = (req.query as any).clientId as string;
   
   if (!clientId) {
     logger.error('Missing clientId for dashboard SSE connection');
-    res.status(400).json({ error: 'Missing clientId parameter' });
+    res.status(400).send({ error: 'Missing clientId parameter' });
     return;
   }
   
   // Set headers for SSE
-  res.writeHead(200, {
+  res.raw.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
@@ -32,13 +32,13 @@ export const setupDashboardSSE = (req: Request, res: Response): void => {
   });
   
   // Send initial connection message
-  res.write(`data: ${JSON.stringify({ event: 'connected', clientId })}\n\n`);
+  res.raw.write(`data: ${JSON.stringify({ event: 'connected', clientId })}\n\n`);
   
   // Helper function to send SSE events
   const sendEvent = (event: string, data: any) => {
-    if (req.closed) return;
-    res.write(`event: ${event}\n`);
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    if (res.raw.closed) return;
+    res.raw.write(`event: ${event}\n`);
+    res.raw.write(`data: ${JSON.stringify(data)}\n\n`);
   };
   
   // Send system status every 5 seconds
@@ -81,7 +81,7 @@ export const setupDashboardSSE = (req: Request, res: Response): void => {
   dashboardEventEmitter.on('alert', handleAlert);
   
   // Handle client disconnect
-  req.on('close', () => {
+  req.raw.on('close', () => {
     logger.info(`Dashboard SSE connection closed for client ${clientId}`);
     clearInterval(systemStatusInterval);
     
@@ -153,7 +153,7 @@ export const emitAlert = (type: string, message: string, data: any = {}): void =
 /**
  * Get active calls for the dashboard
  */
-export const getActiveCalls = async (req: Request, res: Response): Promise<void> => {
+export const getActiveCalls = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
     const calls = await Call.find({
       status: { $in: ['dialing', 'in-progress'] }
@@ -163,7 +163,7 @@ export const getActiveCalls = async (req: Request, res: Response): Promise<void>
     .sort({ startTime: -1 })
     .limit(10);
     
-    res.json({
+    res.send({
       success: true,
       activeCalls: calls.map(call => ({
         id: call._id,
@@ -171,34 +171,34 @@ export const getActiveCalls = async (req: Request, res: Response): Promise<void>
         phoneNumber: call.phoneNumber,
         startTime: call.startTime,
         duration: call.duration || 0,
-        leadName: call.leadId ? `${(call.leadId as any).firstName} ${(call.leadId as any).lastName}` : 'Unknown',
-        campaignName: call.campaignId ? (call.campaignId as any).name : 'Unknown',
+        leadName: (call.leadId as any) ? `${(call.leadId as any).firstName} ${(call.leadId as any).lastName}` : 'Unknown',
+        campaignName: (call.campaignId as any) ? (call.campaignId as any).name : 'Unknown',
         metrics: call.metrics || {}
       }))
     });
   } catch (error) {
     logger.error(`Error getting active calls: ${error}`);
-    res.status(500).json({ success: false, error: 'Failed to retrieve active calls' });
+    res.status(500).send({ success: false, error: 'Failed to retrieve active calls' });
   }
 };
 
 /**
  * Get detailed call monitoring data
  */
-export const getCallMonitoringData = async (req: Request, res: Response): Promise<void> => {
+export const getCallMonitoringData = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
-    const { callId } = req.params;
+    const { callId } = req.params as any;
     
     const call = await Call.findById(callId)
       .populate('leadId', 'firstName lastName phone email')
       .populate('campaignId', 'name objective script');
     
     if (!call) {
-      res.status(404).json({ success: false, error: 'Call not found' });
+      res.status(404).send({ success: false, error: 'Call not found' });
       return;
     }
     
-    res.json({
+    res.send({
       success: true,
       call: {
         id: call._id,
@@ -216,14 +216,14 @@ export const getCallMonitoringData = async (req: Request, res: Response): Promis
     });
   } catch (error) {
     logger.error(`Error getting call monitoring data: ${error}`);
-    res.status(500).json({ success: false, error: 'Failed to retrieve call monitoring data' });
+    res.status(500).send({ success: false, error: 'Failed to retrieve call monitoring data' });
   }
 };
 
 /**
  * Get real-time analytics dashboard data for a client
  */
-export const getRealTimeAnalytics = async (req: Request, res: Response): Promise<void> => {
+export const getRealTimeAnalytics = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -285,7 +285,7 @@ export const getRealTimeAnalytics = async (req: Request, res: Response): Promise
       }
     });
     
-    res.json({
+    res.send({
       success: true,
       timestamp: new Date().toISOString(),
       metrics: {
@@ -303,24 +303,24 @@ export const getRealTimeAnalytics = async (req: Request, res: Response): Promise
     });
   } catch (error) {
     logger.error(`Error getting real-time analytics: ${error}`);
-    res.status(500).json({ success: false, error: 'Failed to retrieve real-time analytics' });
+    res.status(500).send({ success: false, error: 'Failed to retrieve real-time analytics' });
   }
 };
 
 /**
  * Sets up server-sent events for predictive analytics updates
  */
-export const setupPredictiveAnalyticsSSE = (req: Request, res: Response): void => {
-  const clientId = req.query.clientId as string;
+export const setupPredictiveAnalyticsSSE = (req: FastifyRequest, res: FastifyReply): void => {
+  const clientId = (req.query as any).clientId as string;
   
   if (!clientId) {
     logger.error('Missing clientId for predictive analytics SSE connection');
-    res.status(400).json({ error: 'Missing clientId parameter' });
+    res.status(400).send({ error: 'Missing clientId parameter' });
     return;
   }
   
   // Set headers for SSE
-  res.writeHead(200, {
+  res.raw.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
@@ -328,13 +328,13 @@ export const setupPredictiveAnalyticsSSE = (req: Request, res: Response): void =
   });
   
   // Send initial connection message
-  res.write(`data: ${JSON.stringify({ event: 'connected', clientId })}\n\n`);
+  res.raw.write(`data: ${JSON.stringify({ event: 'connected', clientId })}\n\n`);
   
   // Helper function to send SSE events
   const sendEvent = (event: string, data: any) => {
-    if (req.closed) return;
-    res.write(`event: ${event}\n`);
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    if (res.raw.closed) return;
+    res.raw.write(`event: ${event}\n`);
+    res.raw.write(`data: ${JSON.stringify(data)}\n\n`);
   };
   
   // Send prediction updates every 30 seconds
@@ -402,7 +402,7 @@ export const setupPredictiveAnalyticsSSE = (req: Request, res: Response): void =
   }, 30000);
   
   // Handle client disconnect
-  req.on('close', () => {
+  req.raw.on('close', () => {
     logger.info(`Predictive analytics SSE connection closed for client ${clientId}`);
     clearInterval(predictionInterval);
   });

@@ -1,5 +1,4 @@
-import express from 'express';
-import { authenticate } from '../middleware/auth';
+import { FastifyInstance } from 'fastify';
 import {
   getVoicePersonalities,
   synthesizeVoice,
@@ -10,26 +9,25 @@ import {
   interruptConversationalAI
 } from '../controllers/voiceAIController';
 
-const router = express.Router();
+const voiceAIRoutes = async (fastify, opts: Record<string, any>) => {
+  fastify.addHook('onRequest', fastify.authenticate);
 
-// All routes are protected
-router.use(authenticate);
+  // Voice Personalities
+  fastify.get('/personalities', getVoicePersonalities);
+  fastify.post('/train-personality', trainVoicePersonality);
 
-// Voice Personalities
-router.get('/personalities', getVoicePersonalities);
-router.post('/train-personality', trainVoicePersonality);
+  // Voice Synthesis
+  fastify.post('/synthesize', synthesizeVoice);
 
-// Voice Synthesis
-router.post('/synthesize', synthesizeVoice);
+  // Conversation Adaptation
+  fastify.post('/adapt-conversation', adaptConversation);
 
-// Conversation Adaptation
-router.post('/adapt-conversation', adaptConversation);
+  // ElevenLabs Conversational AI
+  fastify.post('/conversational-ai/start', startConversationalAI);
+  fastify.post('/conversational-ai/interrupt', interruptConversationalAI);
 
-// ElevenLabs Conversational AI
-router.post('/conversational-ai/start', startConversationalAI);
-router.post('/conversational-ai/interrupt', interruptConversationalAI);
+  // Testing and Development
+  fastify.post('/test', testVoiceAI);
+};
 
-// Testing and Development
-router.post('/test', testVoiceAI);
-
-export default router;
+export default voiceAIRoutes;

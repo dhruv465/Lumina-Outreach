@@ -3,32 +3,29 @@
  * Routes for metrics and monitoring API endpoints
  */
 
-import express from 'express';
+import { FastifyInstance } from 'fastify';
 import * as metricsController from '../controllers/metricsController';
-import { authenticate } from '../middleware/auth';
-import { roleCheck } from '../middleware/roleCheck';
 
-const router = express.Router();
+const metricsRoutes = async (fastify, opts: Record<string, any>) => {
+  fastify.addHook('onRequest', fastify.authenticate);
 
-// All metrics routes require authentication
-router.use(authenticate);
+  // Get Deepgram model metrics
+  fastify.get('/deepgram', { onRequest: [fastify.roleCheck(['admin', 'manager'])] }, metricsController.getDeepgramMetrics);
 
-// Get Deepgram model metrics
-router.get('/deepgram', roleCheck(['admin', 'manager']), metricsController.getDeepgramMetrics);
+  // Get system performance metrics
+  fastify.get('/performance', { onRequest: [fastify.roleCheck(['admin', 'manager'])] }, metricsController.getPerformanceMetrics);
 
-// Get system performance metrics
-router.get('/performance', roleCheck(['admin', 'manager']), metricsController.getPerformanceMetrics);
+  // Get alert history
+  fastify.get('/alerts', { onRequest: [fastify.roleCheck(['admin', 'manager'])] }, metricsController.getAlertHistory);
 
-// Get alert history
-router.get('/alerts', roleCheck(['admin', 'manager']), metricsController.getAlertHistory);
+  // Acknowledge an alert
+  fastify.post('/alerts/:id/acknowledge', { onRequest: [fastify.roleCheck(['admin', 'manager'])] }, metricsController.acknowledgeAlert);
 
-// Acknowledge an alert
-router.post('/alerts/:id/acknowledge', roleCheck(['admin', 'manager']), metricsController.acknowledgeAlert);
+  // Run model compatibility diagnostic
+  fastify.post('/deepgram/diagnostic', { onRequest: [fastify.roleCheck(['admin'])] }, metricsController.runModelCompatibilityDiagnostic);
 
-// Run model compatibility diagnostic
-router.post('/deepgram/diagnostic', roleCheck(['admin']), metricsController.runModelCompatibilityDiagnostic);
+  // Get metrics collection status
+  fastify.get('/status', { onRequest: [fastify.roleCheck(['admin', 'manager'])] }, metricsController.getMetricsStatus);
+};
 
-// Get metrics collection status
-router.get('/status', roleCheck(['admin', 'manager']), metricsController.getMetricsStatus);
-
-export default router;
+export default metricsRoutes;

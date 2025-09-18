@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import jwt from 'jsonwebtoken';
 import User from '../models/User';
 import { logger } from '../index';
@@ -7,14 +7,14 @@ import { handleError } from '../utils/errorHandling';
 // @desc    Register a new user
 // @route   POST /api/users/register
 // @access  Public
-export const createUser = async (req: Request, res: Response): Promise<Response> => {
+export const createUser = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role } = req.body as any;
 
     // Check if user already exists
     const userExists = await User.findOne({ email });
     if (userExists) {
-      return res.status(400).json({ message: 'User already exists' });
+      return res.status(400).send({ message: 'User already exists' });
     }
 
     // Create user
@@ -32,7 +32,7 @@ export const createUser = async (req: Request, res: Response): Promise<Response>
       { expiresIn: '30d' }
     );
 
-    return res.status(201).json({
+    return res.status(201).send({
       _id: user._id,
       name: user.name,
       email: user.email,
@@ -41,27 +41,27 @@ export const createUser = async (req: Request, res: Response): Promise<Response>
     });
   } catch (error) {
     logger.error('Error creating user:', error);
-    return res.status(500).json({ message: 'Server error', error: handleError(error) });
+    return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
 
 // @desc    Login user
 // @route   POST /api/users/login
 // @access  Public
-export const loginUser = async (req: Request, res: Response): Promise<Response> => {
+export const loginUser = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body as any;
 
     // Check if user exists
     const user = await User.findOne({ email }).select('+password');
     if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).send({ message: 'Invalid credentials' });
     }
 
     // Check if password matches
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).send({ message: 'Invalid credentials' });
     }
 
     // Generate JWT token
@@ -71,7 +71,7 @@ export const loginUser = async (req: Request, res: Response): Promise<Response> 
       { expiresIn: '30d' }
     );
 
-    return res.status(200).json({
+    return res.status(200).send({
       _id: user._id,
       name: user.name,
       email: user.email,
@@ -80,21 +80,21 @@ export const loginUser = async (req: Request, res: Response): Promise<Response> 
     });
   } catch (error) {
     logger.error('Error logging in user:', error);
-    return res.status(500).json({ message: 'Server error', error: handleError(error) });
+    return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
 
 // @desc    Get user profile
 // @route   GET /api/users/profile
 // @access  Private
-export const getUserProfile = async (req: Request & { user?: any }, res: Response): Promise<Response> => {
+export const getUserProfile = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
     const user = await User.findById(req.user.id);
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).send({ message: 'User not found' });
     }
 
-    return res.status(200).json({
+    return res.status(200).send({
       _id: user._id,
       name: user.name,
       email: user.email,
@@ -102,21 +102,21 @@ export const getUserProfile = async (req: Request & { user?: any }, res: Respons
     });
   } catch (error) {
     logger.error('Error getting user profile:', error);
-    return res.status(500).json({ message: 'Server error', error: handleError(error) });
+    return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
 
 // @desc    Update user profile
 // @route   PUT /api/users/profile
 // @access  Private
-export const updateUserProfile = async (req: Request & { user?: any }, res: Response): Promise<Response> => {
+export const updateUserProfile = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
     const user = await User.findById(req.user.id);
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).send({ message: 'User not found' });
     }
 
-    const { name, email, password } = req.body;
+    const { name, email, password } = req.body as any;
 
     // Update fields
     if (name) user.name = name;
@@ -136,7 +136,7 @@ export const updateUserProfile = async (req: Request & { user?: any }, res: Resp
       );
     }
 
-    return res.status(200).json({
+    return res.status(200).send({
       _id: updatedUser._id,
       name: updatedUser.name,
       email: updatedUser.email,
@@ -145,24 +145,24 @@ export const updateUserProfile = async (req: Request & { user?: any }, res: Resp
     });
   } catch (error) {
     logger.error('Error updating user profile:', error);
-    return res.status(500).json({ message: 'Server error', error: handleError(error) });
+    return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
 
 // @desc    Get all users
 // @route   GET /api/users
 // @access  Private/Admin
-export const getAllUsers = async (req: Request & { user?: any }, res: Response): Promise<Response> => {
+export const getAllUsers = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
     // Check if user is admin
     if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Not authorized to access this resource' });
+      return res.status(403).send({ message: 'Not authorized to access this resource' });
     }
 
     const users = await User.find({}).select('-password');
-    return res.status(200).json(users);
+    return res.status(200).send(users);
   } catch (error) {
     logger.error('Error getting all users:', error);
-    return res.status(500).json({ message: 'Server error', error: handleError(error) });
+    return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };

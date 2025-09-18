@@ -3,7 +3,7 @@
  * Controller for metrics and monitoring API endpoints
  */
 
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { DeepgramModelMetrics } from '../monitoring/deepgramModelMetrics';
 import logger from '../utils/logger';
 import { performanceMonitor } from '../utils/performanceMonitorStub';
@@ -12,18 +12,18 @@ import { alertSystem } from '../utils/alertSystemStub';
 /**
  * Get Deepgram model metrics summary
  */
-export const getDeepgramMetrics = async (req: Request, res: Response): Promise<void> => {
+export const getDeepgramMetrics = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
     const deepgramMetrics = DeepgramModelMetrics.getInstance();
     const metrics = deepgramMetrics.getMetricsSummary();
     
-    res.json({
+    reply.send({
       success: true,
       data: metrics
     });
   } catch (error) {
     logger.error('Error retrieving Deepgram metrics:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve Deepgram metrics',
       details: error instanceof Error ? error.message : String(error)
@@ -34,12 +34,12 @@ export const getDeepgramMetrics = async (req: Request, res: Response): Promise<v
 /**
  * Get system performance metrics
  */
-export const getPerformanceMetrics = async (req: Request, res: Response): Promise<void> => {
+export const getPerformanceMetrics = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
     const metrics = performanceMonitor.getCurrentMetrics();
-    const history = req.query.history === 'true' ? performanceMonitor.getMetricsHistory(100) : undefined;
+    const history = (req.query as any).history === 'true' ? performanceMonitor.getMetricsHistory(100) : undefined;
     
-    res.json({
+    reply.send({
       success: true,
       data: {
         current: metrics,
@@ -48,7 +48,7 @@ export const getPerformanceMetrics = async (req: Request, res: Response): Promis
     });
   } catch (error) {
     logger.error('Error retrieving performance metrics:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve performance metrics',
       details: error instanceof Error ? error.message : String(error)
@@ -59,22 +59,22 @@ export const getPerformanceMetrics = async (req: Request, res: Response): Promis
 /**
  * Get alert history
  */
-export const getAlertHistory = async (req: Request, res: Response): Promise<void> => {
+export const getAlertHistory = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
-    const level = req.query.level as string | undefined;
-    const type = req.query.type as string | undefined;
+    const limit = (req.query as any).limit ? parseInt((req.query as any).limit, 10) : 100;
+    const level = (req.query as any).level as string | undefined;
+    const type = (req.query as any).type as string | undefined;
     
     // Use the alerts array directly from the alertSystem instance
     const alerts = []; // In a real implementation, this would come from alertSystem
     
-    res.json({
+    reply.send({
       success: true,
       data: alerts
     });
   } catch (error) {
     logger.error('Error retrieving alert history:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve alert history',
       details: error instanceof Error ? error.message : String(error)
@@ -85,12 +85,12 @@ export const getAlertHistory = async (req: Request, res: Response): Promise<void
 /**
  * Acknowledge an alert
  */
-export const acknowledgeAlert = async (req: Request, res: Response): Promise<void> => {
+export const acknowledgeAlert = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    const { alertId, userId } = req.body;
+    const { alertId, userId } = req.body as { alertId: string, userId: string };
     
     if (!alertId) {
-      res.status(400).json({
+      reply.code(400).send({
         success: false,
         error: 'Alert ID is required'
       });
@@ -100,19 +100,19 @@ export const acknowledgeAlert = async (req: Request, res: Response): Promise<voi
     const acknowledged = alertSystem.acknowledgeAlert(alertId, userId || 'system');
     
     if (acknowledged) {
-      res.json({
+      reply.send({
         success: true,
         message: 'Alert acknowledged successfully'
       });
     } else {
-      res.status(404).json({
+      reply.code(404).send({
         success: false,
         error: 'Alert not found or already acknowledged'
       });
     }
   } catch (error) {
     logger.error('Error acknowledging alert:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to acknowledge alert',
       details: error instanceof Error ? error.message : String(error)
@@ -123,7 +123,7 @@ export const acknowledgeAlert = async (req: Request, res: Response): Promise<voi
 /**
  * Run diagnostic check for model compatibility
  */
-export const runModelCompatibilityDiagnostic = async (req: Request, res: Response): Promise<void> => {
+export const runModelCompatibilityDiagnostic = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
     // Import here to avoid circular dependency
     // Stub this functionality for now since the actual implementation depends on code not yet created
@@ -140,13 +140,13 @@ export const runModelCompatibilityDiagnostic = async (req: Request, res: Respons
       }
     };
     
-    res.json({
+    reply.send({
       success: true,
       data: results
     });
   } catch (error) {
     logger.error('Error running model compatibility diagnostic:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to run model compatibility diagnostic',
       details: error instanceof Error ? error.message : String(error)
@@ -157,12 +157,12 @@ export const runModelCompatibilityDiagnostic = async (req: Request, res: Respons
 /**
  * Get metrics collection status
  */
-export const getMetricsStatus = async (req: Request, res: Response): Promise<void> => {
+export const getMetricsStatus = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
     const deepgramMetrics = DeepgramModelMetrics.getInstance();
     const isDeepgramMetricsActive = deepgramMetrics.isActive();
     
-    res.json({
+    reply.send({
       success: true,
       data: {
         deepgramMetrics: isDeepgramMetricsActive,
@@ -172,7 +172,7 @@ export const getMetricsStatus = async (req: Request, res: Response): Promise<voi
     });
   } catch (error) {
     logger.error('Error retrieving metrics status:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve metrics status',
       details: error instanceof Error ? error.message : String(error)
@@ -183,7 +183,7 @@ export const getMetricsStatus = async (req: Request, res: Response): Promise<voi
 /**
  * Get comprehensive metrics dashboard data
  */
-export const getMetricsDashboard = async (req: Request, res: Response): Promise<void> => {
+export const getMetricsDashboard = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
     // Get Deepgram metrics
     const deepgramMetrics = DeepgramModelMetrics.getInstance();
@@ -232,13 +232,13 @@ export const getMetricsDashboard = async (req: Request, res: Response): Promise<
       }
     };
     
-    res.json({
+    reply.send({
       success: true,
       data: dashboardData
     });
   } catch (error) {
     logger.error('Error retrieving metrics dashboard data:', error);
-    res.status(500).json({
+    reply.code(500).send({
       success: false,
       error: 'Failed to retrieve metrics dashboard data',
       details: error instanceof Error ? error.message : String(error)

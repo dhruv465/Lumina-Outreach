@@ -3,7 +3,7 @@
  * 
  * This controller handles testing LLM provider connections with the unified LLM Service SDK.
  */
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import Configuration from '../models/Configuration';
 import { logger, getErrorMessage } from '../index';
 import LLMService, { LLMConfig, LLMProvider, LLMMessage } from '../services/llm';
@@ -19,12 +19,12 @@ interface TestLLMConnectionParams {
  * @route POST /api/configuration/test-llm
  * @access Private
  */
-export const testLLMConnection = async (req: Request, res: Response) => {
+export const testLLMConnection = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const { provider, apiKey, model } = req.body as TestLLMConnectionParams;
 
     if (!provider || !apiKey || !model) {
-      return res.status(400).json({ 
+      return res.status(400).send({ 
         message: 'Provider, API key, and model are required',
         success: false
       });
@@ -101,14 +101,14 @@ export const testLLMConnection = async (req: Request, res: Response) => {
       }
     }
 
-    return res.status(200).json({
+    return res.status(200).send({
       success: isSuccessful,
       message: isSuccessful ? 'Connection successful' : 'Connection failed',
       details: response
     });
   } catch (error) {
     logger.error('Error in testLLMConnection:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       success: false,
       error: getErrorMessage(error)

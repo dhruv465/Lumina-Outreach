@@ -1,5 +1,5 @@
+import { FastifyRequest, FastifyReply } from 'fastify';
 import axios from 'axios';
-import { Request, Response } from 'express';
 import twilio from 'twilio';
 import { getErrorMessage, logger } from '../index';
 import Configuration from '../models/Configuration';
@@ -106,7 +106,7 @@ const updateServicesWithNewConfig = async (configuration: any): Promise<void> =>
 // @desc    Get system configuration
 // @route   GET /api/configuration
 // @access  Private
-export const getSystemConfiguration = async (_req: Request, res: Response) => {
+export const getSystemConfiguration = async (_req: FastifyRequest, res: FastifyReply) => {
   try {
     logger.info('Fetching system configuration');
     
@@ -279,13 +279,13 @@ export const getSystemConfiguration = async (_req: Request, res: Response) => {
       }
     });
 
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    res.status(200).json(configToSend);
+    res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.header('Pragma', 'no-cache');
+    res.header('Expires', '0');
+    res.status(200).send(configToSend);
   } catch (error) {
     logger.error('Error in getSystemConfiguration:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -430,15 +430,15 @@ const validateProviderUpdate = (
 // @desc    Update system configuration
 // @route   PUT /api/configuration
 // @access  Private
-export const updateSystemConfiguration = async (req: Request, res: Response) => {
-  const updatedConfig: UpdatedConfig = req.body;
+export const updateSystemConfiguration = async (req: FastifyRequest, res: FastifyReply) => {
+  const updatedConfig: UpdatedConfig = req.body as any;
   
   try {
     const config = await Configuration.findOne();
     
     if (!config) {
       logger.warn('Configuration not found');
-      res.status(404).json({ 
+      res.status(404).send({ 
         message: 'Configuration not found',
         success: false
       });
@@ -454,7 +454,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
       if (updatedConfig.twilioConfig.authToken) {
         const keyUpdate = handleApiKeyUpdate(updatedConfig.twilioConfig.authToken, existingConfig.twilioConfig.authToken);
         if (keyUpdate.error) {
-          return res.status(400).json({ 
+          return res.status(400).send({ 
             message: 'Invalid Twilio auth token',
             error: keyUpdate.error 
           });
@@ -479,7 +479,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
       if (updatedConfig.elevenLabsConfig.apiKey) {
         const validation = validateElevenLabsKey(updatedConfig.elevenLabsConfig.apiKey);
         if (!validation.isValid) {
-          return res.status(400).json({ 
+          return res.status(400).send({ 
             message: 'Invalid ElevenLabs API key',
             error: validation.error 
           });
@@ -521,7 +521,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
       });
       
       if (!voiceValidation.isValid) {
-        return res.status(400).json({ 
+        return res.status(400).send({ 
           message: 'Invalid voice parameters',
           error: voiceValidation.error 
         });
@@ -684,7 +684,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
         });
         
         if (!llmValidation.isValid) {
-          return res.status(400).json({
+          return res.status(400).send({
             message: 'Invalid LLM parameters',
             error: llmValidation.error
           });
@@ -728,7 +728,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
       });
       
       if (!generalValidation.isValid) {
-        return res.status(400).json({
+        return res.status(400).send({
           message: 'Invalid general settings',
           error: generalValidation.error
         });
@@ -856,7 +856,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
           // Validate the API key format
           const validation = validateDeepgramKey(updatedConfig.deepgramConfig.apiKey);
           if (!validation.isValid) {
-            return res.status(400).json({ 
+            return res.status(400).send({ 
               message: 'Invalid Deepgram API key format',
               error: validation.error 
             });
@@ -881,7 +881,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
               const compatibleModels = await compatibilityService.getCompatibleModels(updatedConfig.deepgramConfig.apiKey);
               
               if (compatibleModels.length === 0) {
-                return res.status(400).json({
+                return res.status(400).send({
                   message: 'Deepgram API key is valid but no compatible models found',
                   error: 'No accessible models for this account'
                 });
@@ -1208,7 +1208,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
         }
       }
       
-      res.status(200).json({
+      res.status(200).send({
         message: 'Configuration updated successfully',
         success: true,
         configuration: response
@@ -1227,7 +1227,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
     });
 
     if (error instanceof Error && error.name === 'ValidationError') {
-      return res.status(400).json({
+      return res.status(400).send({
         message: 'Configuration validation failed',
         success: false,
         error: error.message
@@ -1235,14 +1235,14 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
     }
 
     if (error instanceof Error && error.name === 'MongoError') {
-      return res.status(500).json({
+      return res.status(500).send({
         message: 'Database error',
         success: false,
         error: 'Failed to save configuration'
       });
     }
 
-    res.status(500).json({
+    res.status(500).send({
       message: 'Server error',
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -1253,7 +1253,7 @@ export const updateSystemConfiguration = async (req: Request, res: Response) => 
 // @desc    Get available LLM models and providers
 // @route   GET /api/configuration/llm-options
 // @access  Private
-export const getLLMOptions = async (_req: Request, res: Response) => {
+export const getLLMOptions = async (_req: FastifyRequest, res: FastifyReply) => {
   try {
     // This would typically fetch the latest model information from the LLM providers
     // For now, return predefined options
@@ -1290,10 +1290,10 @@ export const getLLMOptions = async (_req: Request, res: Response) => {
       ]
     };
 
-    res.status(200).json(llmOptions);
+    res.status(200).send(llmOptions);
   } catch (error) {
     logger.error('Error in getLLMOptions:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -1304,12 +1304,12 @@ export const getLLMOptions = async (_req: Request, res: Response) => {
 // @desc    Get available voice options from ElevenLabs
 // @route   GET /api/configuration/voice-options
 // @access  Private
-export const getVoiceOptions = async (_req: Request, res: Response) => {
+export const getVoiceOptions = async (_req: FastifyRequest, res: FastifyReply) => {
   try {
     const configuration = await Configuration.findOne();
     
     if (!configuration || !configuration.elevenLabsConfig.apiKey) {
-      return res.status(400).json({ 
+      return res.status(400).send({ 
         message: 'ElevenLabs API key not configured',
         voices: [] 
       });
@@ -1319,7 +1319,7 @@ export const getVoiceOptions = async (_req: Request, res: Response) => {
     const availableVoices = configuration.elevenLabsConfig.availableVoices || [];
     
     if (availableVoices.length === 0) {
-      return res.status(200).json({ 
+      return res.status(200).send({ 
         message: 'No voices configured. Please set up voices in ElevenLabs configuration.',
         voices: [] 
       });
@@ -1332,10 +1332,10 @@ export const getVoiceOptions = async (_req: Request, res: Response) => {
       previewUrl: voice.previewUrl || null
     }));
 
-    return res.status(200).json({ voices: voiceOptions });
+    return res.status(200).send({ voices: voiceOptions });
   } catch (error) {
     logger.error('Error in getVoiceOptions:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -1345,7 +1345,7 @@ export const getVoiceOptions = async (_req: Request, res: Response) => {
 // @desc    Test LLM connection
 // @route   POST /api/configuration/test-llm
 // @access  Private
-export const testLLMConnection = async (req: Request, res: Response) => {
+export const testLLMConnection = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const { provider, apiKey, model } = req.body as {
       provider: string;
@@ -1354,7 +1354,7 @@ export const testLLMConnection = async (req: Request, res: Response) => {
     };
 
     if (!provider || !apiKey || !model) {
-      return res.status(400).json({ 
+      return res.status(400).send({ 
         message: 'Provider, API key, and model are required',
         success: false
       });
@@ -1450,7 +1450,7 @@ export const testLLMConnection = async (req: Request, res: Response) => {
         break;
         
       default:
-        return res.status(400).json({ 
+        return res.status(400).send({ 
           message: 'Unsupported LLM provider',
           success: false
         });
@@ -1503,14 +1503,14 @@ export const testLLMConnection = async (req: Request, res: Response) => {
       }
     }
 
-    return res.status(200).json({
+    return res.status(200).send({
       success: isSuccessful,
       message: isSuccessful ? 'Connection successful' : 'Connection failed',
       details: response
     });
   } catch (error) {
     logger.error('Error in testLLMConnection:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       success: false,
       error: handleError(error)
@@ -1521,12 +1521,12 @@ export const testLLMConnection = async (req: Request, res: Response) => {
 // @desc    Test Twilio connection
 // @route   POST /api/configuration/test-twilio
 // @access  Private
-export const testTwilioConnection = async (req: Request, res: Response) => {
+export const testTwilioConnection = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { accountSid, authToken, phoneNumber } = req.body;
+    const { accountSid, authToken, phoneNumber } = req.body as any;
 
     if (!accountSid || !authToken) {
-      return res.status(400).json({ message: 'Account SID and Auth Token are required' });
+      return res.status(400).send({ message: 'Account SID and Auth Token are required' });
     }
 
     let isSuccessful = false;
@@ -1547,7 +1547,7 @@ export const testTwilioConnection = async (req: Request, res: Response) => {
         });
         
         if (numbers.length === 0) {
-          return res.status(400).json({
+          return res.status(400).send({
             success: false,
             message: 'Phone number not found in Twilio account',
             accountStatus: account.status
@@ -1583,14 +1583,14 @@ export const testTwilioConnection = async (req: Request, res: Response) => {
       }
     }
 
-    return res.status(200).json({
+    return res.status(200).send({
       success: isSuccessful,
       message: isSuccessful ? 'Connection successful' : 'Connection failed',
       details: response
     });
   } catch (error) {
     logger.error('Error in testTwilioConnection:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -1600,12 +1600,12 @@ export const testTwilioConnection = async (req: Request, res: Response) => {
 // @desc    Test Deepgram TTS connection
 // @route   POST /api/configuration/test-deepgram-tts
 // @access  Private
-export const testDeepgramTTSConnection = async (req: Request, res: Response) => {
+export const testDeepgramTTSConnection = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { apiKey } = req.body;
+    const { apiKey } = req.body as any;
 
     if (!apiKey) {
-      return res.status(400).json({ message: 'API key is required' });
+      return res.status(400).send({ message: 'API key is required' });
     }
 
     let isSuccessful = false;
@@ -1663,13 +1663,13 @@ export const testDeepgramTTSConnection = async (req: Request, res: Response) => 
           await configuration.save();
           logger.info('Deepgram TTS configuration status updated to verified');
           // Always update ttsConfig.provider according to user's selection
-          if (req.body.ttsConfig && req.body.ttsConfig.provider) {
+          if ((req.body as any).ttsConfig && (req.body as any).ttsConfig.provider) {
             configuration.ttsConfig = {
               ...configuration.ttsConfig,
-              ...req.body.ttsConfig,
+              ...(req.body as any).ttsConfig,
             };
             configuration.markModified('ttsConfig');
-            logger.info(`TTS provider set to: ${req.body.ttsConfig.provider}`);
+            logger.info(`TTS provider set to: ${(req.body as any).ttsConfig.provider}`);
           }
         }
       } else {
@@ -1687,21 +1687,21 @@ export const testDeepgramTTSConnection = async (req: Request, res: Response) => 
       }
       
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Deepgram TTS connection failed',
         error: errorMessage
       });
     }
 
-    return res.json({
+    return res.send({
       success: isSuccessful,
       message: isSuccessful ? 'Deepgram TTS connection successful' : 'Deepgram TTS connection failed',
       details: response
     });
   } catch (error) {
     logger.error('Error in testDeepgramTTSConnection:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
@@ -1711,12 +1711,12 @@ export const testDeepgramTTSConnection = async (req: Request, res: Response) => 
 // @desc    Test ElevenLabs connection
 // @route   POST /api/configuration/test-elevenlabs
 // @access  Private
-export const testElevenLabsConnection = async (req: Request, res: Response) => {
+export const testElevenLabsConnection = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { apiKey } = req.body;
+    const { apiKey } = req.body as any;
 
     if (!apiKey) {
-      return res.status(400).json({ message: 'API key is required' });
+      return res.status(400).send({ message: 'API key is required' });
     }
 
     let isSuccessful = false;
@@ -1768,14 +1768,14 @@ export const testElevenLabsConnection = async (req: Request, res: Response) => {
       }
     }
 
-    return res.status(200).json({
+    return res.status(200).send({
       success: isSuccessful,
       message: isSuccessful ? 'Connection successful' : 'Connection failed',
       details: response
     });
   } catch (error) {
     logger.error('Error in testElevenLabsConnection:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -1785,14 +1785,14 @@ export const testElevenLabsConnection = async (req: Request, res: Response) => {
 // @desc    Test voice synthesis with ElevenLabs
 // @route   POST /api/configuration/test-voice
 // @access  Private
-export const testVoiceSynthesis = async (req: Request, res: Response) => {
+export const testVoiceSynthesis = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { voiceId, text, apiKey, campaignId, useConfigSettings = true } = req.body;
+    const { voiceId, text, apiKey, campaignId, useConfigSettings = true } = req.body as any;
     logger.info(`Voice synthesis test request received with voiceId: ${voiceId}`);
     
     if (!voiceId || !text) {
       logger.warn('Voice synthesis test missing required fields', { voiceId: !!voiceId, text: !!text });
-      return res.status(400).json({ message: 'Voice ID and text are required' });
+      return res.status(400).send({ message: 'Voice ID and text are required' });
     }
 
     let elevenLabsApiKey = apiKey;
@@ -1803,7 +1803,7 @@ export const testVoiceSynthesis = async (req: Request, res: Response) => {
       const configuration = await Configuration.findOne();
       if (!configuration?.elevenLabsConfig?.apiKey) {
         logger.warn('ElevenLabs API key not configured');
-        return res.status(400).json({ message: 'ElevenLabs API key not configured' });
+        return res.status(400).send({ message: 'ElevenLabs API key not configured' });
       }
       elevenLabsApiKey = configuration.elevenLabsConfig.apiKey;
     }
@@ -1811,7 +1811,7 @@ export const testVoiceSynthesis = async (req: Request, res: Response) => {
     // Validate API key format (ElevenLabs keys are typically 32+ characters)
     if (!elevenLabsApiKey || elevenLabsApiKey.length < 32 || elevenLabsApiKey.includes('••••••••')) {
       logger.warn('Invalid ElevenLabs API key format');
-      return res.status(400).json({ message: 'Invalid ElevenLabs API key format' });
+      return res.status(400).send({ message: 'Invalid ElevenLabs API key format' });
     }
 
     logger.info(`Making ElevenLabs API request with voice ID: ${voiceId}`);
@@ -1876,7 +1876,7 @@ export const testVoiceSynthesis = async (req: Request, res: Response) => {
       }
 
       logger.info('Voice synthesis successful');
-      return res.status(200).json({
+      return res.status(200).send({
         success: true,
         message: 'Voice synthesis successful',
         audioData: `data:audio/mpeg;base64,${audioBase64}`,
@@ -1927,7 +1927,7 @@ export const testVoiceSynthesis = async (req: Request, res: Response) => {
         statusCode = axiosError.response?.status || 400;
       }
 
-      return res.status(statusCode).json({
+      return res.status(statusCode).send({
         success: false,
         message: errorMessage,
         details: errorDetails
@@ -1936,7 +1936,7 @@ export const testVoiceSynthesis = async (req: Request, res: Response) => {
 
   } catch (error) {
     logger.error('Error in testVoiceSynthesis:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -1946,9 +1946,9 @@ export const testVoiceSynthesis = async (req: Request, res: Response) => {
 // @desc    Delete API key
 // @route   DELETE /api/configuration/api-key/:provider/:name?
 // @access  Private
-export const deleteApiKey = async (req: Request, res: Response) => {
+export const deleteApiKey = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { provider, name } = req.params;
+    const { provider, name } = req.params as any;
     
     logger.info(`Received request to delete API key for provider: ${provider}${name ? `, name: ${name}` : ''}`);
     
@@ -1956,7 +1956,7 @@ export const deleteApiKey = async (req: Request, res: Response) => {
     let configuration = await Configuration.findOne();
     
     if (!configuration) {
-      return res.status(404).json({ message: 'Configuration not found' });
+      return res.status(404).send({ message: 'Configuration not found' });
     }
     
     let success = false;
@@ -1994,7 +1994,7 @@ export const deleteApiKey = async (req: Request, res: Response) => {
         
       case 'llm':
         if (!name) {
-          return res.status(400).json({ message: 'LLM provider name is required' });
+          return res.status(400).send({ message: 'LLM provider name is required' });
         }
         
         if (configuration.llmConfig && configuration.llmConfig.providers) {
@@ -2048,7 +2048,7 @@ export const deleteApiKey = async (req: Request, res: Response) => {
         break;
         
       default:
-        return res.status(400).json({ message: 'Invalid provider specified' });
+        return res.status(400).send({ message: 'Invalid provider specified' });
     }
     
     // Save the updated configuration
@@ -2103,20 +2103,20 @@ export const deleteApiKey = async (req: Request, res: Response) => {
         await updateServicesWithNewConfig(configuration);
       } catch (error) {
         logger.error('Error saving configuration after API key deletion:', error);
-        return res.status(500).json({
+        return res.status(500).send({
           message: 'Failed to save configuration after API key deletion',
           error: handleError(error)
         });
       }
     }
     
-    return res.status(200).json({
+    return res.status(200).send({
       success,
       message
     });
   } catch (error) {
     logger.error('Error in deleteApiKey:', error);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Server error',
       error: handleError(error)
     });
@@ -2126,17 +2126,17 @@ export const deleteApiKey = async (req: Request, res: Response) => {
 // @desc    Verify ElevenLabs API Key
 // @route   POST /api/configuration/verify/elevenlabs
 // @access  Private
-export const verifyElevenLabsApiKey = async (req: Request, res: Response) => {
+export const verifyElevenLabsApiKey = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     // Get the configuration
     const config = await Configuration.findOne();
     if (!config) {
-      return res.status(404).json({ message: 'Configuration not found' });
+      return res.status(404).send({ message: 'Configuration not found' });
     }
 
     // Check if API key exists
     if (!config.elevenLabsConfig?.apiKey) {
-      return res.status(400).json({ 
+      return res.status(400).send({ 
         message: 'ElevenLabs API key is not set',
         status: 'failed'
       });
@@ -2150,7 +2150,7 @@ export const verifyElevenLabsApiKey = async (req: Request, res: Response) => {
     const updatedConfig = await Configuration.findOne();
     
     // Return the verification result with the latest configuration status
-    return res.status(200).json({
+    return res.status(200).send({
       success: verificationResult.success,
       status: verificationResult.status,
       message: verificationResult.message,
@@ -2162,7 +2162,7 @@ export const verifyElevenLabsApiKey = async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error(`Error verifying ElevenLabs API key: ${getErrorMessage(error)}`);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Error verifying ElevenLabs API key',
       error: getErrorMessage(error)
     });
@@ -2172,17 +2172,17 @@ export const verifyElevenLabsApiKey = async (req: Request, res: Response) => {
 // @desc    Verify Deepgram TTS API Key
 // @route   POST /api/configuration/verify/deepgram-tts
 // @access  Private
-export const verifyDeepgramTTSApiKey = async (req: Request, res: Response) => {
+export const verifyDeepgramTTSApiKey = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     // Get the configuration
     const config = await Configuration.findOne();
     if (!config) {
-      return res.status(404).json({ message: 'Configuration not found' });
+      return res.status(404).send({ message: 'Configuration not found' });
     }
 
     // Check if API key exists
     if (!config.ttsConfig?.deepgramTTS?.apiKey) {
-      return res.status(400).json({ 
+      return res.status(400).send({ 
         message: 'Deepgram TTS API key is not set',
         status: 'failed'
       });
@@ -2196,7 +2196,7 @@ export const verifyDeepgramTTSApiKey = async (req: Request, res: Response) => {
     const updatedConfig = await Configuration.findOne();
     
     // Return the verification result with the latest configuration status
-    return res.status(200).json({
+    return res.status(200).send({
       success: verificationResult.success,
       status: verificationResult.status,
       message: verificationResult.message,
@@ -2207,7 +2207,7 @@ export const verifyDeepgramTTSApiKey = async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error(`Error verifying Deepgram TTS API key: ${getErrorMessage(error)}`);
-    return res.status(500).json({
+    return res.status(500).send({
       message: 'Error verifying Deepgram TTS API key',
       error: getErrorMessage(error)
     });
@@ -2217,9 +2217,9 @@ export const verifyDeepgramTTSApiKey = async (req: Request, res: Response) => {
 // @desc    Make a test call using Twilio
 // @route   POST /api/configuration/test-call
 // @access  Private
-export const makeTestCall = async (req: Request, res: Response) => {
+export const makeTestCall = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { accountSid, authToken, fromNumber, toNumber, message } = req.body;
+    const { accountSid, authToken, fromNumber, toNumber, message } = req.body as any;
     
     logger.info('Testing Twilio call with:', { 
       fromNumber, 
@@ -2231,7 +2231,7 @@ export const makeTestCall = async (req: Request, res: Response) => {
 
     // Validate required fields
     if (!accountSid || !authToken || !fromNumber || !toNumber) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Missing required parameters. Please provide accountSid, authToken, fromNumber, and toNumber.'
       });
@@ -2239,7 +2239,7 @@ export const makeTestCall = async (req: Request, res: Response) => {
 
     // Validate phone numbers
     if (!fromNumber.match(/^\+\d{10,15}$/) || !toNumber.match(/^\+\d{10,15}$/)) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Phone numbers must be in E.164 format (e.g., +12125551234)'
       });
@@ -2288,7 +2288,7 @@ export const makeTestCall = async (req: Request, res: Response) => {
       // Don't fail the request if just the config update fails
     }
     
-    return res.status(200).json({
+    return res.status(200).send({
       success: true,
       message: 'Test call initiated successfully',
       callSid: call.sid,
@@ -2334,7 +2334,7 @@ export const makeTestCall = async (req: Request, res: Response) => {
       };
     }
     
-    return res.status(400).json({
+    return res.status(400).send({
       success: false,
       message: errorMessage,
       details: errorDetails
@@ -2344,7 +2344,7 @@ export const makeTestCall = async (req: Request, res: Response) => {
 // @desc    Auto-configure Deepgram model
 // @route   POST /api/configuration/deepgram/auto-configure
 // @access  Private
-export const autoConfigureDeepgramModel = async (_req: Request, res: Response) => {
+export const autoConfigureDeepgramModel = async (_req: FastifyRequest, res: FastifyReply) => {
   try {
     logger.info('Starting Deepgram auto-configuration...');
     
@@ -2357,7 +2357,7 @@ export const autoConfigureDeepgramModel = async (_req: Request, res: Response) =
     if (result.success) {
       logger.info(`Deepgram auto-configuration successful: ${result.model}`);
       
-      res.status(200).json({
+      res.status(200).send({
         success: true,
         message: 'Deepgram model auto-configured successfully',
         data: {
@@ -2372,7 +2372,7 @@ export const autoConfigureDeepgramModel = async (_req: Request, res: Response) =
     } else {
       logger.error(`Deepgram auto-configuration failed: ${result.error}`);
       
-      res.status(400).json({
+      res.status(400).send({
         success: false,
         message: 'Deepgram auto-configuration failed',
         error: result.error,
@@ -2384,7 +2384,7 @@ export const autoConfigureDeepgramModel = async (_req: Request, res: Response) =
     const errorMessage = handleError(error);
     logger.error(`Deepgram auto-configuration error: ${errorMessage}`);
     
-    res.status(500).json({
+    res.status(500).send({
       success: false,
       message: 'Internal server error during auto-configuration',
       error: errorMessage
@@ -2395,7 +2395,7 @@ export const autoConfigureDeepgramModel = async (_req: Request, res: Response) =
 // @desc    Validate Deepgram model configuration
 // @route   POST /api/configuration/deepgram/validate
 // @access  Private
-export const validateDeepgramConfiguration = async (_req: Request, res: Response) => {
+export const validateDeepgramConfiguration = async (_req: FastifyRequest, res: FastifyReply) => {
   try {
     logger.info('Validating Deepgram configuration...');
     
@@ -2408,7 +2408,7 @@ export const validateDeepgramConfiguration = async (_req: Request, res: Response
     if (result.isValid) {
       logger.info(`Deepgram validation successful for model: ${result.model}`);
       
-      res.status(200).json({
+      res.status(200).send({
         success: true,
         message: 'Deepgram configuration is valid',
         data: {
@@ -2420,7 +2420,7 @@ export const validateDeepgramConfiguration = async (_req: Request, res: Response
     } else {
       logger.warn(`Deepgram validation failed for model ${result.model}: ${result.error}`);
       
-      res.status(400).json({
+      res.status(400).send({
         success: false,
         message: 'Deepgram configuration validation failed',
         data: {
@@ -2437,7 +2437,7 @@ export const validateDeepgramConfiguration = async (_req: Request, res: Response
     const errorMessage = handleError(error);
     logger.error(`Deepgram validation error: ${errorMessage}`);
     
-    res.status(500).json({
+    res.status(500).send({
       success: false,
       message: 'Internal server error during validation',
       error: errorMessage
@@ -2448,7 +2448,7 @@ export const validateDeepgramConfiguration = async (_req: Request, res: Response
 // @desc    Get Deepgram validation status
 // @route   GET /api/configuration/deepgram/status
 // @access  Private
-export const getDeepgramValidationStatus = async (_req: Request, res: Response) => {
+export const getDeepgramValidationStatus = async (_req: FastifyRequest, res: FastifyReply) => {
   try {
     const { getDeepgramAutoConfigService } = await import('../services/deepgramAutoConfigService');
     const autoConfigService = getDeepgramAutoConfigService();
@@ -2456,7 +2456,7 @@ export const getDeepgramValidationStatus = async (_req: Request, res: Response) 
     // Get current validation status
     const status = await autoConfigService.getValidationStatus();
     
-    res.status(200).json({
+    res.status(200).send({
       success: true,
       message: 'Deepgram validation status retrieved',
       data: status
@@ -2466,7 +2466,7 @@ export const getDeepgramValidationStatus = async (_req: Request, res: Response) 
     const errorMessage = handleError(error);
     logger.error(`Error getting Deepgram validation status: ${errorMessage}`);
     
-    res.status(500).json({
+    res.status(500).send({
       success: false,
       message: 'Internal server error getting validation status',
       error: errorMessage
@@ -2477,12 +2477,12 @@ export const getDeepgramValidationStatus = async (_req: Request, res: Response) 
 // @desc    Test Deepgram model compatibility
 // @route   POST /api/configuration/deepgram/test-model
 // @access  Private
-export const testDeepgramModelCompatibility = async (req: Request, res: Response) => {
+export const testDeepgramModelCompatibility = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { model } = req.body;
+    const { model } = req.body as any;
     
     if (!model) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Model name is required'
       });
@@ -2493,7 +2493,7 @@ export const testDeepgramModelCompatibility = async (req: Request, res: Response
     // Get current configuration
     const config = await Configuration.findOne();
     if (!config || !config.deepgramConfig?.apiKey) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Deepgram API key not configured'
       });
@@ -2503,7 +2503,7 @@ export const testDeepgramModelCompatibility = async (req: Request, res: Response
     const compatibilityService = getModelCompatibilityService();
     
     if (!compatibilityService) {
-      return res.status(500).json({
+      return res.status(500).send({
         success: false,
         message: 'Model compatibility service not initialized'
       });
@@ -2515,7 +2515,7 @@ export const testDeepgramModelCompatibility = async (req: Request, res: Response
     if (result.isValid) {
       logger.info(`Model ${model} is compatible`);
       
-      res.status(200).json({
+      res.status(200).send({
         success: true,
         message: `Model ${model} is compatible`,
         data: {
@@ -2527,7 +2527,7 @@ export const testDeepgramModelCompatibility = async (req: Request, res: Response
     } else {
       logger.warn(`Model ${model} is not compatible: ${result.error}`);
       
-      res.status(400).json({
+      res.status(400).send({
         success: false,
         message: `Model ${model} is not compatible`,
         data: {
@@ -2544,7 +2544,7 @@ export const testDeepgramModelCompatibility = async (req: Request, res: Response
     const errorMessage = handleError(error);
     logger.error(`Error testing model compatibility: ${errorMessage}`);
     
-    res.status(500).json({
+    res.status(500).send({
       success: false,
       message: 'Internal server error during model compatibility test',
       error: errorMessage
@@ -2555,14 +2555,14 @@ export const testDeepgramModelCompatibility = async (req: Request, res: Response
 // @desc    Get suggested models based on account capabilities
 // @route   GET /api/configuration/deepgram/suggested-models
 // @access  Private
-export const getSuggestedDeepgramModels = async (req: Request, res: Response) => {
+export const getSuggestedDeepgramModels = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     logger.info('Getting suggested Deepgram models...');
     
     // Get current configuration
     const config = await Configuration.findOne();
     if (!config || !config.deepgramConfig?.apiKey) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Deepgram API key not configured'
       });
@@ -2572,11 +2572,7 @@ export const getSuggestedDeepgramModels = async (req: Request, res: Response) =>
     const configValidator = getDeepgramConfigValidator();
     
     // Get query parameters for preferences
-    const useCase = req.query.useCase as 'general' | 'meeting' | 'phone' || 'general';
-    const language = req.query.language as string || 'en';
-    const prioritizeAccuracy = req.query.prioritizeAccuracy === 'true';
-    const prioritizeSpeed = req.query.prioritizeSpeed === 'true';
-    const prioritizeCost = req.query.prioritizeCost === 'true';
+    const { useCase = 'general', language = 'en', prioritizeAccuracy = false, prioritizeSpeed = false, prioritizeCost = false } = req.query as any;
     
     // Get optimal configuration suggestions
     const optimalConfig = await configValidator.suggestOptimalConfiguration(
@@ -2592,7 +2588,7 @@ export const getSuggestedDeepgramModels = async (req: Request, res: Response) =>
     
     logger.info(`Generated optimal configuration suggestions for ${useCase} use case`);
     
-    res.status(200).json({
+    res.status(200).send({
       success: true,
       message: 'Suggested models retrieved successfully',
       data: {
@@ -2617,7 +2613,7 @@ export const getSuggestedDeepgramModels = async (req: Request, res: Response) =>
     const errorMessage = handleError(error);
     logger.error(`Error getting suggested models: ${errorMessage}`);
     
-    res.status(500).json({
+    res.status(500).send({
       success: false,
       message: 'Internal server error getting suggested models',
       error: errorMessage
@@ -2628,14 +2624,14 @@ export const getSuggestedDeepgramModels = async (req: Request, res: Response) =>
 // @desc    Validate complete Deepgram configuration
 // @route   POST /api/configuration/deepgram/validate-config
 // @access  Private
-export const validateCompleteDeepgramConfiguration = async (req: Request, res: Response) => {
+export const validateCompleteDeepgramConfiguration = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     logger.info('Validating complete Deepgram configuration...');
     
     // Get current configuration
     const config = await Configuration.findOne();
     if (!config || !config.deepgramConfig?.apiKey) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Deepgram API key not configured'
       });
@@ -2648,7 +2644,7 @@ export const validateCompleteDeepgramConfiguration = async (req: Request, res: R
     const configForValidation = {
       apiKey: config.deepgramConfig.apiKey,
       model: config.deepgramConfig.primaryModel,
-      language: req.body.language || 'en',
+      language: (req.body as any).language || 'en',
       fallbackModels: config.deepgramConfig.fallbackModels,
       accountTier: config.deepgramConfig.tier,
       availableModels: config.deepgramConfig.availableModels,
@@ -2656,7 +2652,7 @@ export const validateCompleteDeepgramConfiguration = async (req: Request, res: R
       status: config.deepgramConfig.status,
       lastModelValidation: config.deepgramConfig.lastModelValidation,
       lastError: config.deepgramConfig.lastError,
-      ...req.body // Allow override of specific settings for validation
+      ...(req.body as any) // Allow override of specific settings for validation
     };
     
     // Validate the configuration
@@ -2664,7 +2660,7 @@ export const validateCompleteDeepgramConfiguration = async (req: Request, res: R
     
     logger.info(`Configuration validation completed: ${validationResult.isValid ? 'PASSED' : 'FAILED'}`);
     
-    res.status(validationResult.isValid ? 200 : 400).json({
+    res.status(validationResult.isValid ? 200 : 400).send({
       success: validationResult.isValid,
       message: validationResult.isValid 
         ? 'Deepgram configuration is valid' 
@@ -2681,7 +2677,7 @@ export const validateCompleteDeepgramConfiguration = async (req: Request, res: R
     const errorMessage = handleError(error);
     logger.error(`Error validating complete configuration: ${errorMessage}`);
     
-    res.status(500).json({
+    res.status(500).send({
       success: false,
       message: 'Internal server error during configuration validation',
       error: errorMessage
@@ -2692,19 +2688,19 @@ export const validateCompleteDeepgramConfiguration = async (req: Request, res: R
 // @desc    Batch test multiple models
 // @route   POST /api/configuration/deepgram/batch-test-models
 // @access  Private
-export const batchTestDeepgramModels = async (req: Request, res: Response) => {
+export const batchTestDeepgramModels = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { models } = req.body;
+    const { models } = req.body as any;
     
     if (!models || !Array.isArray(models) || models.length === 0) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Models array is required and must not be empty'
       });
     }
     
     if (models.length > 10) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Maximum 10 models can be tested at once'
       });
@@ -2715,7 +2711,7 @@ export const batchTestDeepgramModels = async (req: Request, res: Response) => {
     // Get current configuration
     const config = await Configuration.findOne();
     if (!config || !config.deepgramConfig?.apiKey) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'Deepgram API key not configured'
       });
@@ -2742,7 +2738,7 @@ export const batchTestDeepgramModels = async (req: Request, res: Response) => {
     
     logger.info(`Batch testing completed: ${accessibleModels}/${totalModels} models accessible`);
     
-    res.status(200).json({
+    res.status(200).send({
       success: true,
       message: `Batch testing completed for ${totalModels} models`,
       data: {
@@ -2761,7 +2757,7 @@ export const batchTestDeepgramModels = async (req: Request, res: Response) => {
     const errorMessage = handleError(error);
     logger.error(`Error in batch model testing: ${errorMessage}`);
     
-    res.status(500).json({
+    res.status(500).send({
       success: false,
       message: 'Internal server error during batch model testing',
       error: errorMessage

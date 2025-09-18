@@ -4,12 +4,13 @@
  * Provides real-time dashboard metrics and visualizations
  */
 
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { RedisClientType } from 'redis';
 import { Db } from 'mongodb';
+import { Server, IncomingMessage, ServerResponse } from 'http';
 
 export function registerDashboardRoutes(
-  server: FastifyInstance,
+  server: FastifyInstance<Server, IncomingMessage, ServerResponse, any, any>,
   db: Db,
   redisClient: RedisClientType
 ) {

@@ -1,6 +1,6 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { getDeepgramService, initializeDeepgramService, DeepgramEvent, TranscriptResult } from '../services/deepgramService';
-import logger from '../utils/logger';
+import logger, { getErrorMessage } from '../utils/logger';
 import Configuration from '../models/Configuration';
 import { Socket } from 'socket.io';
 import { EventEmitter } from 'events';
@@ -49,12 +49,12 @@ export async function initializeDeepgramController(): Promise<void> {
       
       await config.save();
     } catch (validationError) {
-      logger.error(`Error validating Deepgram API key: ${validationError}`);
+      logger.error(`Error validating Deepgram API key: ${getErrorMessage(validationError)}`);
       
       // Update configuration to mark validation failure
       config.deepgramConfig.status = 'failed';
       config.deepgramConfig.lastVerified = new Date();
-      config.deepgramConfig.lastError = `Validation error: ${validationError.message}`;
+      config.deepgramConfig.lastError = `Validation error: ${getErrorMessage(validationError)}`;
       await config.save();
     }
     
@@ -65,7 +65,7 @@ export async function initializeDeepgramController(): Promise<void> {
       logger.warn('Deepgram service failed to initialize');
     }
   } catch (error) {
-    logger.error(`Error initializing Deepgram controller: ${error}`);
+    logger.error(`Error initializing Deepgram controller: ${getErrorMessage(error)}`);
   }
 }
 
@@ -99,7 +99,7 @@ function setupDeepgramEventHandlers(deepgramService: any): void {
         }
       );
     } catch (err) {
-      logger.error(`Error updating call record with transcript: ${err}`);
+      logger.error(`Error updating call record with transcript: ${getErrorMessage(err)}`);
     }
   });
 
@@ -134,59 +134,59 @@ function setupDeepgramEventHandlers(deepgramService: any): void {
 /**
  * Get circuit breaker status for Deepgram
  */
-export async function getCircuitStatus(req: Request, res: Response): Promise<void> {
+export async function getCircuitStatus(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   try {
     const circuitBreaker = getCircuitBreakerService();
     const deepgramCircuit = circuitBreaker.getStats().find(stat => stat.name === 'deepgram-api');
     
     if (!deepgramCircuit) {
-      res.status(404).json({ error: 'Deepgram circuit not found' });
+      reply.code(404).send({ error: 'Deepgram circuit not found' });
       return;
     }
     
-    res.status(200).json(deepgramCircuit);
+    reply.code(200).send(deepgramCircuit);
   } catch (error) {
-    logger.error(`Error getting circuit status: ${error}`);
-    res.status(500).json({ error: 'Failed to get circuit status' });
+    logger.error(`Error getting circuit status: ${getErrorMessage(error)}`);
+    reply.code(500).send({ error: 'Failed to get circuit status' });
   }
 }
 
 /**
  * Reset the circuit breaker for Deepgram
  */
-export async function resetCircuit(req: Request, res: Response): Promise<void> {
+export async function resetCircuit(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   try {
     const circuitBreaker = getCircuitBreakerService();
     const result = circuitBreaker.resetCircuit('deepgram-api');
     
     if (result) {
-      res.status(200).json({ success: true, message: 'Circuit reset successfully' });
+      reply.code(200).send({ success: true, message: 'Circuit reset successfully' });
     } else {
-      res.status(404).json({ error: 'Deepgram circuit not found' });
+      reply.code(404).send({ error: 'Deepgram circuit not found' });
     }
   } catch (error) {
-    logger.error(`Error resetting circuit: ${error}`);
-    res.status(500).json({ error: 'Failed to reset circuit' });
+    logger.error(`Error resetting circuit: ${getErrorMessage(error)}`);
+    reply.code(500).send({ error: 'Failed to reset circuit' });
   }
 }
 
 /**
  * Start real-time transcription for a call
  */
-export async function startTranscription(req: Request, res: Response): Promise<void> {
+export async function startTranscription(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   try {
-    const { callId } = req.params;
-    const { language = 'en', model = 'nova-2' } = req.body;
+    const { callId } = req.params as any;
+    const { language = 'en', model = 'nova-2' } = req.body as any;
 
     if (!callId) {
-      res.status(400).json({ error: 'Call ID is required' });
+      reply.code(400).send({ error: 'Call ID is required' });
       return;
     }
 
     // Get the Deepgram service
     const deepgramService = getDeepgramService();
     if (!deepgramService) {
-      res.status(500).json({ error: 'Deepgram service not initialized' });
+      reply.code(500).send({ error: 'Deepgram service not initialized' });
       return;
     }
 
@@ -234,38 +234,38 @@ export async function startTranscription(req: Request, res: Response): Promise<v
         }
       );
     } catch (err) {
-      logger.error(`Error updating call record with transcription info: ${err}`);
+      logger.error(`Error updating call record with transcription info: ${getErrorMessage(err)}`);
     }
 
-    res.status(200).json({ 
+    reply.code(200).send({ 
       success: true, 
       connectionId,
       usingFallback,
       message: usingFallback ? 'Transcription started in degraded mode' : 'Transcription started'
     });
   } catch (error) {
-    logger.error(`Error starting transcription: ${error}`);
-    res.status(500).json({ error: 'Failed to start transcription' });
+    logger.error(`Error starting transcription: ${getErrorMessage(error)}`);
+    reply.code(500).send({ error: 'Failed to start transcription' });
   }
 }
 
 /**
  * Stop real-time transcription for a call
  */
-export async function stopTranscription(req: Request, res: Response): Promise<void> {
+export async function stopTranscription(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   try {
-    const { callId } = req.params;
-    const { connectionId } = req.body;
+    const { callId } = req.params as any;
+    const { connectionId } = req.body as any;
 
     if (!callId) {
-      res.status(400).json({ error: 'Call ID is required' });
+      reply.code(400).send({ error: 'Call ID is required' });
       return;
     }
 
     // Get the Deepgram service
     const deepgramService = getDeepgramService();
     if (!deepgramService) {
-      res.status(500).json({ error: 'Deepgram service not initialized' });
+      reply.code(500).send({ error: 'Deepgram service not initialized' });
       return;
     }
 
@@ -277,7 +277,7 @@ export async function stopTranscription(req: Request, res: Response): Promise<vo
     }
 
     if (!connId) {
-      res.status(400).json({ error: 'Connection ID is required' });
+      reply.code(400).send({ error: 'Connection ID is required' });
       return;
     }
 
@@ -297,70 +297,71 @@ export async function stopTranscription(req: Request, res: Response): Promise<vo
         }
       );
     } catch (err) {
-      logger.error(`Error updating call record when stopping transcription: ${err}`);
+      logger.error(`Error updating call record when stopping transcription: ${getErrorMessage(err)}`);
     }
 
-    res.status(200).json({ 
+    reply.code(200).send({ 
       success: true, 
       message: 'Transcription stopped'
     });
   } catch (error) {
-    logger.error(`Error stopping transcription: ${error}`);
-    res.status(500).json({ error: 'Failed to stop transcription' });
+    logger.error(`Error stopping transcription: ${getErrorMessage(error)}`);
+    reply.code(500).send({ error: 'Failed to stop transcription' });
   }
 }
 
 /**
  * Send audio data to an active transcription stream
  */
-export async function processAudio(req: Request, res: Response): Promise<void> {
+export async function processAudio(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   try {
-    const { connectionId } = req.params;
+    const { connectionId } = req.params as any;
     
     if (!connectionId) {
-      res.status(400).json({ error: 'Connection ID is required' });
+      reply.code(400).send({ error: 'Connection ID is required' });
       return;
     }
 
-    if (!req.body || !Buffer.isBuffer(req.body)) {
-      res.status(400).json({ error: 'Request body must be audio buffer' });
+    if (!req.body || !Buffer.isBuffer(req.body as any)) {
+      reply.code(400).send({ error: 'Request body must be audio buffer' });
       return;
     }
 
     // Get the Deepgram service
     const deepgramService = getDeepgramService();
     if (!deepgramService) {
-      res.status(500).json({ error: 'Deepgram service not initialized' });
+      reply.code(500).send({ error: 'Deepgram service not initialized' });
       return;
     }
 
     // Send audio data to the transcription stream
     deepgramService.sendAudioToStream(connectionId, req.body);
 
-    res.status(200).json({ success: true });
+    reply.code(200).send({ success: true });
   } catch (error) {
-    logger.error(`Error processing audio for transcription: ${error}`);
-    res.status(500).json({ error: 'Failed to process audio' });
+    logger.error(`Error processing audio for transcription: ${getErrorMessage(error)}`);
+    reply.code(500).send({ error: 'Failed to process audio' });
   }
 }
 
 /**
  * Transcribe an audio file and return the result
  */
-export async function transcribeAudioFile(req: Request, res: Response): Promise<void> {
+export async function transcribeAudioFile(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   try {
-    if (!req.file) {
-      res.status(400).json({ error: 'No audio file provided' });
+    const data = await (req as any).file();
+    if (!data) {
+      reply.code(400).send({ error: 'No audio file provided' });
       return;
     }
 
-    const audioBuffer = req.file.buffer;
-    const { language, model } = req.body;
+    const audioBuffer = await data.toBuffer();
+    const { language, model } = req.body as any;
 
     // Get the Deepgram service
     const deepgramService = getDeepgramService();
     if (!deepgramService) {
-      res.status(500).json({ error: 'Deepgram service not initialized' });
+      reply.code(500).send({ error: 'Deepgram service not initialized' });
       return;
     }
 
@@ -371,10 +372,10 @@ export async function transcribeAudioFile(req: Request, res: Response): Promise<
       detectLanguage: !language
     });
 
-    res.status(200).json(result);
+    reply.code(200).send(result);
   } catch (error) {
-    logger.error(`Error transcribing audio file: ${error}`);
-    res.status(500).json({ error: 'Failed to transcribe audio file' });
+    logger.error(`Error transcribing audio file: ${getErrorMessage(error)}`);
+    reply.code(500).send({ error: 'Failed to transcribe audio file' });
   }
 }
 

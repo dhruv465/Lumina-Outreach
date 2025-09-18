@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { logger } from '../index';
 import { checkDatabaseHealth, isDatabaseConnected } from '../database/connection';
 import { validateGoogleConfig } from '../config/validation';
@@ -596,9 +596,9 @@ export async function performSystemHealthCheck(): Promise<SystemHealth> {
 }
 
 /**
- * Express route handler for health check endpoint
+ * Fastify route handler for health check endpoint
  */
-export async function healthCheckHandler(req: Request, res: Response): Promise<void> {
+export async function healthCheckHandler(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   try {
     const health = await performSystemHealthCheck();
 
@@ -606,10 +606,10 @@ export async function healthCheckHandler(req: Request, res: Response): Promise<v
     const statusCode = health.status === 'healthy' ? 200 :
       health.status === 'degraded' ? 207 : 503;
 
-    res.status(statusCode).json(health);
+    reply.code(statusCode).send(health);
   } catch (error) {
     logger.error('Health check endpoint error:', error);
-    res.status(500).json({
+    reply.code(500).send({
       status: 'unhealthy',
       timestamp: new Date(),
       checks: [{
@@ -626,17 +626,17 @@ export async function healthCheckHandler(req: Request, res: Response): Promise<v
 /**
  * Simple readiness check for load balancers
  */
-export function readinessCheckHandler(req: Request, res: Response): void {
+export function readinessCheckHandler(req: FastifyRequest, reply: FastifyReply): void {
   const isReady = isDatabaseConnected();
 
   if (isReady) {
-    res.status(200).json({
+    reply.code(200).send({
       status: 'ready',
       timestamp: new Date(),
       uptime: process.uptime()
     });
   } else {
-    res.status(503).json({
+    reply.code(503).send({
       status: 'not ready',
       timestamp: new Date(),
       message: 'Database not connected'
@@ -647,8 +647,8 @@ export function readinessCheckHandler(req: Request, res: Response): void {
 /**
  * Simple liveness check for container orchestration
  */
-export function livenessCheckHandler(req: Request, res: Response): void {
-  res.status(200).json({
+export function livenessCheckHandler(req: FastifyRequest, reply: FastifyReply): void {
+  reply.code(200).send({
     status: 'alive',
     timestamp: new Date(),
     uptime: process.uptime(),

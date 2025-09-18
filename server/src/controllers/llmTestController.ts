@@ -3,7 +3,7 @@
  * 
  * This controller handles testing LLM models with the unified LLM Service SDK.
  */
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import Configuration from '../models/Configuration';
 import { logger, getErrorMessage } from '../index';
 import LLMService, { LLMConfig, LLMProvider, LLMChatRequest } from '../services/llm';
@@ -21,19 +21,19 @@ interface TestLLMParams {
  * @route POST /api/configuration/test-llm-chat
  * @access Private
  */
-export const testLLMChat = async (req: Request, res: Response) => {
+export const testLLMChat = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const { provider, model, prompt, temperature = 0.7, apiKey } = req.body as TestLLMParams;
 
     if (!provider) {
-      return res.status(400).json({ 
+      return reply.code(400).send({ 
         success: false, 
         message: 'Provider is required' 
       });
     }
 
     if (!prompt) {
-      return res.status(400).json({
+      return reply.code(400).send({
         success: false,
         message: 'Test prompt is required'
       });
@@ -67,7 +67,7 @@ export const testLLMChat = async (req: Request, res: Response) => {
       const config = await Configuration.findOne();
       
       if (!config) {
-        return res.status(404).json({ 
+        return reply.code(404).send({ 
           success: false, 
           message: 'Configuration not found' 
         });
@@ -79,14 +79,14 @@ export const testLLMChat = async (req: Request, res: Response) => {
       );
 
       if (!providerConfig) {
-        return res.status(404).json({
+        return reply.code(404).send({
           success: false,
           message: `Provider ${configProviderName} not found in configuration`
         });
       }
 
       if (!providerConfig.apiKey) {
-        return res.status(400).json({
+        return reply.code(400).send({
           success: false,
           message: `No API key configured for ${configProviderName}`
         });
@@ -118,7 +118,7 @@ export const testLLMChat = async (req: Request, res: Response) => {
     }
 
     if (!modelToUse) {
-      return res.status(400).json({
+      return reply.code(400).send({
         success: false,
         message: `No model specified for ${provider}`
       });
@@ -201,14 +201,14 @@ export const testLLMChat = async (req: Request, res: Response) => {
       }
     }
 
-    return res.status(200).json({
+    return reply.code(200).send({
       success: isSuccessful,
       message: isSuccessful ? 'Model test successful' : 'Model test failed',
       response: response
     });
   } catch (error) {
     logger.error('Error in testLLMChat:', error);
-    return res.status(500).json({
+    return reply.code(500).send({
       success: false,
       message: 'Server error',
       error: getErrorMessage(error)
@@ -221,11 +221,11 @@ export const testLLMChat = async (req: Request, res: Response) => {
  * @route GET /api/configuration/llm-models
  * @access Private
  */
-export const getAllLLMModels = async (req: Request, res: Response) => {
+export const getAllLLMModels = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const configuration = await Configuration.findOne();
     if (!configuration) {
-      return res.status(404).json({
+      return reply.code(404).send({
         success: false,
         message: 'Configuration not found'
       });
@@ -249,17 +249,17 @@ export const getAllLLMModels = async (req: Request, res: Response) => {
     // Get all available models from all configured providers
     const allModels = await llmService.getAllAvailableModels();
     
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    return res.status(200).json({
+    reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+    reply.header('Pragma', 'no-cache');
+    reply.header('Expires', '0');
+    return reply.code(200).send({
       success: true,
       models: allModels,
       providers: llmService.listProviders()
     });
   } catch (error) {
     logger.error('Error getting all LLM models:', error);
-    return res.status(500).json({
+    return reply.code(500).send({
       success: false,
       message: 'Server error',
       error: getErrorMessage(error)
@@ -272,22 +272,22 @@ export const getAllLLMModels = async (req: Request, res: Response) => {
  * @route GET /api/configuration/llm-models/:provider
  * @access Private
  */
-export const getProviderLLMModels = async (req: Request, res: Response) => {
+export const getProviderLLMModels = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { provider } = req.params;
+    const { provider } = req.params as any;
     
     if (!provider) {
-      return res.status(400).json({
-        success: false,
-        message: 'Provider parameter is required'
+      return reply.code(400).send({ 
+        success: false, 
+        message: 'Provider parameter is required' 
       });
     }
 
     const configuration = await Configuration.findOne();
     if (!configuration) {
-      return res.status(404).json({
-        success: false,
-        message: 'Configuration not found'
+      return reply.code(404).send({ 
+        success: false, 
+        message: 'Configuration not found' 
       });
     }
 
@@ -301,14 +301,14 @@ export const getProviderLLMModels = async (req: Request, res: Response) => {
     );
 
     if (!providerConfig) {
-      return res.status(404).json({
+      return reply.code(404).send({
         success: false,
         message: `Provider ${provider} not found in configuration`
       });
     }
 
     if (!providerConfig.apiKey) {
-      return res.status(400).json({
+      return reply.code(400).send({
         success: false,
         message: `No API key configured for ${provider}`
       });
@@ -331,14 +331,14 @@ export const getProviderLLMModels = async (req: Request, res: Response) => {
     // Get models from the specific provider
     const models = await llmService.getProviderModels(configProviderName);
     
-    return res.status(200).json({
+    return reply.code(200).send({
       success: true,
       provider: configProviderName,
       models: models
     });
   } catch (error) {
-    logger.error(`Error getting models for provider ${req.params.provider}:`, error);
-    return res.status(500).json({
+    logger.error(`Error getting models for provider ${(req.params as any).provider}:`, error);
+    return reply.code(500).send({
       success: false,
       message: 'Server error',
       error: getErrorMessage(error)
@@ -351,19 +351,19 @@ export const getProviderLLMModels = async (req: Request, res: Response) => {
  * @route POST /api/configuration/llm-models/dynamic
  * @access Private
  */
-export const getDynamicProviderModels = async (req: Request, res: Response) => {
+export const getDynamicProviderModels = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { provider, apiKey } = req.body;
+    const { provider, apiKey } = req.body as any;
     
     if (!provider) {
-      return res.status(400).json({
+      return reply.code(400).send({
         success: false,
         message: 'Provider is required'
       });
     }
 
     if (!apiKey) {
-      return res.status(400).json({
+      return reply.code(400).send({
         success: false,
         message: 'API key is required'
       });
@@ -389,13 +389,13 @@ export const getDynamicProviderModels = async (req: Request, res: Response) => {
     // Get models from the specific provider
     const models = await llmService.getProviderModels(configProviderName);
     
-    return res.status(200).json({
+    return reply.code(200).send({
       success: true,
       provider: configProviderName,
       models: models
     });
   } catch (error) {
-    logger.error(`Error dynamically fetching models for provider ${req.body.provider}:`, error);
+    logger.error(`Error dynamically fetching models for provider ${(req.body as any).provider}:`, error);
     
     // Provide more specific error messages based on the error type
     let errorMessage = 'Failed to fetch models';
@@ -407,7 +407,7 @@ export const getDynamicProviderModels = async (req: Request, res: Response) => {
       errorMessage = 'Network error - please check your connection';
     }
     
-    return res.status(400).json({
+    return reply.code(400).send({
       success: false,
       message: errorMessage,
       error: errorString

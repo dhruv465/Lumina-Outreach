@@ -15,6 +15,7 @@ import path from 'path';
 import dotenv from 'dotenv';
 import pino from 'pino';
 import WebSocket from 'ws';
+import { Server, IncomingMessage, ServerResponse } from 'http';
 
 // Load environment variables
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -32,7 +33,7 @@ const logger = pino({
 });
 
 // Initialize Fastify with logger
-const server: FastifyInstance = fastify({
+const server: FastifyInstance<Server, IncomingMessage, ServerResponse, any, any> = fastify({
   logger,
   trustProxy: true,
 });
@@ -168,7 +169,6 @@ async function registerGateway() {
       status: 'active',
       startTime: new Date().toISOString(),
       lastHeartbeat: new Date().toISOString(),
-      healthCheckEndpoint: '/health',
       metrics: {
         activeConnections: server.websocketServer?.clients ? server.websocketServer.clients.size : 0,
         cpuUsage: process.cpuUsage(),
@@ -262,7 +262,7 @@ server.register(fastifyProxy, {
 });
 
 // WebSocket proxy for real-time communication
-server.register(async function (fastify: FastifyInstance) {
+server.register(async function (fastify: FastifyInstance<Server, IncomingMessage, ServerResponse, any, any>) {
   fastify.get('/ws', { websocket: true }, (socket: WebSocket, req: FastifyRequest) => {
     // Handle WebSocket connections here or proxy them to the appropriate service
     socket.on('message', async (message: string) => {

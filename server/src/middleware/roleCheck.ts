@@ -3,29 +3,28 @@
  * Middleware for checking user roles
  */
 
-import { Request, Response, NextFunction } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 
 export const roleCheck = (allowedRoles: string[]) => {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return (req: FastifyRequest, reply: FastifyReply) => {
     // Get user from request (assuming it was added by auth middleware)
     const user = (req as any).user;
     
     if (!user) {
-      return res.status(401).json({
+      reply.status(401).send({
         success: false,
         error: 'Unauthorized - Authentication required'
       });
+      throw new Error('Unauthorized');
     }
     
     // Check if user has any of the allowed roles
     if (!user.role || !allowedRoles.includes(user.role)) {
-      return res.status(403).json({
+      reply.status(403).send({
         success: false,
         error: 'Forbidden - Insufficient permissions'
       });
+      throw new Error('Forbidden');
     }
-    
-    // User has required role, proceed
-    next();
   };
 };

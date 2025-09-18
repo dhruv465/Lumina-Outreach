@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import WebSocket from 'ws';
 import { logger } from '../index';
 import { realTimeCallStateMachine, CallEvent, CallState } from '../services/realTimeCallStateMachine';
@@ -38,7 +38,7 @@ interface TwilioMediaMessage {
 /**
  * Enhanced WebSocket handler for real-time media streaming
  */
-export const handleRealTimeMediaStream = async (ws: WebSocket, req: Request): Promise<void> => {
+export const handleRealTimeMediaStream = async (ws: WebSocket, req: FastifyRequest): Promise<void> => {
   let callId: string | null = null;
   let conversationId: string | null = null;
   let streamSid: string | null = null;
@@ -46,7 +46,7 @@ export const handleRealTimeMediaStream = async (ws: WebSocket, req: Request): Pr
 
   try {
     // Extract parameters from URL
-    const url = new URL(req.url || '', `http://${req.headers.host}`);
+    const url = new URL(req.raw.url || '', `http://${req.headers.host}`);
     callId = url.searchParams.get('callId') || url.pathname.split('/').find(p => p.length === 24);
     conversationId = url.searchParams.get('conversationId') || url.searchParams.get('sessionId');
 
@@ -79,6 +79,7 @@ export const handleRealTimeMediaStream = async (ws: WebSocket, req: Request): Pr
 
     // Get or create conversation ID
     if (!conversationId) {
+      const { conversationEngine } = await import('../services');
       conversationId = await conversationEngine.startConversation(
         callId,
         call.leadId.toString(),
@@ -500,7 +501,7 @@ function estimateTextDuration(text: string): number {
 /**
  * Health check endpoint for real-time services
  */
-export const getHealthStatus = async (req: Request, res: Response): Promise<Response> => {
+export const getHealthStatus = async (req: FastifyRequest, reply: FastifyReply): Promise<any> => {
   try {
     const config = await Configuration.findOne();
     
@@ -534,12 +535,12 @@ export const getHealthStatus = async (req: Request, res: Response): Promise<Resp
       }
     };
 
-    return res.status(200).json(health);
+    return reply.code(200).send(health);
 
   } catch (error) {
     logger.error('Error getting health status:', error);
     
-    return res.status(500).json({
+    return reply.code(500).send({
       timestamp: new Date().toISOString(),
       status: 'unhealthy',
       error: error instanceof Error ? error.message : String(error)
@@ -550,12 +551,12 @@ export const getHealthStatus = async (req: Request, res: Response): Promise<Resp
 /**
  * Get metrics for a specific call
  */
-export const getCallMetrics = async (req: Request, res: Response): Promise<Response> => {
+export const getCallMetrics = async (req: FastifyRequest, reply: FastifyReply): Promise<any> => {
   try {
-    const { callId } = req.params;
+    const { callId } = req.params as any;
     
     if (!callId) {
-      return res.status(400).json({ error: 'Call ID is required' });
+      return reply.code(400).send({ error: 'Call ID is required' });
     }
 
     const stateMachineMetrics = realTimeCallStateMachine.getSessionMetrics(callId);
@@ -564,7 +565,7 @@ export const getCallMetrics = async (req: Request, res: Response): Promise<Respo
     const stateHistory = realTimeCallStateMachine.getStateHistory(callId);
 
     if (!stateMachineMetrics) {
-      return res.status(404).json({ error: 'Call session not found' });
+      return reply.code(404).send({ error: 'Call session not found' });
     }
 
     const metrics = {
@@ -576,12 +577,12 @@ export const getCallMetrics = async (req: Request, res: Response): Promise<Respo
       timestamp: new Date().toISOString()
     };
 
-    return res.status(200).json(metrics);
+    return reply.code(200).send(metrics);
 
   } catch (error) {
     logger.error('Error getting call metrics:', error);
     
-    return res.status(500).json({
+    return reply.code(500).send({
       error: error instanceof Error ? error.message : String(error)
     });
   }
@@ -590,13 +591,13 @@ export const getCallMetrics = async (req: Request, res: Response): Promise<Respo
 /**
  * Manually trigger a state transition (for testing/debugging)
  */
-export const triggerStateTransition = async (req: Request, res: Response): Promise<Response> => {
+export const triggerStateTransition = async (req: FastifyRequest, reply: FastifyReply): Promise<any> => {
   try {
-    const { callId } = req.params;
-    const { state, event, metadata = {} } = req.body;
+    const { callId } = req.params as any;
+    const { state, event, metadata = {} } = req.body as any;
 
     if (!callId || !state || !event) {
-      return res.status(400).json({ 
+      return reply.code(400).send({ 
         error: 'Call ID, state, and event are required' 
       });
     }
@@ -609,7 +610,7 @@ export const triggerStateTransition = async (req: Request, res: Response): Promi
     );
 
     if (success) {
-      return res.status(200).json({
+      return reply.code(200).send({
         success: true,
         callId,
         newState: state,
@@ -617,7 +618,7 @@ export const triggerStateTransition = async (req: Request, res: Response): Promi
         timestamp: new Date().toISOString()
       });
     } else {
-      return res.status(400).json({
+      return reply.code(400).send({
         success: false,
         error: 'Invalid state transition'
       });
@@ -626,7 +627,7 @@ export const triggerStateTransition = async (req: Request, res: Response): Promi
   } catch (error) {
     logger.error('Error triggering state transition:', error);
     
-    return res.status(500).json({
+    return reply.code(500).send({
       error: error instanceof Error ? error.message : String(error)
     });
   }

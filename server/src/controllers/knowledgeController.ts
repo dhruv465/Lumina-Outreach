@@ -5,14 +5,14 @@
  * categorization, and search for the RAG knowledge base.
  */
 
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { getKnowledgeService } from '../services/knowledgeService';
 import { logger } from '../index';
 
 // Utility function to handle errors
-const handleError = (error: any, res: Response, message: string) => {
+const handleError = (error: any, res: FastifyReply, message: string) => {
   logger.error(`${message}: ${error instanceof Error ? error.message : String(error)}`);
-  return res.status(500).json({
+  return res.status(500).send({
     success: false,
     message,
     error: error instanceof Error ? error.message : 'Unknown error'
@@ -22,26 +22,29 @@ const handleError = (error: any, res: Response, message: string) => {
 // @desc    Upload documents
 // @route   POST /api/knowledge/documents
 // @access  Private
-export const uploadDocuments = async (req: Request, res: Response) => {
+export const uploadDocuments = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const files = req.files as Express.Multer.File[];
+    const files = (req as any).files();
     
     if (!files || files.length === 0) {
-      return res.status(400).json({
+      return res.status(400).send({
         success: false,
         message: 'No files were uploaded'
       });
     }
     
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const { categoryId, tags } = req.body;
+    const userId = (req as any).user.id;
+    const { categoryId, tags } = req.body as any;
     
     const results = await Promise.all(
-      files.map(file => knowledgeService.processDocument(file, userId, categoryId, tags))
+      files.map(async (file: any) => {
+        const data = await file.toBuffer();
+        return knowledgeService.processDocument({ ...file, buffer: data }, userId, categoryId, tags);
+      })
     );
     
-    res.status(201).json({
+    res.status(201).send({
       success: true,
       message: `Successfully uploaded ${results.length} document(s)`,
       documents: results
@@ -54,20 +57,20 @@ export const uploadDocuments = async (req: Request, res: Response) => {
 // @desc    Get all documents
 // @route   GET /api/knowledge/documents
 // @access  Private
-export const getDocuments = async (req: Request, res: Response) => {
+export const getDocuments = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     // Defensive guard to ensure user is authenticated
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ 
+    if (!(req as any).user || !(req as any).user.id) {
+      return res.status(401).send({ 
         success: false, 
         message: 'Unauthorized' 
       });
     }
 
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
+    const userId = (req as any).user.id;
     
-    const { page = 1, limit = 20, categoryId, tags, status, query } = req.query;
+    const { page = 1, limit = 20, categoryId, tags, status, query } = req.query as any;
     
     const documents = await knowledgeService.getDocuments(
       userId,
@@ -81,7 +84,7 @@ export const getDocuments = async (req: Request, res: Response) => {
       }
     );
     
-    res.json({
+    res.send({
       success: true,
       ...documents
     });
@@ -93,30 +96,30 @@ export const getDocuments = async (req: Request, res: Response) => {
 // @desc    Get document by ID
 // @route   GET /api/knowledge/documents/:id
 // @access  Private
-export const getDocumentById = async (req: Request, res: Response) => {
+export const getDocumentById = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     // Defensive guard to ensure user is authenticated
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ 
+    if (!(req as any).user || !(req as any).user.id) {
+      return res.status(401).send({ 
         success: false, 
         message: 'Unauthorized' 
       });
     }
 
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const documentId = req.params.id;
+    const userId = (req as any).user.id;
+    const documentId = (req.params as any).id;
     
     const document = await knowledgeService.getDocumentById(documentId, userId);
     
     if (!document) {
-      return res.status(404).json({
+      return res.status(404).send({
         success: false,
         message: 'Document not found'
       });
     }
     
-    res.json({
+    res.send({
       success: true,
       document
     });
@@ -128,31 +131,31 @@ export const getDocumentById = async (req: Request, res: Response) => {
 // @desc    Update document
 // @route   PUT /api/knowledge/documents/:id
 // @access  Private
-export const updateDocument = async (req: Request, res: Response) => {
+export const updateDocument = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     // Defensive guard to ensure user is authenticated
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ 
+    if (!(req as any).user || !(req as any).user.id) {
+      return res.status(401).send({ 
         success: false, 
         message: 'Unauthorized' 
       });
     }
 
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const documentId = req.params.id;
+    const userId = (req as any).user.id;
+    const documentId = (req.params as any).id;
     const updates = req.body;
     
     const updatedDocument = await knowledgeService.updateDocument(documentId, userId, updates);
     
     if (!updatedDocument) {
-      return res.status(404).json({
+      return res.status(404).send({
         success: false,
         message: 'Document not found'
       });
     }
     
-    res.json({
+    res.send({
       success: true,
       message: 'Document updated successfully',
       document: updatedDocument
@@ -165,30 +168,30 @@ export const updateDocument = async (req: Request, res: Response) => {
 // @desc    Delete document
 // @route   DELETE /api/knowledge/documents/:id
 // @access  Private
-export const deleteDocument = async (req: Request, res: Response) => {
+export const deleteDocument = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     // Defensive guard to ensure user is authenticated
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ 
+    if (!(req as any).user || !(req as any).user.id) {
+      return res.status(401).send({ 
         success: false, 
         message: 'Unauthorized' 
       });
     }
 
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const documentId = req.params.id;
+    const userId = (req as any).user.id;
+    const documentId = (req.params as any).id;
     
     const result = await knowledgeService.deleteDocument(documentId, userId);
     
     if (!result) {
-      return res.status(404).json({
+      return res.status(404).send({
         success: false,
         message: 'Document not found'
       });
     }
     
-    res.json({
+    res.send({
       success: true,
       message: 'Document deleted successfully'
     });
@@ -200,20 +203,20 @@ export const deleteDocument = async (req: Request, res: Response) => {
 // @desc    Get all chunks
 // @route   GET /api/knowledge/chunks
 // @access  Private
-export const getChunks = async (req: Request, res: Response) => {
+export const getChunks = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     // Defensive guard to ensure user is authenticated
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ 
+    if (!(req as any).user || !(req as any).user.id) {
+      return res.status(401).send({ 
         success: false, 
         message: 'Unauthorized' 
       });
     }
 
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
+    const userId = (req as any).user.id;
     
-    const { page = 1, limit = 50, documentId, tags } = req.query;
+    const { page = 1, limit = 50, documentId, tags } = req.query as any;
     
     const chunks = await knowledgeService.getChunks(
       userId,
@@ -225,7 +228,7 @@ export const getChunks = async (req: Request, res: Response) => {
       }
     );
     
-    res.json({
+    res.send({
       success: true,
       ...chunks
     });
@@ -237,22 +240,22 @@ export const getChunks = async (req: Request, res: Response) => {
 // @desc    Get chunk by ID
 // @route   GET /api/knowledge/chunks/:id
 // @access  Private
-export const getChunkById = async (req: Request, res: Response) => {
+export const getChunkById = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const chunkId = req.params.id;
+    const userId = (req as any).user.id;
+    const chunkId = (req.params as any).id;
     
     const chunk = await knowledgeService.getChunkById(chunkId, userId);
     
     if (!chunk) {
-      return res.status(404).json({
+      return res.status(404).send({
         success: false,
         message: 'Chunk not found'
       });
     }
     
-    res.json({
+    res.send({
       success: true,
       chunk
     });
@@ -264,12 +267,12 @@ export const getChunkById = async (req: Request, res: Response) => {
 // @desc    Update chunk
 // @route   PUT /api/knowledge/chunks/:id
 // @access  Private
-export const updateChunk = async (req: Request, res: Response) => {
+export const updateChunk = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const chunkId = req.params.id;
-    const { content, metadata, tags, importance } = req.body;
+    const userId = (req as any).user.id;
+    const chunkId = (req.params as any).id;
+    const { content, metadata, tags, importance } = req.body as any;
     
     const updatedChunk = await knowledgeService.updateChunk(chunkId, userId, {
       content,
@@ -279,13 +282,13 @@ export const updateChunk = async (req: Request, res: Response) => {
     });
     
     if (!updatedChunk) {
-      return res.status(404).json({
+      return res.status(404).send({
         success: false,
         message: 'Chunk not found'
       });
     }
     
-    res.json({
+    res.send({
       success: true,
       message: 'Chunk updated successfully',
       chunk: updatedChunk
@@ -298,22 +301,22 @@ export const updateChunk = async (req: Request, res: Response) => {
 // @desc    Get all categories
 // @route   GET /api/knowledge/categories
 // @access  Private
-export const getCategories = async (req: Request, res: Response) => {
+export const getCategories = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     // Defensive guard to ensure user is authenticated
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ 
+    if (!(req as any).user || !(req as any).user.id) {
+      return res.status(401).send({ 
         success: false, 
         message: 'Unauthorized' 
       });
     }
 
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
+    const userId = (req as any).user.id;
     
     const categories = await knowledgeService.getCategories(userId);
     
-    res.json({
+    res.send({
       success: true,
       categories
     });
@@ -325,11 +328,11 @@ export const getCategories = async (req: Request, res: Response) => {
 // @desc    Create category
 // @route   POST /api/knowledge/categories
 // @access  Private
-export const createCategory = async (req: Request, res: Response) => {
+export const createCategory = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const { name, description, parentId } = req.body;
+    const userId = (req as any).user.id;
+    const { name, description, parentId } = req.body as any;
     
     const category = await knowledgeService.createCategory(userId, {
       name,
@@ -337,7 +340,7 @@ export const createCategory = async (req: Request, res: Response) => {
       parentId
     });
     
-    res.status(201).json({
+    res.status(201).send({
       success: true,
       message: 'Category created successfully',
       category
@@ -350,12 +353,12 @@ export const createCategory = async (req: Request, res: Response) => {
 // @desc    Update category
 // @route   PUT /api/knowledge/categories/:id
 // @access  Private
-export const updateCategory = async (req: Request, res: Response) => {
+export const updateCategory = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const categoryId = req.params.id;
-    const { name, description, parentId } = req.body;
+    const userId = (req as any).user.id;
+    const categoryId = (req.params as any).id;
+    const { name, description, parentId } = req.body as any;
     
     const updatedCategory = await knowledgeService.updateCategory(categoryId, userId, {
       name,
@@ -364,13 +367,13 @@ export const updateCategory = async (req: Request, res: Response) => {
     });
     
     if (!updatedCategory) {
-      return res.status(404).json({
+      return res.status(404).send({
         success: false,
         message: 'Category not found'
       });
     }
     
-    res.json({
+    res.send({
       success: true,
       message: 'Category updated successfully',
       category: updatedCategory
@@ -383,22 +386,22 @@ export const updateCategory = async (req: Request, res: Response) => {
 // @desc    Delete category
 // @route   DELETE /api/knowledge/categories/:id
 // @access  Private
-export const deleteCategory = async (req: Request, res: Response) => {
+export const deleteCategory = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const categoryId = req.params.id;
+    const userId = (req as any).user.id;
+    const categoryId = (req.params as any).id;
     
     const result = await knowledgeService.deleteCategory(categoryId, userId);
     
     if (!result) {
-      return res.status(404).json({
+      return res.status(404).send({
         success: false,
         message: 'Category not found'
       });
     }
     
-    res.json({
+    res.send({
       success: true,
       message: 'Category deleted successfully'
     });
@@ -410,22 +413,22 @@ export const deleteCategory = async (req: Request, res: Response) => {
 // @desc    Get all tags
 // @route   GET /api/knowledge/tags
 // @access  Private
-export const getTags = async (req: Request, res: Response) => {
+export const getTags = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     // Defensive guard to ensure user is authenticated
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ 
+    if (!(req as any).user || !(req as any).user.id) {
+      return res.status(401).send({ 
         success: false, 
         message: 'Unauthorized' 
       });
     }
 
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
+    const userId = (req as any).user.id;
     
     const tags = await knowledgeService.getTags(userId);
     
-    res.json({
+    res.send({
       success: true,
       tags
     });
@@ -437,15 +440,15 @@ export const getTags = async (req: Request, res: Response) => {
 // @desc    Create tag
 // @route   POST /api/knowledge/tags
 // @access  Private
-export const createTag = async (req: Request, res: Response) => {
+export const createTag = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const { name, color } = req.body;
+    const userId = (req as any).user.id;
+    const { name, color } = req.body as any;
     
     const tag = await knowledgeService.createTag(userId, { name, color });
     
-    res.status(201).json({
+    res.status(201).send({
       success: true,
       message: 'Tag created successfully',
       tag
@@ -458,11 +461,11 @@ export const createTag = async (req: Request, res: Response) => {
 // @desc    Search knowledge
 // @route   POST /api/knowledge/search
 // @access  Private
-export const searchKnowledge = async (req: Request, res: Response) => {
+export const searchKnowledge = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const { query, filters, limit = 10 } = req.body;
+    const userId = (req as any).user.id;
+    const { query, filters, limit = 10 } = req.body as any;
     
     const results = await knowledgeService.searchKnowledge(
       userId,
@@ -471,7 +474,7 @@ export const searchKnowledge = async (req: Request, res: Response) => {
       Number(limit)
     );
     
-    res.json({
+    res.send({
       success: true,
       results
     });
@@ -483,11 +486,11 @@ export const searchKnowledge = async (req: Request, res: Response) => {
 // @desc    Get usage analytics
 // @route   GET /api/knowledge/analytics/usage
 // @access  Private
-export const getUsageAnalytics = async (req: Request, res: Response) => {
+export const getUsageAnalytics = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const { startDate, endDate } = req.query;
+    const userId = (req as any).user.id;
+    const { startDate, endDate } = req.query as any;
     
     const analytics = await knowledgeService.getUsageAnalytics(
       userId,
@@ -495,7 +498,7 @@ export const getUsageAnalytics = async (req: Request, res: Response) => {
       endDate ? new Date(endDate as string) : undefined
     );
     
-    res.json({
+    res.send({
       success: true,
       analytics
     });
@@ -507,11 +510,11 @@ export const getUsageAnalytics = async (req: Request, res: Response) => {
 // @desc    Get performance analytics
 // @route   GET /api/knowledge/analytics/performance
 // @access  Private
-export const getPerformanceAnalytics = async (req: Request, res: Response) => {
+export const getPerformanceAnalytics = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
-    const { startDate, endDate } = req.query;
+    const userId = (req as any).user.id;
+    const { startDate, endDate } = req.query as any;
     
     const analytics = await knowledgeService.getPerformanceAnalytics(
       userId,
@@ -519,7 +522,7 @@ export const getPerformanceAnalytics = async (req: Request, res: Response) => {
       endDate ? new Date(endDate as string) : undefined
     );
     
-    res.json({
+    res.send({
       success: true,
       analytics
     });
@@ -531,14 +534,14 @@ export const getPerformanceAnalytics = async (req: Request, res: Response) => {
 // @desc    Get knowledge gaps
 // @route   GET /api/knowledge/analytics/gaps
 // @access  Private
-export const getKnowledgeGaps = async (req: Request, res: Response) => {
+export const getKnowledgeGaps = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const knowledgeService = getKnowledgeService();
-    const userId = req.user.id;
+    const userId = (req as any).user.id;
     
     const gaps = await knowledgeService.getKnowledgeGaps(userId);
     
-    res.json({
+    res.send({
       success: true,
       gaps
     });

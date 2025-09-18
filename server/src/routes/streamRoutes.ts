@@ -1,20 +1,9 @@
-import express from 'express';
-import { handleRealTimeMediaStream } from '../controllers/enhancedRealTimeController';
+import { FastifyInstance } from 'fastify';
 
-import { handleTwilioStreamWebhook } from '../services/webhookHandlers';
+const streamRoutes = async (fastify, opts: Record<string, any>) => {
+  // This file is largely deprecated as WebSocket streaming is now handled directly in index.ts
+  // via fastify-websocket and dedicated WebSocket servers (Twilio, Deepgram).
+  // Keeping this file as a placeholder to avoid breaking imports.
+};
 
-const router = express.Router();
-
-// Note: All WebSocket streaming endpoints are now handled by TwilioWebSocketServer
-// to avoid conflicts with express-ws and ensure proper Twilio Media Streams protocol compliance
-// 
-// The following routes have been moved to the native WebSocket server:
-// - /voice/stream/* - Twilio Media Streams (handled by TwilioWebSocketServer)
-// - /voice/conversational-ai - ElevenLabs Conversational AI
-// - /voice/optimized-stream - Optimized streaming endpoints
-//
-// Legacy route - kept for backward compatibility with existing integrations
-// but consider migrating to dedicated TwilioWebSocketServer for better reliability
-// wsRouter.ws('/stream', handleTwilioStreamWebhook);
-
-export default router;
+export default streamRoutes;

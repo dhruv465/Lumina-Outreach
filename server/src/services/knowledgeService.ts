@@ -63,7 +63,7 @@ export class KnowledgeService {
    * Process an uploaded document
    */
   async processDocument(
-    file: Express.Multer.File,
+    file: any,
     userId: string,
     categoryId?: string,
     tags?: string[]
@@ -71,10 +71,10 @@ export class KnowledgeService {
     try {
       // Save document metadata
       const document = await Document.create({
-        fileName: file.originalname,
+        fileName: file.filename,
         fileType: file.mimetype,
-        filePath: file.path,
-        fileSize: file.size,
+        filePath: file.filepath,
+        fileSize: file.file.bytesRead,
         userId,
         categoryId: categoryId ? new Types.ObjectId(categoryId) : undefined,
         tags: tags || [],

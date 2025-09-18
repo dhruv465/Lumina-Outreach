@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import { logger } from '../index';
 import {
   voiceAIService
@@ -8,13 +8,13 @@ import { handleError } from '../utils/errorHandling';
 // @desc    Get voice personalities
 // @route   GET /api/lumina-outreach/personalities
 // @access  Private
-export const getVoicePersonalities = async (req: Request, res: Response) => {
+export const getVoicePersonalities = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const personalities = await voiceAIService.getAvailablePersonalities();
-    res.json(personalities);
+    res.send(personalities);
   } catch (error) {
     logger.error('Error in getVoicePersonalities:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Failed to fetch voice personalities',
       error: handleError(error)
     });
@@ -24,16 +24,16 @@ export const getVoicePersonalities = async (req: Request, res: Response) => {
 // @desc    Synthesize adaptive voice response
 // @route   POST /api/lumina-outreach/synthesize
 // @access  Private
-export const synthesizeVoice = async (req: Request, res: Response) => {
+export const synthesizeVoice = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const { 
       text, 
       personalityId, 
       language = 'en'
-    } = req.body;
+    } = req.body as any;
 
     if (!text) {
-      return res.status(400).json({ message: 'Text is required for synthesis' });
+      return res.status(400).send({ message: 'Text is required for synthesis' });
     }
 
     const audioResult = await voiceAIService.synthesizeAdaptiveVoice({
@@ -42,13 +42,13 @@ export const synthesizeVoice = async (req: Request, res: Response) => {
       language
     });
 
-    res.json({
+    res.send({
       audioUrl: audioResult.audioUrl,
       metadata: audioResult.metadata
     });
   } catch (error) {
     logger.error('Error in synthesizeVoice:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Voice synthesis failed',
       error: handleError(error)
     });
@@ -58,14 +58,14 @@ export const synthesizeVoice = async (req: Request, res: Response) => {
 // @desc    Real-time conversation adaptation
 // @route   POST /api/lumina-outreach/adapt-conversation
 // @access  Private
-export const adaptConversation = async (req: Request, res: Response) => {
+export const adaptConversation = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const { 
       conversationId,
       conversationHistory,
       currentScript,
       language = 'en'
-    } = req.body;
+    } = req.body as any;
 
     // Simplified adaptation without emotion detection
     const adaptation = {
@@ -75,7 +75,7 @@ export const adaptConversation = async (req: Request, res: Response) => {
       recommendations: ['Continue with current approach']
     };
 
-    res.json({
+    res.send({
       adaptedScript: adaptation.script,
       voiceAdjustments: adaptation.voiceAdjustments,
       personalityShift: adaptation.personalityShift,
@@ -83,7 +83,7 @@ export const adaptConversation = async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error('Error in adaptConversation:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Conversation adaptation failed',
       error: handleError(error)
     });
@@ -93,11 +93,11 @@ export const adaptConversation = async (req: Request, res: Response) => {
 // @desc    Train voice personality (deprecated - training removed)
 // @route   POST /api/lumina-outreach/train-personality
 // @access  Private
-export const trainVoicePersonality = async (req: Request, res: Response) => {
+export const trainVoicePersonality = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     // Voice personality training has been removed from the system
     // Return success response for backward compatibility
-    res.json({
+    res.send({
       trainingId: `deprecated_${Date.now()}`,
       status: 'completed',
       estimatedCompletion: new Date().toISOString(),
@@ -110,7 +110,7 @@ export const trainVoicePersonality = async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error('Error in trainVoicePersonality:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Voice personality training failed',
       error: handleError(error)
     });
@@ -120,16 +120,16 @@ export const trainVoicePersonality = async (req: Request, res: Response) => {
 // @desc    Test voice AI capabilities (simplified)
 // @route   POST /api/lumina-outreach/test
 // @access  Private
-export const testVoiceAI = async (req: Request, res: Response) => {
+export const testVoiceAI = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const { 
       testType = 'basic',
       personalityId,
       testScenarios 
-    } = req.body;
+    } = req.body as any;
 
     // Get dynamic test text from configuration or request
-    let testText = req.body.testText;
+    let testText = (req.body as any).testText;
     
     if (!testText) {
       // Get from system configuration
@@ -144,7 +144,7 @@ export const testVoiceAI = async (req: Request, res: Response) => {
     
     // If still no test text, require it from user
     if (!testText) {
-      return res.status(400).json({
+      return res.status(400).send({
         message: 'Test text is required. Please provide testText in request body or configure it in system settings.',
         required: 'testText'
       });
@@ -157,7 +157,7 @@ export const testVoiceAI = async (req: Request, res: Response) => {
         language: 'en'
       });
 
-      res.json({
+      res.send({
         testId: `test_${Date.now()}`,
         results: {
           voiceSynthesis: 'passed',
@@ -175,7 +175,7 @@ export const testVoiceAI = async (req: Request, res: Response) => {
         ]
       });
     } catch (testError) {
-      res.json({
+      res.send({
         testId: `test_${Date.now()}`,
         results: {
           voiceSynthesis: 'failed',
@@ -194,7 +194,7 @@ export const testVoiceAI = async (req: Request, res: Response) => {
     }
   } catch (error) {
     logger.error('Error in testVoiceAI:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Voice AI testing failed',
       error: handleError(error)
     });
@@ -204,7 +204,7 @@ export const testVoiceAI = async (req: Request, res: Response) => {
 // @desc    Start ElevenLabs Conversational AI interaction
 // @route   POST /api/lumina-outreach/conversational-ai/start
 // @access  Private
-export const startConversationalAI = async (req: Request, res: Response) => {
+export const startConversationalAI = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const {
       text,
@@ -215,14 +215,14 @@ export const startConversationalAI = async (req: Request, res: Response) => {
       adaptiveTone = true,
       contextAwareness = true,
       previousMessages = []
-    } = req.body;
+    } = req.body as any;
 
     if (!text) {
-      return res.status(400).json({ message: 'Text input is required' });
+      return res.status(400).send({ message: 'Text input is required' });
     }
     
     if (!voiceId) {
-      return res.status(400).json({ message: 'Voice ID is required' });
+      return res.status(400).send({ message: 'Voice ID is required' });
     }
 
     // Start the conversation using the enhanced SDK implementation
@@ -240,13 +240,13 @@ export const startConversationalAI = async (req: Request, res: Response) => {
     );
 
     // Return the conversation result
-    res.json({
+    res.send({
       success: true,
       conversation: conversationResult
     });
   } catch (error) {
     logger.error('Error in startConversationalAI:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Failed to start conversational AI',
       error: handleError(error)
     });
@@ -256,12 +256,12 @@ export const startConversationalAI = async (req: Request, res: Response) => {
 // @desc    Interrupt an ongoing ElevenLabs Conversational AI interaction
 // @route   POST /api/lumina-outreach/conversational-ai/interrupt
 // @access  Private
-export const interruptConversationalAI = async (req: Request, res: Response) => {
+export const interruptConversationalAI = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { conversationId } = req.body;
+    const { conversationId } = req.body as any;
 
     if (!conversationId) {
-      return res.status(400).json({ message: 'Conversation ID is required' });
+      return res.status(400).send({ message: 'Conversation ID is required' });
     }
 
     // Since we removed the direct interrupt method, we'll use the SDK service
@@ -281,7 +281,7 @@ export const interruptConversationalAI = async (req: Request, res: Response) => 
       success = false;
     }
 
-    res.json({
+    res.send({
       success,
       message: success 
         ? 'Conversation interrupted successfully' 
@@ -289,7 +289,7 @@ export const interruptConversationalAI = async (req: Request, res: Response) => 
     });
   } catch (error) {
     logger.error('Error in interruptConversationalAI:', error);
-    res.status(500).json({
+    res.status(500).send({
       message: 'Failed to interrupt conversational AI',
       error: handleError(error)
     });

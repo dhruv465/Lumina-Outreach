@@ -603,6 +603,25 @@ const initializeServices = async () => {
       }
     }
 
+    // Initialize Deepgram STT service if API key is available
+    if (deepgramApiKey) {
+      try {
+        const { initializeDeepgramService } = await import(
+          "./services/deepgramService"
+        );
+        initializeDeepgramService(deepgramApiKey);
+        logger.info("Deepgram STT service initialized successfully");
+      } catch (error) {
+        logger.warn(
+          `Failed to initialize Deepgram STT service: ${getErrorMessage(error)}`
+        );
+      }
+    } else {
+      logger.warn(
+        "Deepgram STT service not initialized - no API key available"
+      );
+    }
+
     // Initialize TTS Provider Service
     try {
       const { initializeTTSProviderService } = await import(

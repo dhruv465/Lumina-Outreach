@@ -823,6 +823,8 @@ export class DeepgramService extends EventEmitter {
         error: getErrorMessage(error),
         model: model || 'unknown'
       });
+    });
+
     connection.on('error', (error) => {
       logger.error(`Deepgram stream error for call ${callId}: ${getErrorMessage(error)}`);
       this.emit(DeepgramEvent.ERROR, { connectionId, callId, error: getErrorMessage(error), model });

@@ -788,7 +788,7 @@ export class DeepgramService extends EventEmitter {
         });
 
         // Create live transcription with latest API
-        const connection = this.client.listen.live({
+        const connectionOptions = {
           language: streamOptions.language,
           model: streamOptions.model,
           tier: streamOptions.tier || 'base',
@@ -803,7 +803,16 @@ export class DeepgramService extends EventEmitter {
           sample_rate: 16000,
           interim_results: true,
           keywords: streamOptions.keywords || []
+        };
+
+        logger.info(`Creating Deepgram WebSocket connection with options:`, {
+          callId,
+          model: connectionOptions.model,
+          tier: connectionOptions.tier,
+          language: connectionOptions.language
         });
+
+        const connection = this.client.listen.live(connectionOptions);
 
         // Store connection for management with metadata
         this.activeConnections.set(connectionId, {
@@ -929,7 +938,14 @@ export class DeepgramService extends EventEmitter {
 
     // Handle errors and mark the circuit as potentially failing
     connection.on(LiveTranscriptionEvents.Error, (error) => {
-      logger.error(`Deepgram stream error for call ${callId} with model ${model || 'unknown'}: ${getErrorMessage(error)}`);
+      const errorMessage = getErrorMessage(error);
+      logger.error(`Deepgram stream error for call ${callId} with model ${model || 'unknown'}: ${errorMessage}`);
+      
+      // Check for specific WebSocket connection errors
+      if (errorMessage.includes('network error') || errorMessage.includes('non-101 status code')) {
+        logger.error(`WebSocket connection failed for call ${callId}. This may be due to network issues, proxy settings, or firewall restrictions.`);
+        logger.error(`Please check: 1) Network connectivity to api.deepgram.com, 2) Firewall/proxy settings, 3) WebSocket support`);
+      }
       
       // Check if this is a model compatibility error
       if (this.isModelCompatibilityError(error)) {
@@ -939,7 +955,7 @@ export class DeepgramService extends EventEmitter {
           callId,
           connectionId,
           originalModel: model,
-          reason: `Stream error: ${getErrorMessage(error)}`
+          reason: `Stream error: ${errorMessage}`
         });
       }
       
@@ -1057,11 +1073,17 @@ export class DeepgramService extends EventEmitter {
         return;
       }
 
-      const connection = connectionData.connection || connectionData;
+      const connection = connectionData.connection;
       
       // Close the connection if it's open
-      if (connection.isOpen || connection.getReadyState() === 1) { // 1 = OPEN
-        connection.finish();
+      if (connection && (connection.isOpen || connection.getReadyState() === 1)) { // 1 = OPEN
+        if (typeof connection.finish === 'function') {
+          connection.finish();
+        } else if (typeof connection.close === 'function') {
+          connection.close();
+        } else {
+          logger.warn(`Connection ${connectionId} does not have close/finish method`);
+        }
         logger.info(`Closed Deepgram connection ${connectionId} (model: ${connectionData.model || 'unknown'})`);
       }
       

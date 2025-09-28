@@ -654,7 +654,7 @@ export class DeepgramService extends EventEmitter {
         const connection = this.client.listen.live({
           language: streamOptions.language,
           model: streamOptions.model,
-          tier: streamOptions.tier || 'enhanced',
+          tier: streamOptions.tier || 'base',
           punctuate: streamOptions.punctuate !== false,
           diarize: streamOptions.diarize || false,
           multichannel: false,

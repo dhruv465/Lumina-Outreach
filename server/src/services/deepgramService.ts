@@ -676,6 +676,7 @@ export class DeepgramService extends EventEmitter {
         });
 
         const connection = this.client.listen.live(connectionOptions);
+       
 
         // Store connection for management with metadata
         this.activeConnections.set(connectionId, {

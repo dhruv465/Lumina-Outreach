@@ -748,7 +748,7 @@ export class EnhancedSpeechToTextService {
       keywords: options.keywords || [],
       profanity_filter: options.profanityFilter || false,
       redact: options.redact || false,
-      tier: options.tier || 'enhanced', // enhanced or base
+      tier: options.tier || 'base', // enhanced or base
       version: options.version || 'latest',
       filler_words: options.fillerWords || false
     };

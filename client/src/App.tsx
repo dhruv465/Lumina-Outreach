@@ -19,6 +19,7 @@ import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import NotFound from '@/pages/NotFound';
 import AnimatedLogoPage from '@/pages/AnimatedLogoPage';
+import LogoOnlyPage from '@/pages/LogoOnlyPage';
 
 // Protected route component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -48,6 +49,7 @@ function App() {
 
         {/* Public routes */}
         <Route path="animated-logo" element={<AnimatedLogoPage />} />
+        <Route path="logo-only" element={<LogoOnlyPage />} />
         {/* <Route path="call-simulator" element={<CallSimulator />} /> */}
 
         {/* Dashboard routes */}

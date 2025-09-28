@@ -97,6 +97,9 @@ export class DeepgramService extends EventEmitter {
     utteranceEndMs: 500
   };
   private readonly CIRCUIT_NAME = 'deepgram-api';
+  private modelValidationCache: Map<string, { isValid: boolean; timestamp: number }> = new Map();
+  private transcriptionCache: Map<string, { data: any; timestamp: number }> = new Map();
+  private readonly MODEL_VALIDATION_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor(apiKey: string) {
     super();
@@ -756,10 +759,10 @@ export class DeepgramService extends EventEmitter {
           id: uuidv4(),
           callId,
           text: alt.transcript || '',
-          isFinal: message.is_final || false,
+          isFinal: data.is_final || false,
           confidence: alt.confidence || 0,
           words: alt.words?.map((word: any) => ({ word: word.word, start: word.start, end: word.end, confidence: word.confidence })) || [],
-          metadata: { startTime: message.start || 0, endTime: message.end || 0, processingLatency: message.audio_meta?.processing_latency_ms || 0 }
+          metadata: { startTime: data.start || 0, endTime: data.end || 0, processingLatency: data.audio_meta?.processing_latency_ms || 0 }
         };
 
         if (result.isFinal) {

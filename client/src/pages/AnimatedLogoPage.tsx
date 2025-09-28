@@ -4,7 +4,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { Button } from '@/components/ui/button';
 import { Moon, Sun, ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import AnimatedLogo from '@/components/AnimatedLogo';
+import SelfDrawingSVGLogo from '@/self-drawing-svg-logo';
 
 const AnimatedLogoPage: React.FC = () => {
   const { theme, setTheme } = useTheme();
@@ -78,14 +78,14 @@ const AnimatedLogoPage: React.FC = () => {
           </p>
         </motion.div>
 
-        {/* Animated Logo Display */}
+        {/* Self-Drawing Logo Display */}
         <motion.div
           className="mb-12"
           initial={{ scale: 0.5, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ duration: 1, delay: 0.5 }}
         >
-          <AnimatedLogo size={300} />
+          <SelfDrawingSVGLogo />
         </motion.div>
 
         {/* Feature Description */}

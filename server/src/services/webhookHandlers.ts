@@ -441,54 +441,7 @@ export async function handleTwilioVoiceWebhook(req: FastifyRequest, reply: Fasti
                         speechTimeout: 5,
                         speechModel: 'phone_call',
                         timeout: 20,
-                        numDigits: 1
                   });
-
-                  gather.pause({ length: 2 });
-
-                  const promptMessage = "Please feel free to share your thoughts or let me know if you have any questions.";
-                  gather.say({
-                        voice: 'alice',
-                        language: campaign.primaryLanguage === 'hi' ? 'hi-IN' : 'en-US'
-                  }, promptMessage);
-
-                  const config = await Configuration.findOne();
-                  const noResponseMessage = config?.errorMessages?.noSpeechDetected || "I didn't hear anything. Let me try once more - please speak when you're ready.";
-
-                  const secondGather = twiml.gather({
-                        input: 'speech',
-                        action: `${process.env.WEBHOOK_BASE_URL}/api/calls/gather?callId=${callId}&conversationId=${conversationId}`,
-                        method: 'POST',
-                        speechTimeout: 5,
-                        speechModel: 'phone_call',
-                        timeout: 25
-                  });
-
-                  secondGather.say({
-                        voice: 'alice',
-                        language: campaign.primaryLanguage === 'hi' ? 'hi-IN' : 'en-US'
-                  }, noResponseMessage);
-
-                  const goodbyeMessage = config?.callResponses?.goodbye || "Thank you for your time. Goodbye.";
-
-                  const defaultLlmProviderName = configuration?.llmConfig?.defaultProvider;
-                  const defaultLlmProvider = configuration?.llmConfig?.providers?.find(p => p.name === defaultLlmProviderName);
-                  const usedElevenLabs = await synthesizeVoiceResponse(
-                        twiml,
-                        goodbyeMessage,
-                        {
-                              voiceId: campaign?.voiceConfiguration?.voiceId,
-                              language: campaign.primaryLanguage === 'hi' ? 'hi' : 'en',
-                              campaignId: campaign?._id?.toString(),
-                              fallbackBehavior: 'tts'
-                        }
-                  );
-
-                  if (!usedElevenLabs) {
-                        logger.info(`Used Twilio TTS for goodbye message for call ${callId}`);
-                  }
-
-                  twiml.hangup();
             }
 
             const twimlString = twiml.toString();

@@ -2,12 +2,13 @@ import { logger } from '../index';
 import { getErrorMessage } from './logger';
 
 /**
- * Convert μ-law audio to PCM format with proper WAV header for Deepgram
- * Twilio sends audio in μ-law format, but Deepgram works better with PCM WAV
+ * Convert μ-law audio to 16-bit PCM format with proper WAV header for Deepgram,
+ * resampling from 8kHz to 16kHz.
+ * Twilio sends audio in μ-law format (8kHz), but Deepgram's Nova-2 model often expects 16kHz Linear16.
  */
 export function convertMuLawToPCM(muLawBuffer: Buffer): Buffer {
     try {
-      // Use the same μ-law decode table as in voice activity detection
+      // μ-law to linear conversion table (standard ITU-T G.711)
       const MULAW_DECODE_TABLE = [
         -32124, -31100, -30076, -29052, -28028, -27004, -25980, -24956,
         -23932, -22908, -21884, -20860, -19836, -18812, -17788, -16764,
@@ -36,25 +37,39 @@ export function convertMuLawToPCM(muLawBuffer: Buffer): Buffer {
         1884, 1820, 1756, 1692, 1628, 1564, 1500, 1436,
         1372, 1308, 1244, 1180, 1116, 1052, 988, 924,
         876, 844, 812, 780, 748, 716, 684, 652,
-        620, -588, -556, -524, -492, -460, -428, -396,
-        372, -356, -340, -324, -308, -292, -276, -260,
-        244, -228, -212, -196, -180, -164, -148, -132,
-        120, -112, -104, -96, -88, -80, -72, -64,
-        56, -48, -40, -32, -24, -16, -8, 0
+        620, 588, 556, 524, 492, 460, 428, 396,
+        372, 356, 340, 324, 308, 292, 276, 260,
+        244, 228, 212, 196, 180, 164, 148, 132,
+        120, 112, 104, 96, 88, 80, 72, 64,
+        56, 48, 40, 32, 24, 16, 8, 0
       ];
       
-      const pcmBuffer = Buffer.alloc(muLawBuffer.length * 2);
+      // Convert each μ-law byte to 16-bit PCM using the lookup table
+      const pcm8kHzBuffer = Buffer.alloc(muLawBuffer.length * 2);
       
       for (let i = 0; i < muLawBuffer.length; i++) {
         const muLawByte = muLawBuffer[i];
         const pcmSample = MULAW_DECODE_TABLE[muLawByte];
-        pcmBuffer.writeInt16LE(pcmSample, i * 2);
+        pcm8kHzBuffer.writeInt16LE(pcmSample, i * 2);
       }
       
-      return createWavFile(pcmBuffer, 8000, 1, 16);
+      // Resample from 8kHz to 16kHz using linear interpolation
+      const pcm16kHzBuffer = Buffer.alloc(pcm8kHzBuffer.length * 2);
+      
+      for (let i = 0; i < pcm8kHzBuffer.length / 2; i++) { // Iterate over 16-bit samples
+          const sample1 = pcm8kHzBuffer.readInt16LE(i * 2);
+          const sample2 = (i * 2 + 2 < pcm8kHzBuffer.length) ? pcm8kHzBuffer.readInt16LE(i * 2 + 2) : sample1; // Handle last sample
+
+          pcm16kHzBuffer.writeInt16LE(sample1, i * 4); // Write original sample
+          const interpolatedSample = Math.round((sample1 + sample2) / 2);
+          pcm16kHzBuffer.writeInt16LE(interpolatedSample, i * 4 + 2); // Write interpolated sample
+      }
+
+      // Create a proper WAV file with header for Deepgram (16kHz)
+      return createWavFile(pcm16kHzBuffer, 16000, 1, 16);
     } catch (error) {
-      logger.warn(`Error converting μ-law to PCM: ${getErrorMessage(error)}, using original buffer`);
-      return muLawBuffer;
+      logger.warn(`Error converting μ-law to PCM and resampling: ${getErrorMessage(error)}, using original buffer`);
+      return muLawBuffer; // Return original buffer if conversion fails
     }
 }
 
@@ -129,11 +144,11 @@ export function detectVoiceActivity(audioBuffer: Buffer): boolean {
         1884, 1820, 1756, 1692, 1628, 1564, 1500, 1436,
         1372, 1308, 1244, 1180, 1116, 1052, 988, 924,
         876, 844, 812, 780, 748, 716, 684, 652,
-        620, -588, -556, -524, -492, -460, -428, -396,
-        372, -356, -340, -324, -308, -292, -276, -260,
-        244, -228, -212, -196, -180, -164, -148, -132,
-        120, -112, -104, -96, -88, -80, -72, -64,
-        56, -48, -40, -32, -24, -16, -8, 0
+        620, 588, 556, 524, 492, 460, 428, 396,
+        372, 356, 340, 324, 308, 292, 276, 260,
+        244, 228, 212, 196, 180, 164, 148, 132,
+        120, 112, 104, 96, 88, 80, 72, 64,
+        56, 48, 40, 32, 24, 16, 8, 0
       ];
       
       let sumSquares = 0;

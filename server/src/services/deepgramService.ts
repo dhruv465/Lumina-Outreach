@@ -3,6 +3,7 @@ import { getErrorMessage } from '../utils/logger';
 import logger from '../utils/logger';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
+import WebSocket from 'ws';
 import Configuration from '../models/Configuration';
 import { getCircuitBreakerService, CircuitBreakerOptions } from './circuitBreakerService';
 import { 
@@ -80,31 +81,6 @@ export interface TranscriptResult {
   };
 }
 
-/* Internal options definitions were previously here but are now consolidated in the exported interface above */
-
-/**
- * DeepgramService Class
-
-// Define Deepgram config interface for database
-interface DeepgramConfig {
-  language?: string;
-  model?: string;
-  primaryModel?: string;
-  detectLanguage?: boolean;
-  apiKey?: string;
-  fallbackModels?: string[];
-  autoFallback?: boolean;
-  accountTier?: 'free' | 'basic' | 'premium';
-  availableModels?: string[];
-  lastModelValidation?: Date;
-  status?: 'unverified' | 'verified' | 'failed' | 'degraded';
-  lastError?: string;
-}
-
-/**
- * Service for real-time speech-to-text using Deepgram
- * Provides ultra-low latency transcription with WebSocket streaming
- */
 export class DeepgramService extends EventEmitter {
   private apiKey: string;
   private client: DeepgramClient;
@@ -117,143 +93,30 @@ export class DeepgramService extends EventEmitter {
     language: 'en',
     model: 'nova-2',
     punctuate: true,
-    endpointing: 150, // 150ms of silence to consider end of speech
-    utteranceEndMs: 500 // 500ms to finalize an utterance
+    endpointing: 150, 
+    utteranceEndMs: 500
   };
   private readonly CIRCUIT_NAME = 'deepgram-api';
-  private fallbackProviders: string[] = [];
-  // Local cache for transcription results
-  private transcriptionCache: Map<string, any> = new Map();
-  // Model validation cache
   private modelValidationCache: Map<string, { isValid: boolean; timestamp: number }> = new Map();
+  private transcriptionCache: Map<string, { data: any; timestamp: number }> = new Map();
   private readonly MODEL_VALIDATION_TTL = 5 * 60 * 1000; // 5 minutes
 
-  /**
-   * Create a new Deepgram Service instance
-   * @param apiKey Deepgram API key
-   */
   constructor(apiKey: string) {
     super();
     this.apiKey = apiKey;
     this.client = createClient(apiKey);
-    
-    // Initialize model compatibility service
     this.modelCompatibilityService = initializeModelCompatibilityService(apiKey);
     
-    // Initialize circuit breaker options
     const circuitOptions: CircuitBreakerOptions = {
-      resetTimeout: 10000, // Shorter reset for voice services
-      errorThresholdPercentage: 30, // More sensitive for real-time voice
-      timeout: 5000 // Voice API calls should be fast
+      resetTimeout: 10000,
+      errorThresholdPercentage: 30,
+      timeout: 5000
     };
-    
-    // Get the circuit breaker service
     getCircuitBreakerService().getCircuit(this.CIRCUIT_NAME, circuitOptions);
     
-    logger.info('Deepgram Service initialized with model compatibility support, in-memory caching and circuit breaker protection');
-    
-    // Set up periodic cache cleanup (every 30 minutes)
-    setInterval(() => this.cleanupCache(), 30 * 60 * 1000);
-    
-    // Set up connection health monitoring (inspired by Deepgram Voice Agent)
-    setInterval(() => this.monitorConnections(), 30 * 1000); // Every 30 seconds
-    
-    // Initialize with optimal model configuration
-    this.initializeOptimalModel().catch(error => {
-      logger.warn(`Failed to initialize optimal model: ${getErrorMessage(error)}`);
-    });
-  }
-  
-  /**
-   * Monitor active connections health (inspired by Deepgram Voice Agent)
-   */
-  private monitorConnections(): void {
-    const now = Date.now();
-    const staleConnectionThreshold = 5 * 60 * 1000; // 5 minutes
-    
-    for (const [connectionId, connectionData] of this.activeConnections.entries()) {
-      if (connectionData.createdAt) {
-        const connectionAge = now - connectionData.createdAt.getTime();
-        
-        // Check for stale connections
-        if (connectionAge > staleConnectionThreshold) {
-          logger.warn(`Stale connection detected: ${connectionId}, age: ${connectionAge}ms`);
-          
-          // Emit connection health event
-          this.emit(DeepgramEvent.CONNECTION_STATUS, {
-            connectionId,
-            callId: connectionData.callId,
-            status: 'stale',
-            age: connectionAge
-          });
-          
-          // Attempt to refresh connection if it's a real connection (not fallback)
-          if (!connectionData.isFallback && !connectionData.isEmergencyFallback) {
-            this.refreshConnection(connectionId);
-          }
-        }
-      }
-    }
-    
-    logger.debug(`Connection health check completed. Active connections: ${this.activeConnections.size}`);
+    logger.info('Deepgram Service initialized');
   }
 
-  /**
-   * Refresh a stale connection
-   * @param connectionId Connection ID to refresh
-   */
-  private refreshConnection(connectionId: string): void {
-    const connectionData = this.activeConnections.get(connectionId);
-    
-    if (!connectionData) {
-      return;
-    }
-    
-    logger.info(`Attempting to refresh connection: ${connectionId}`);
-    
-    try {
-      // Send a keep-alive message to test connection
-      if (connectionData.connection && typeof connectionData.connection.send === 'function') {
-        connectionData.connection.send(JSON.stringify({
-          type: 'KeepAlive',
-          timestamp: Date.now()
-        }));
-        
-        logger.debug(`Keep-alive sent to connection: ${connectionId}`);
-      }
-    } catch (error) {
-      logger.error(`Failed to refresh connection ${connectionId}: ${getErrorMessage(error)}`);
-      
-      // Mark connection as unhealthy
-      this.emit(DeepgramEvent.CONNECTION_STATUS, {
-        connectionId,
-        callId: connectionData.callId,
-        status: 'unhealthy',
-        error: getErrorMessage(error)
-      });
-    }
-  }
-
-  /**
-   * Cleanup the local transcription cache to prevent memory leaks
-   */
-  private cleanupCache(): void {
-    const now = Date.now();
-    const MAX_AGE = 60 * 60 * 1000; // 1 hour in milliseconds
-    
-    for (const [key, value] of this.transcriptionCache.entries()) {
-      if (value.timestamp && (now - value.timestamp) > MAX_AGE) {
-        this.transcriptionCache.delete(key);
-      }
-    }
-    
-    logger.debug(`DeepgramService cache cleanup completed. Current cache size: ${this.transcriptionCache.size}`);
-  }
-
-  /**
-   * Update the API key
-   * @param apiKey New Deepgram API key
-   */
   public updateApiKey(apiKey: string): void {
     this.apiKey = apiKey;
     this.client = createClient(apiKey);
@@ -907,34 +770,18 @@ export class DeepgramService extends EventEmitter {
           text: alt.transcript || '',
           isFinal: data.is_final || false,
           confidence: alt.confidence || 0,
-          words: alt.words?.map((word: any) => ({
-            word: word.word,
-            start: word.start,
-            end: word.end,
-            confidence: word.confidence
-          })) || [],
-          metadata: {
-            startTime: data.start || 0,
-            endTime: data.end || 0,
-            processingLatency: data.audio_meta?.processing_latency_ms || 0
-          }
+          words: alt.words?.map((word: any) => ({ word: word.word, start: word.start, end: word.end, confidence: word.confidence })) || [],
+          metadata: { startTime: data.start || 0, endTime: data.end || 0, processingLatency: data.audio_meta?.processing_latency_ms || 0 }
         };
 
-        // Log detailed metrics for final results
         if (result.isFinal) {
-          logger.info(`Deepgram final transcript for call ${callId}`, {
-            text: result.text,
-            confidence: result.confidence,
-            latency: result.metadata.processingLatency,
-            model: model || 'unknown'
-          });
           this.emit(DeepgramEvent.TRANSCRIPT_FINAL, result);
         } else {
-          // Emit interim results without excessive logging
           this.emit(DeepgramEvent.TRANSCRIPT_RECEIVED, result);
         }
       }
     });
+
 
     // Handle errors and mark the circuit as potentially failing
     connection.on(LiveTranscriptionEvents.Error, (error) => {
@@ -976,88 +823,39 @@ export class DeepgramService extends EventEmitter {
         error: getErrorMessage(error),
         model: model || 'unknown'
       });
+    connection.on('error', (error) => {
+      logger.error(`Deepgram stream error for call ${callId}: ${getErrorMessage(error)}`);
+      this.emit(DeepgramEvent.ERROR, { connectionId, callId, error: getErrorMessage(error), model });
     });
 
-    // Handle close events
-    connection.on(LiveTranscriptionEvents.Close, () => {
+    connection.on('close', () => {
       logger.info(`Deepgram stream closed for call ${callId}`);
       this.activeConnections.delete(connectionId);
-      this.emit(DeepgramEvent.CONNECTION_STATUS, {
-        connectionId,
-        callId,
-        status: 'disconnected'
-      });
-    });
-
-    // Handle open events
-    connection.on(LiveTranscriptionEvents.Open, () => {
-      logger.info(`Deepgram stream opened for call ${callId}`);
-      this.emit(DeepgramEvent.CONNECTION_STATUS, {
-        connectionId,
-        callId,
-        status: 'open'
-      });
+      this.emit(DeepgramEvent.CONNECTION_STATUS, { connectionId, callId, status: 'disconnected' });
     });
   }
 
-  /**
-   * Get connection data by connection ID
-   * @param connectionId Connection ID
-   * @returns Connection data
-   */
-  public getConnection(connectionId: string): any {
-    return this.activeConnections.get(connectionId);
-  }
-
-  /**
-   * Send audio data to an active transcription stream
-   * @param connectionId Connection ID
-   * @param audioData Audio data as Buffer
-   */
   public sendAudioToStream(connectionId: string, audioData: Buffer): void {
     const connectionData = this.activeConnections.get(connectionId);
     if (!connectionData) {
-      logger.warn(`No active Deepgram connection found for ID ${connectionId}`);
-      return;
-    }
-
-    // Handle fallback connections
-    if (connectionData.isFallback || connectionData.isEmergencyFallback) {
-      logger.debug(`Ignoring audio data for fallback connection ${connectionId}`);
-      return;
-    }
-
-    const connection = connectionData.connection || connectionData;
-
-    try {
-      // Check if connection is open before sending
-      if (connection.isOpen || connection.getReadyState() === 1) { // 1 = OPEN
-        connection.send(audioData);
-        this.warnedConnections.delete(connectionId);
-      } else {
-        if (!this.warnedConnections.has(connectionId)) {
-            logger.warn(`Deepgram connection ${connectionId} is not open`);
-            this.warnedConnections.add(connectionId);
-        }
+      if (!this.warnedConnections.has(connectionId)) {
+        logger.warn(`No active Deepgram connection found for ID ${connectionId}`);
+        this.warnedConnections.add(connectionId);
       }
-    } catch (error) {
-      logger.error(`Error sending audio to Deepgram: ${getErrorMessage(error)}`);
-      
-      // If this is a model compatibility error, emit fallback event
-      if (this.isModelCompatibilityError(error)) {
-        this.emit(DeepgramEvent.FALLBACK_USED, {
-          connectionId,
-          callId: connectionData.callId,
-          reason: `Audio send error: ${getErrorMessage(error)}`
-        });
+      return;
+    }
+
+    const { connection } = connectionData;
+    if (connection.readyState === WebSocket.OPEN) {
+      connection.send(audioData);
+    } else {
+      if (!this.warnedConnections.has(connectionId)) {
+        logger.warn(`Deepgram connection ${connectionId} is not open (state: ${connection.readyState})`);
+        this.warnedConnections.add(connectionId);
       }
     }
   }
 
-  /**
-   * Close a transcription stream
-   * @param connectionId Connection ID
-   */
   public closeTranscriptionStream(connectionId: string): void {
     const connectionData = this.activeConnections.get(connectionId);
     if (!connectionData) {
@@ -1088,267 +886,36 @@ export class DeepgramService extends EventEmitter {
       }
       
       // Clean up the connection
+    if (connectionData) {
+      connectionData.connection.close();
       this.activeConnections.delete(connectionId);
       this.warnedConnections.delete(connectionId);
-    } catch (error) {
-      logger.error(`Error closing Deepgram connection: ${getErrorMessage(error)}`);
-      // Still clean up the connection even if closing failed
-      this.activeConnections.delete(connectionId);
+      logger.info(`Closed Deepgram connection ${connectionId}`);
     }
   }
 
-  /**
-   * Get all active connection IDs
-   * @returns Array of active connection IDs
-   */
-  public getActiveConnectionIds(): string[] {
-    return Array.from(this.activeConnections.keys());
-  }
-
-  /**
-   * Close all active connections
-   */
-  public closeAllConnections(): void {
-    const connectionIds = this.getActiveConnectionIds();
-    logger.info(`Closing ${connectionIds.length} Deepgram connections`);
-    
-    connectionIds.forEach(id => {
-      this.closeTranscriptionStream(id);
-    });
-  }
-
-  /**
-   * Validate the Deepgram API key and find compatible models
-   * @returns Promise<boolean> - True if the API key is valid
-   */
   public async validateApiKey(): Promise<boolean> {
     try {
-      logger.debug(`Deepgram API key being validated (masked): ${this.apiKey.substring(0, 5)}...${this.apiKey.substring(this.apiKey.length - 5)}`);
-      // Use model compatibility service to validate and find compatible models
       const compatibleModels = await this.modelCompatibilityService.getCompatibleModels(this.apiKey);
-      
-      if (compatibleModels.length === 0) {
-        logger.error('Deepgram API key validation failed: No compatible models found');
-        return false;
-      }
-      
-      // Update our fallback models based on what's available
-      this.fallbackModels = compatibleModels.filter(model => model !== this.defaultModel);
-      
-      logger.info(`Deepgram API key validation successful. Compatible models: [${compatibleModels.join(', ')}]`);
-      return true;
+      return compatibleModels.length > 0;
     } catch (error) {
       logger.error(`Deepgram API key validation failed: ${getErrorMessage(error)}`);
       return false;
     }
   }
-  
-  /**
-   * Transcribe an audio buffer using Deepgram
-   * @param audioBuffer Buffer containing audio data
-   * @param options Transcription options
-   * @returns Transcription result
-   */
-  public async transcribeBuffer(
-    audioBuffer: Buffer,
-    options?: DeepgramStreamOptions
-  ): Promise<any> {
-    try {
-      // Merge default options with provided options
-      const transcribeOptions = {
-        ...this.defaultOptions,
-        ...options
-      };
-
-      // Validate model before transcribing
-      let modelToUse = transcribeOptions.model || this.defaultModel;
-      const isModelValid = await this.validateAndSetModel(modelToUse);
-      
-      if (!isModelValid) {
-        // Try to find a compatible fallback model
-        logger.warn(`Model ${modelToUse} is not valid for buffer transcription, attempting fallback`);
-        
-        const modelsToTry = [this.defaultModel, ...this.fallbackModels].filter((model, index, arr) => arr.indexOf(model) === index);
-        let fallbackFound = false;
-        
-        for (const fallbackModel of modelsToTry) {
-          if (fallbackModel !== modelToUse) {
-            const isFallbackValid = await this.validateAndSetModel(fallbackModel);
-            if (isFallbackValid) {
-              modelToUse = fallbackModel;
-              transcribeOptions.model = fallbackModel;
-              fallbackFound = true;
-              
-              // Enhanced logging for buffer transcription fallback
-              logger.info(`Deepgram buffer transcription fallback successful`, {
-                originalModel: options?.model || this.defaultModel,
-                fallbackModel: fallbackModel,
-                reason: 'Model validation failed',
-                context: 'deepgram-buffer-transcription-fallback'
-              });
-              
-              logger.info(`Using fallback model ${fallbackModel} for buffer transcription`);
-              break;
-            }
-          }
-        }
-        
-        if (!fallbackFound) {
-          throw new Error(`No compatible models available for buffer transcription`);
-        }
-      }
-
-      logger.info(`Transcribing audio buffer with Deepgram`, {
-        model: transcribeOptions.model,
-        language: transcribeOptions.language
-      });
-
-      // Use the prerecorded API to transcribe the buffer
-      const result = await this.client.listen.prerecorded.transcribeFile(audioBuffer, {
-        language: transcribeOptions.language,
-        model: transcribeOptions.model,
-        tier: transcribeOptions.tier || 'enhanced',
-        punctuate: transcribeOptions.punctuate !== false,
-        diarize: transcribeOptions.diarize || false,
-        multichannel: false,
-        alternatives: 1,
-        smart_format: true,
-        numerals: true,
-        profanity_filter: transcribeOptions.profanityFilter || transcribeOptions.profanity_filter || false
-      });
-      
-      // Record metrics
-      deepgramModelMetrics.recordModelUsage(
-        modelToUse,
-        'premium', // Default tier assumption
-        true,
-        0 // latency is unknown for buffer transcription
-      );
-      
-      return result;
-    } catch (error) {
-      logger.error(`Error transcribing audio buffer: ${getErrorMessage(error)}`);
-      
-      // Record failure metrics
-      deepgramModelMetrics.recordModelUsage(options?.model || this.defaultModel, 'premium', false, 0);
-      
-      throw new Error(`Failed to transcribe audio buffer: ${getErrorMessage(error)}`);
-    }
-  }
-  
-  /**
-   * Transcribe audio from a URL using Deepgram
-   * @param audioUrl URL to audio file
-   * @param options Transcription options
-   * @returns Transcription result
-   */
-  public async transcribeUrl(
-    audioUrl: string,
-    options?: DeepgramStreamOptions
-  ): Promise<any> {
-    try {
-      // Merge default options with provided options
-      const transcribeOptions = {
-        ...this.defaultOptions,
-        ...options
-      };
-
-      // Validate model before transcribing
-      let modelToUse = transcribeOptions.model || this.defaultModel;
-      const isModelValid = await this.validateAndSetModel(modelToUse);
-      
-      if (!isModelValid) {
-        // Try to find a compatible fallback model
-        logger.warn(`Model ${modelToUse} is not valid for URL transcription, attempting fallback`);
-        
-        const modelsToTry = [this.defaultModel, ...this.fallbackModels].filter((model, index, arr) => arr.indexOf(model) === index);
-        let fallbackFound = false;
-        
-        for (const fallbackModel of modelsToTry) {
-          if (fallbackModel !== modelToUse) {
-            const isFallbackValid = await this.validateAndSetModel(fallbackModel);
-            if (isFallbackValid) {
-              modelToUse = fallbackModel;
-              transcribeOptions.model = fallbackModel;
-              fallbackFound = true;
-              
-              // Enhanced logging for URL transcription fallback
-              logger.info(`Deepgram URL transcription fallback successful`, {
-                originalModel: options?.model || this.defaultModel,
-                fallbackModel: fallbackModel,
-                reason: 'Model validation failed',
-                context: 'deepgram-url-transcription-fallback'
-              });
-              
-              logger.info(`Using fallback model ${fallbackModel} for URL transcription`);
-              break;
-            }
-          }
-        }
-        
-        if (!fallbackFound) {
-          throw new Error(`No compatible models available for URL transcription`);
-        }
-      }
-
-      logger.info(`Transcribing audio from URL with Deepgram: ${audioUrl}`, {
-        model: transcribeOptions.model,
-        language: transcribeOptions.language
-      });
-
-      // Use the prerecorded API to transcribe the URL
-      const result = await this.client.listen.prerecorded.transcribeUrl({
-        url: audioUrl
-      }, {
-        language: transcribeOptions.language,
-        model: transcribeOptions.model,
-        tier: transcribeOptions.tier || 'enhanced',
-        punctuate: transcribeOptions.punctuate !== false,
-        diarize: transcribeOptions.diarize || false,
-        multichannel: false,
-        alternatives: 1,
-        smart_format: true,
-        numerals: true,
-        profanity_filter: transcribeOptions.profanityFilter || transcribeOptions.profanity_filter || false
-      });
-      
-      // Record metrics
-      deepgramModelMetrics.recordModelUsage(modelToUse, 'premium', true, 0);
-      
-      return result;
-    } catch (error) {
-      logger.error(`Error transcribing audio from URL: ${getErrorMessage(error)}`);
-      
-      // Record failure metrics
-      deepgramModelMetrics.recordModelUsage(options?.model || this.defaultModel, 'premium', false, 0);
-      
-      throw new Error(`Failed to transcribe audio from URL: ${getErrorMessage(error)}`);
-    }
-  }
 }
 
-// Singleton instance
 let deepgramServiceInstance: DeepgramService | null = null;
 
-/**
- * Initialize the Deepgram Service with model compatibility support
- * @param apiKey Deepgram API key
- * @returns Service instance
- */
 export function initializeDeepgramService(apiKey: string): DeepgramService {
   if (!deepgramServiceInstance) {
     deepgramServiceInstance = new DeepgramService(apiKey);
   } else {
-    // Update API key if service already exists
     deepgramServiceInstance.updateApiKey(apiKey);
   }
   return deepgramServiceInstance;
 }
 
-/**
- * Get the Deepgram Service instance
- * @returns Service instance or null if not initialized
- */
 export function getDeepgramService(): DeepgramService | null {
   return deepgramServiceInstance;
 }

@@ -890,6 +890,9 @@ export class DeepgramService extends EventEmitter {
       // Clean up the connection
       this.activeConnections.delete(connectionId);
       this.warnedConnections.delete(connectionId);
+    } catch (error) {
+      logger.error(`Error closing Deepgram connection ${connectionId}: ${getErrorMessage(error)}`);
+    }
   }
 
   public async validateApiKey(): Promise<boolean> {

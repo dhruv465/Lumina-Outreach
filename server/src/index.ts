@@ -22,6 +22,8 @@ import deepgramTestRoutes, {
   setupDeepgramWebSocketServer,
 } from "./routes/deepgramTestRoutes";
 import deepgramTTSRoutes from "./routes/deepgramTTSRoutes";
+import streamingTTSRoutes from "./routes/streamingTTSRoutes";
+import connectionPreWarmingRoutes from "./routes/connectionPreWarmingRoutes";
 import sttRoutes from "./routes/sttRoutes";
 import knowledgeRoutes from "./routes/knowledgeRoutes";
 import leadRoutes from "./routes/leadRoutes";
@@ -247,6 +249,8 @@ app.get("/api/deepgram-metrics", (req, res) => {
 // Monitoring API routes removed
 app.register(deepgramTestRoutes, { prefix: "/api/deepgram" }); // Deepgram testing routes
 app.register(deepgramTTSRoutes, { prefix: "/api/deepgram-tts" }); // Deepgram TTS routes
+app.register(streamingTTSRoutes, { prefix: "/api/streaming-tts" }); // Streaming TTS routes
+app.register(connectionPreWarmingRoutes, { prefix: "/api/connection-pre-warming" }); // Connection pre-warming routes
 app.register(sttRoutes, { prefix: "/api/stt" }); // Speech-to-Text testing routes
 app.register(ttsProviderRoutes, { prefix: "/api/tts-provider" }); // TTS Provider management routes
 app.register(enhancedRealTimeRoutes, { prefix: "/api/realtime" }); // Enhanced real-time call functionality
@@ -568,6 +572,30 @@ const initializeServices = async () => {
         );
         initializeDeepgramTTS(deepgramApiKey);
         logger.info("Deepgram TTS service initialized as primary TTS provider");
+        
+        // Initialize streaming TTS service
+        const { initializeStreamingTTS } = await import(
+          "./services/streamingTTSService"
+        );
+        initializeStreamingTTS(deepgramApiKey);
+        logger.info("Streaming TTS service initialized successfully");
+        
+        // Initialize connection pre-warming service
+        const { initializeConnectionPreWarming } = await import(
+          "./services/connectionPreWarmingService"
+        );
+        const preWarmingService = initializeConnectionPreWarming();
+        
+        // Initialize WebSocket connection pool
+        const { initializeWebSocketConnectionPool } = await import(
+          "./services/websocketConnectionPool"
+        );
+        initializeWebSocketConnectionPool();
+        
+        // Start pre-warming connections in the background
+        preWarmingService.preWarmConnections().catch(error => {
+          logger.warn(`Connection pre-warming failed: ${getErrorMessage(error)}`);
+        });
       } catch (error) {
         logger.warn(
           `Failed to initialize Deepgram TTS service: ${getErrorMessage(error)}`
@@ -582,6 +610,30 @@ const initializeServices = async () => {
         logger.info(
           "Deepgram TTS service initialized as fallback for voice synthesis"
         );
+        
+        // Initialize streaming TTS service
+        const { initializeStreamingTTS } = await import(
+          "./services/streamingTTSService"
+        );
+        initializeStreamingTTS(deepgramApiKey);
+        logger.info("Streaming TTS service initialized as fallback");
+        
+        // Initialize connection pre-warming service
+        const { initializeConnectionPreWarming } = await import(
+          "./services/connectionPreWarmingService"
+        );
+        const preWarmingService = initializeConnectionPreWarming();
+        
+        // Initialize WebSocket connection pool
+        const { initializeWebSocketConnectionPool } = await import(
+          "./services/websocketConnectionPool"
+        );
+        initializeWebSocketConnectionPool();
+        
+        // Start pre-warming connections in the background
+        preWarmingService.preWarmConnections().catch(error => {
+          logger.warn(`Connection pre-warming failed: ${getErrorMessage(error)}`);
+        });
       } catch (error) {
         logger.warn(
           `Failed to initialize Deepgram TTS service: ${getErrorMessage(error)}`

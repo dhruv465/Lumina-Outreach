@@ -675,6 +675,7 @@ export class DeepgramService extends EventEmitter {
           language: connectionOptions.language
         });
 
+        // Create WebSocket connection - API key is already included in client initialization
         const connection = this.client.listen.live(connectionOptions);
        
 

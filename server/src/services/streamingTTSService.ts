@@ -2,6 +2,7 @@ import { createClient } from '@deepgram/sdk';
 import { Readable, Transform } from 'stream';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
+import { getConnectionPreWarmingService } from './connectionPreWarmingService';
 
 export interface StreamingTTSOptions {
   model?: string;
@@ -34,6 +35,7 @@ export class StreamingTTSService {
   /**
    * Synthesize speech with streaming support for ultra-low latency
    * Streams audio chunks as they're generated instead of waiting for complete synthesis
+   * Uses pre-warmed connections when available for faster setup
    */
   async synthesizeSpeechStream(
     text: string,
@@ -61,14 +63,34 @@ export class StreamingTTSService {
       logger.info('Starting streaming TTS synthesis', {
         textLength: text.length,
         chunkSize,
-        options: defaultOptions
+        options: defaultOptions,
+        usingPreWarmed: false // Will be updated if pre-warmed connection is used
       });
 
-      // Create the TTS request
-      const response = await this.client.speak.request(
-        { text: text },
-        defaultOptions
-      );
+      // Try to use pre-warmed connection first
+      const preWarmingService = getConnectionPreWarmingService();
+      let response;
+      
+      if (preWarmingService && preWarmingService.isModelReady(defaultOptions.model)) {
+        logger.debug(`Using pre-warmed connection for model ${defaultOptions.model}`);
+        const preWarmedClient = preWarmingService.getPreWarmedConnection(defaultOptions.model)?.client;
+        
+        if (preWarmedClient) {
+          response = await preWarmedClient.speak.request(
+            { text: text },
+            defaultOptions
+          );
+          logger.debug('Used pre-warmed connection for TTS synthesis');
+        }
+      }
+      
+      // Fallback to regular client if pre-warmed connection not available
+      if (!response) {
+        response = await this.client.speak.request(
+          { text: text },
+          defaultOptions
+        );
+      }
 
       // Get the stream
       const deepgramStream = await response.getStream();

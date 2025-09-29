@@ -40,7 +40,8 @@ export class DeepgramTTSService {
       const defaultOptions = {
         model: 'aura-asteria-en',
         encoding: encoding,
-        container: options.container || (encoding === 'linear16' ? 'wav' : undefined),
+        // Only include container for non-mp3 encodings
+        ...(encoding === 'linear16' && { container: 'wav' }),
         // Only include sample_rate for non-mp3 encodings
         ...(encoding !== 'mp3' && { sample_rate: options.sample_rate || 24000 }),
         ...options

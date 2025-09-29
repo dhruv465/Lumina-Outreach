@@ -55,7 +55,8 @@ export class StreamingTTSService {
       const defaultOptions = {
         model: options.model || 'aura-asteria-en',
         encoding: options.encoding || 'mp3',
-        container: options.container || (options.encoding === 'linear16' ? 'wav' : undefined),
+        // Only include container for non-mp3 encodings
+        ...(options.encoding === 'linear16' && { container: 'wav' }),
         ...(options.encoding !== 'mp3' && { sample_rate: options.sample_rate || 24000 }),
         ...options
       };
@@ -203,7 +204,8 @@ export class StreamingTTSService {
       const defaultOptions = {
         model: options.model || 'aura-asteria-en',
         encoding: options.encoding || 'mp3',
-        container: options.container || (options.encoding === 'linear16' ? 'wav' : undefined),
+        // Only include container for non-mp3 encodings
+        ...(options.encoding === 'linear16' && { container: 'wav' }),
         ...(options.encoding !== 'mp3' && { sample_rate: options.sample_rate || 24000 }),
         ...options
       };
@@ -331,7 +333,8 @@ export class StreamingTTSService {
         const defaultOptions = {
           model: options.model || 'aura-asteria-en',
           encoding: options.encoding || 'mp3',
-          container: options.container || (options.encoding === 'linear16' ? 'wav' : undefined),
+          // Only include container for non-mp3 encodings
+        ...(options.encoding === 'linear16' && { container: 'wav' }),
           ...(options.encoding !== 'mp3' && { sample_rate: options.sample_rate || 24000 }),
           ...options
         };

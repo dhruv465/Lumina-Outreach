@@ -587,6 +587,13 @@ export class EnhancedVoiceAIService {
         use_speaker_boost: personality.settings.useSpeakerBoost
       };
 
+      logger.info('Sending request to ElevenLabs', {
+        voiceId: personality.voiceId,
+        text,
+        voiceSettings,
+        model_id: config.elevenLabsConfig.defaultModelId || 'eleven_multilingual_v2'
+      });
+
       const response = await axios.post(
         `https://api.elevenlabs.io/v1/text-to-speech/${personality.voiceId}`,
         {
@@ -605,6 +612,13 @@ export class EnhancedVoiceAIService {
       );
 
       const audioBuffer = Buffer.from(response.data);
+      logger.info(`Received audio buffer from ElevenLabs, size: ${audioBuffer.length}`);
+
+      // Validate if the audio is a valid MP3
+      const isMP3 = (audioBuffer[0] === 0x49 && audioBuffer[1] === 0x44 && audioBuffer[2] === 0x33) || (audioBuffer[0] === 0xFF && (audioBuffer[1] === 0xFB || audioBuffer[1] === 0xFA));
+      if (!isMP3) {
+        throw new Error('Audio from ElevenLabs is not in MP3 format');
+      }
       logger.info(`Voice synthesis successful for voice ${personality.name}`, {
         textLength: text.length,
         audioSize: audioBuffer.length,
@@ -629,7 +643,7 @@ export class EnhancedVoiceAIService {
         try {
           logger.info('Attempting Deepgram TTS fallback');
           const audioBuffer = await deepgramTTS.synthesizeSpeech(text, {
-            model: 'aura-asteria-en',
+            model: personalityId,
             encoding: 'linear16',
             container: 'wav',
             sample_rate: 24000

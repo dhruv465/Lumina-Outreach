@@ -2,7 +2,7 @@ import http from 'http';
 import { RawData } from 'ws';
 import SocketStream from '@fastify/websocket';
 import { getDeepgramService, DeepgramEvent, TranscriptResult } from './deepgramService';
-import { convertMuLawToPCM } from '../utils/audioUtils';
+import { convertMuLawToPCM, convertPCMToMuLaw } from '../utils/audioUtils';
 
 const logger = {
   info: (msg: string, meta?: any) => console.log(`info: ${msg}`, meta ?? ""),
@@ -25,6 +25,24 @@ export class TwilioStreamHandler {
     this.connection.on('message', this.handleMessage.bind(this));
     this.connection.on('close', this.handleClose.bind(this));
     this.connection.on('error', this.handleError.bind(this));
+
+    if (this.deepgramService) {
+      this.deepgramService.on(DeepgramEvent.AGENT_AUDIO_RECEIVED, this.handleAgentAudio.bind(this));
+    }
+  }
+
+  private handleAgentAudio(data: { connectionId: string, callId: string, audio: Buffer }): void {
+    if (data.connectionId === this.deepgramConnectionId) {
+        const muLawBuffer = convertPCMToMuLaw(data.audio);
+        const mediaMessage = {
+            event: 'media',
+            streamSid: this.streamSid,
+            media: {
+                payload: muLawBuffer.toString('base64'),
+            },
+        };
+        this.connection.send(JSON.stringify(mediaMessage));
+    }
   }
 
   private async handleMessage(data: RawData): Promise<void> {

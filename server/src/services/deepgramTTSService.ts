@@ -117,6 +117,8 @@ export class DeepgramTTSService {
         hasOutputFile: !!options.outputFile
       });
 
+      logger.info('Sending request to Deepgram TTS', { defaultOptions });
+
       // Use the exact format from the documentation: { text: "Hello, how can I help you today?" }
       const response = await this.client.speak.request(
         { text: text },
@@ -141,6 +143,7 @@ export class DeepgramTTSService {
           
           // Read the file back as buffer
           const audioBuffer = fs.readFileSync(options.outputFile);
+          logger.info(`Read audio buffer from file, size: ${audioBuffer.length}`);
           return audioBuffer;
         } catch (pipelineError) {
           logger.error('Error writing audio to file:', {
@@ -152,6 +155,8 @@ export class DeepgramTTSService {
       } else {
         // Convert stream to buffer using the helper function
         const audioBuffer = await this.getAudioBuffer(stream);
+        
+        logger.info(`Received audio buffer from Deepgram, size: ${audioBuffer.length}`);
         
         logger.info('Deepgram TTS streaming synthesis successful', {
           audioBufferSize: audioBuffer.length,

@@ -107,6 +107,57 @@ function createWavFile(pcmData: Buffer, sampleRate: number, channels: number, bi
 }
 
 /**
+ * Convert 16-bit PCM audio to μ-law format.
+ * This is the inverse of the μ-law to PCM conversion.
+ */
+export function convertPCMToMuLaw(pcmBuffer: Buffer): Buffer {
+    const muLawBuffer = Buffer.alloc(Math.floor(pcmBuffer.length / 2));
+    for (let i = 0; i < pcmBuffer.length - 1; i += 2) {
+        const pcmSample = pcmBuffer.readInt16LE(i);
+        const muLawSample = linearToMuLaw(pcmSample);
+        muLawBuffer.writeUInt8(muLawSample, i / 2);
+    }
+    return muLawBuffer;
+}
+
+function linearToMuLaw(pcm_val: number): number {
+    const MU_LAW_BIAS = 0x84;
+    const MU_LAW_MAX_LINEAR = 32635;
+
+    let sign = (pcm_val >> 8) & 0x80;
+    if (sign !== 0) {
+        pcm_val = -pcm_val;
+    }
+
+    pcm_val += MU_LAW_BIAS;
+
+    if (pcm_val > MU_LAW_MAX_LINEAR) {
+        pcm_val = MU_LAW_MAX_LINEAR;
+    }
+
+    let exponent = 0;
+    if (pcm_val >= 8192) exponent = 7;
+    else if (pcm_val >= 4096) exponent = 6;
+    else if (pcm_val >= 2048) exponent = 5;
+    else if (pcm_val >= 1024) exponent = 4;
+    else if (pcm_val >= 512) exponent = 3;
+    else if (pcm_val >= 256) exponent = 2;
+    else if (pcm_val >= 128) exponent = 1;
+
+    let mantissa = (pcm_val >> (exponent + 3)) & 0x0F;
+
+    let mulaw_val = (exponent << 4) | mantissa;
+
+    if (sign === 0) {
+        mulaw_val = ~mulaw_val;
+    }
+
+    mulaw_val |= sign;
+
+    return mulaw_val & 0xFF;
+}
+
+/**
  * Detect if there is voice activity in the audio buffer
  * This is an enhanced energy-based voice activity detection with proper μ-law decoding
  */

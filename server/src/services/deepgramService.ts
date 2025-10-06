@@ -62,7 +62,8 @@ export enum DeepgramEvent {
   ERROR = 'error',
   CONNECTION_STATUS = 'connection-status',
   FALLBACK_USED = 'fallback-used',
-  AGENT_READY = 'agent-ready'
+  AGENT_READY = 'agent-ready',
+  AGENT_AUDIO_RECEIVED = 'agent-audio-received'
 }
 
 export interface TranscriptResult {
@@ -726,9 +727,7 @@ export class DeepgramService extends EventEmitter {
       } catch (error) {
         // If it's not JSON, it's likely audio data
         if (data instanceof Buffer) {
-            // TODO: Handle incoming agent audio
-            // For now, we'll just log that we received it.
-            logger.debug(`Received agent audio data chunk of size: ${data.length}`);
+            this.emit(DeepgramEvent.AGENT_AUDIO_RECEIVED, { connectionId, callId, audio: data });
         } else {
             logger.error('Failed to parse message from Deepgram Agent', { error: getErrorMessage(error) });
         }
@@ -790,7 +789,7 @@ export class DeepgramService extends EventEmitter {
       const connection = connectionData.connection;
       
       // Close the connection if it's open
-      if (connection && (connection.isOpen || connection.getReadyState() === 1)) { // 1 = OPEN
+      if (connection && connection.readyState === 1) { // 1 = OPEN
         if (typeof connection.finish === 'function') {
           connection.finish();
         } else if (typeof connection.close === 'function') {

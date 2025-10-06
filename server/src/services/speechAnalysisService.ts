@@ -737,6 +737,111 @@ export class SpeechAnalysisService {
       };
     }
   }
+
+  /**
+   * Analyze speech from audio data or file path
+   * @param audioData Buffer or file path
+   * @param context Optional conversation context
+   * @returns Speech analysis result
+   */
+  public async analyzeSpeech(audioData: Buffer | string, context?: any): Promise<SpeechAnalysis> {
+    try {
+      let audioBuffer: Buffer;
+      
+      // Handle both Buffer and file path inputs
+      if (typeof audioData === 'string') {
+        // File path provided
+        const fs = require('fs');
+        audioBuffer = fs.readFileSync(audioData);
+      } else {
+        // Buffer provided
+        audioBuffer = audioData;
+      }
+
+      // Convert audio to PCM if needed
+      const pcmBuffer = convertMuLawToPCM(audioBuffer);
+      
+      // Use Deepgram for transcription
+      if (this.deepgramClient) {
+        const response = await this.deepgramClient.listen.prerecorded.transcribeFile(
+          pcmBuffer,
+          {
+            mimetype: 'audio/wav',
+            model: this.currentModel,
+            language: 'en',
+            punctuate: true,
+            smart_format: true
+          }
+        );
+
+        const transcript = response.result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+        const confidence = response.result?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
+
+        // Analyze the transcript for intent and sentiment
+        const analysis = await this.analyzeTranscript(transcript, context);
+        
+        return {
+          transcript,
+          confidence,
+          language: this.detectLanguage(transcript),
+          intent: analysis.intent,
+          sentiment: analysis.sentiment,
+          speechFeatures: analysis.speechFeatures
+        };
+      } else {
+        // Fallback analysis
+        return this.getFallbackAnalysis('Audio transcription not available');
+      }
+    } catch (error) {
+      logger.error(`Speech analysis failed: ${getErrorMessage(error)}`);
+      return this.getFallbackAnalysis('Speech analysis failed');
+    }
+  }
+
+  /**
+   * Analyze transcript for intent and sentiment
+   */
+  private async analyzeTranscript(transcript: string, context?: any): Promise<{
+    intent: { category: string; confidence: number; entities: any[] };
+    sentiment: 'positive' | 'negative' | 'neutral';
+    speechFeatures: { pace: number; volume: number; tone: string };
+  }> {
+    // Simple intent detection
+    const lowerTranscript = transcript.toLowerCase();
+    let intent = { category: 'information_request', confidence: 0.5, entities: [] };
+    
+    if (lowerTranscript.includes('buy') || lowerTranscript.includes('purchase')) {
+      intent = { category: 'purchase_intent', confidence: 0.8, entities: [] };
+    } else if (lowerTranscript.includes('price') || lowerTranscript.includes('cost')) {
+      intent = { category: 'pricing_inquiry', confidence: 0.7, entities: [] };
+    } else if (lowerTranscript.includes('help') || lowerTranscript.includes('support')) {
+      intent = { category: 'support_request', confidence: 0.8, entities: [] };
+    }
+
+    // Simple sentiment analysis
+    let sentiment: 'positive' | 'negative' | 'neutral' = 'neutral';
+    const positiveWords = ['good', 'great', 'excellent', 'amazing', 'love', 'like'];
+    const negativeWords = ['bad', 'terrible', 'awful', 'hate', 'dislike', 'problem'];
+    
+    const positiveCount = positiveWords.filter(word => lowerTranscript.includes(word)).length;
+    const negativeCount = negativeWords.filter(word => lowerTranscript.includes(word)).length;
+    
+    if (positiveCount > negativeCount) {
+      sentiment = 'positive';
+    } else if (negativeCount > positiveCount) {
+      sentiment = 'negative';
+    }
+
+    return {
+      intent,
+      sentiment,
+      speechFeatures: {
+        pace: 1.0,
+        volume: 0.5,
+        tone: sentiment
+      }
+    };
+  }
 }
 
 export default SpeechAnalysisService;

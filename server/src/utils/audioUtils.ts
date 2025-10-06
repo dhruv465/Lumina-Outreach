@@ -65,8 +65,8 @@ export function convertMuLawToPCM(muLawBuffer: Buffer): Buffer {
           pcm16kHzBuffer.writeInt16LE(interpolatedSample, i * 4 + 2); // Write interpolated sample
       }
 
-      // Create a proper WAV file with header for Deepgram (16kHz)
-      return createWavFile(pcm16kHzBuffer, 16000, 1, 16);
+      // Return the raw 16kHz PCM buffer
+      return pcm16kHzBuffer;
     } catch (error) {
       logger.warn(`Error converting μ-law to PCM and resampling: ${getErrorMessage(error)}, using original buffer`);
       return muLawBuffer; // Return original buffer if conversion fails

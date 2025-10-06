@@ -123,7 +123,12 @@ export class WebSocketConnectionPool {
 
     try {
       // Send audio data through the connection
-      pooledConnection.connection.send(audioData);
+      try {
+        const arrayBuffer = audioData.buffer.slice(audioData.byteOffset, audioData.byteOffset + audioData.byteLength);
+        pooledConnection.connection.send(arrayBuffer as any);
+      } catch (e) {
+        logger.error(`Failed to send audio to pooled connection: ${getErrorMessage(e)}`);
+      }
       pooledConnection.messageCount++;
       pooledConnection.lastActivity = new Date();
 

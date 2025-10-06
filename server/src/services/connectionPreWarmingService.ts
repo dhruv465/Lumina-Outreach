@@ -74,13 +74,18 @@ export class ConnectionPreWarmingService {
         'aura-2-zeus-en'
       ];
 
-      // Pre-warm connections for each model
-      const preWarmingPromises = availableModels.map(model => 
-        this.preWarmModelConnection(client, model, apiKey)
-      );
+      // Pre-warm connections for each model sequentially
+      const results = [];
+      for (const model of availableModels) {
+        try {
+          const result = await this.preWarmModelConnection(client, model, apiKey);
+          results.push({ status: 'fulfilled', value: result });
+        } catch (error) {
+          results.push({ status: 'rejected', reason: error });
+        }
+        await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+      }
 
-      const results = await Promise.allSettled(preWarmingPromises);
-      
       // Process results
       let successCount = 0;
       let failureCount = 0;
@@ -177,7 +182,7 @@ export class ConnectionPreWarmingService {
       logger.error(`Failed to pre-warm connection for model ${model}`, {
         error: getErrorMessage(error)
       });
-      return { success: false };
+      throw error;
     }
   }
 

@@ -1,6 +1,6 @@
 import http from 'http';
 import { RawData } from 'ws';
-import { SocketStream } from '@fastify/websocket';
+import SocketStream from '@fastify/websocket';
 import { getDeepgramService, DeepgramEvent, TranscriptResult } from './deepgramService';
 import { convertMuLawToPCM } from '../utils/audioUtils';
 
@@ -19,7 +19,7 @@ export class TwilioStreamHandler {
   private isDeepgramReady: boolean = false;
   private audioQueue: Buffer[] = [];
 
-  constructor(private readonly connection: SocketStream, private readonly request: http.IncomingMessage) {
+  constructor(private readonly connection: any, private readonly request: http.IncomingMessage) {
     logger.info('TwilioStreamHandler initialized using SocketStream.');
 
     this.connection.on('message', this.handleMessage.bind(this));
@@ -53,16 +53,35 @@ export class TwilioStreamHandler {
               this.deepgramConnectionId = await this.deepgramService.createTranscriptionStream(this.callId);
               logger.info(`Deepgram transcription stream created with ID: ${this.deepgramConnectionId}`);
 
-              this.deepgramService.on(DeepgramEvent.CONNECTION_STATUS, (status) => {
-                  if (status.connectionId === this.deepgramConnectionId && status.status === 'open') {
-                      logger.info('Deepgram stream is now open. Sending buffered audio.');
-                      this.isDeepgramReady = true;
-                      this.audioQueue.forEach(chunk => {
-                          this.deepgramService.sendAudioToStream(this.deepgramConnectionId, chunk);
-                      });
-                      this.audioQueue = [];
+              if (this.deepgramService.isStreamOpen(this.deepgramConnectionId)) {
+                logger.info('Deepgram stream was already open. Sending buffered audio.');
+                this.isDeepgramReady = true;
+                this.audioQueue.forEach(chunk => {
+                    this.deepgramService.sendAudioToStream(this.deepgramConnectionId, chunk);
+                });
+                this.audioQueue = [];
+              } else {
+                              if (this.deepgramService.isStreamOpen(this.deepgramConnectionId)) {
+                                logger.info('Deepgram stream was already open. Sending buffered audio.');
+                                this.isDeepgramReady = true;
+                                this.audioQueue.forEach(chunk => {
+                                    this.deepgramService.sendAudioToStream(this.deepgramConnectionId, chunk);
+                                });
+                                this.audioQueue = [];
+                              }
+                
+              this.deepgramService.on(DeepgramEvent.AGENT_READY, (status) => {
+                  if (status.connectionId === this.deepgramConnectionId) {
+                      if (!this.isDeepgramReady) {
+                        logger.info('Deepgram agent is ready. Sending buffered audio.');
+                        this.isDeepgramReady = true;
+                        this.audioQueue.forEach(chunk => {
+                            this.deepgramService.sendAudioToStream(this.deepgramConnectionId, chunk);
+                        });
+                        this.audioQueue = [];
+                      }
                   }
-              });
+              });              }
 
               this.deepgramService.on(DeepgramEvent.TRANSCRIPT_RECEIVED, (transcript: TranscriptResult) => {
                 if (transcript.callId === this.callId && transcript.text.trim().length > 0) {

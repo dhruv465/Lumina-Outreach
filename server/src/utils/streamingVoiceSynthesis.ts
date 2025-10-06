@@ -77,8 +77,8 @@ export async function synthesizeVoiceWithStreaming(
       try {
         if (campaignId) {
           const campaign = await Campaign.findById(campaignId);
-          if (campaign?.voiceId) {
-            finalVoiceId = campaign.voiceId;
+          if (campaign?.voiceConfiguration?.voiceId) {
+            finalVoiceId = campaign.voiceConfiguration.voiceId;
           }
         }
         
@@ -195,8 +195,8 @@ async function fallbackToStandardSynthesis(
       try {
         if (campaignId) {
           const campaign = await Campaign.findById(campaignId);
-          if (campaign?.voiceId) {
-            finalVoiceId = campaign.voiceId;
+          if (campaign?.voiceConfiguration?.voiceId) {
+            finalVoiceId = campaign.voiceConfiguration.voiceId;
           }
         }
         
@@ -300,8 +300,8 @@ export async function synthesizeVoiceWebSocket(
       try {
         if (campaignId) {
           const campaign = await Campaign.findById(campaignId);
-          if (campaign?.voiceId) {
-            finalVoiceId = campaign.voiceId;
+          if (campaign?.voiceConfiguration?.voiceId) {
+            finalVoiceId = campaign.voiceConfiguration.voiceId;
           }
         }
         

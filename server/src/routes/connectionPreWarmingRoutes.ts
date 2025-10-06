@@ -1,13 +1,12 @@
 import { FastifyInstance } from 'fastify';
 import { 
-  getConnectionPreWarmingService,
-  getWebSocketConnectionPool 
+  getConnectionPreWarmingService
 } from '../services/connectionPreWarmingService';
 import { getWebSocketConnectionPool as getPool } from '../services/websocketConnectionPool';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
 
-export default async function connectionPreWarmingRoutes(fastify: FastifyInstance) {
+export default async function connectionPreWarmingRoutes(fastify: FastifyInstance<any, any, any, any, any>) {
   // Get pre-warming statistics
   fastify.get('/stats', async (req, res) => {
     try {

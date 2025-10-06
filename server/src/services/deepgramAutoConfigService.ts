@@ -43,7 +43,7 @@ export class DeepgramAutoConfigService {
   private modelCompatibilityService: ModelCompatibilityService | null = null;
   private validationInterval: NodeJS.Timeout | null = null;
   private readonly VALIDATION_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
-  private readonly STARTUP_VALIDATION_TIMEOUT = 10000; // 10 seconds
+  private readonly STARTUP_VALIDATION_TIMEOUT = Number(process.env.DG_STARTUP_VALIDATION_TIMEOUT_MS) || 20000; // default 20 seconds
   private isValidationRunning = false;
 
   constructor() {
@@ -211,11 +211,18 @@ export class DeepgramAutoConfigService {
     try {
       // Set timeout for startup validation
       const validationPromise = this.performConfigurationValidation();
+      let timeoutId: NodeJS.Timeout | null = null;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Startup validation timeout')), this.STARTUP_VALIDATION_TIMEOUT);
+        timeoutId = setTimeout(() => reject(new Error('Startup validation timeout')), this.STARTUP_VALIDATION_TIMEOUT);
       });
 
       const result = await Promise.race([validationPromise, timeoutPromise]);
+
+      // Clear the timer if validation finished first
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
       
       if (result.isValid) {
         logger.info('Startup configuration validation passed');

@@ -7,7 +7,7 @@ import {
   testStreamingTTS
 } from '../services/streamingWebhookHandlers';
 
-export default async function streamingTTSRoutes(fastify: FastifyInstance) {
+export default async function streamingTTSRoutes(fastify: FastifyInstance<any, any, any, any, any>) {
   // Test streaming TTS
   fastify.post('/test', {
     schema: {

@@ -4,16 +4,18 @@ import logger from '../utils/logger';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import WebSocket from 'ws';
+import util from 'util';
 import Configuration from '../models/Configuration';
 import { getCircuitBreakerService, CircuitBreakerOptions } from './circuitBreakerService';
-import { 
-  ModelCompatibilityService, 
+import {
+  ModelCompatibilityService,
   getModelCompatibilityService,
   initializeModelCompatibilityService,
   ModelValidationResult,
   ModelPreferences,
   DeepgramErrorType
 } from './modelCompatibilityService';
+import { validateAndFetch } from './deepgramUtils';
 import { deepgramModelMetrics } from '../monitoring/deepgramModelMetrics';
 
 // Define DeepgramStreamOptions interface directly to avoid circular dependencies
@@ -59,7 +61,8 @@ export enum DeepgramEvent {
   TRANSCRIPT_FINAL = 'transcript-final',
   ERROR = 'error',
   CONNECTION_STATUS = 'connection-status',
-  FALLBACK_USED = 'fallback-used'
+  FALLBACK_USED = 'fallback-used',
+  AGENT_READY = 'agent-ready'
 }
 
 export interface TranscriptResult {
@@ -588,252 +591,157 @@ export class DeepgramService extends EventEmitter {
     callId: string,
     options?: DeepgramStreamOptions
   ): Promise<string> {
-    // Define the main function to execute with circuit breaker
     const createStreamFunction = async () => {
-      try {
-        const connectionId = uuidv4();
-        
-        // Merge default options with provided options
-        const streamOptions = {
-          ...this.defaultOptions,
-          ...options
-        };
+      const connectionId = uuidv4();
+      const streamOptions = { ...this.defaultOptions, ...options };
+      let modelToUse = streamOptions.model || this.defaultModel;
 
-        // Validate model before creating stream
-        let modelToUse = streamOptions.model || this.defaultModel;
-        const isModelValid = await this.validateAndSetModel(modelToUse);
-        
-        if (!isModelValid) {
-          // Try to find a compatible fallback model
-          logger.warn(`Model ${modelToUse} is not valid, attempting fallback`);
-          
-          const modelsToTry = [this.defaultModel, ...this.fallbackModels].filter((model, index, arr) => arr.indexOf(model) === index);
-          let fallbackFound = false;
-          
-          for (const fallbackModel of modelsToTry) {
-            if (fallbackModel !== modelToUse) {
-              const isFallbackValid = await this.validateAndSetModel(fallbackModel);
-              if (isFallbackValid) {
-                modelToUse = fallbackModel;
-                streamOptions.model = fallbackModel;
-                fallbackFound = true;
-                
-                // Enhanced logging for stream fallback
-                logger.info(`Deepgram stream fallback successful`, {
-                  callId,
-                  originalModel: options?.model || this.defaultModel,
-                  fallbackModel: fallbackModel,
-                  reason: 'Model validation failed',
-                  context: 'deepgram-stream-fallback'
-                });
+      // NOTE: Model validation logic is simplified for this refactoring
+      // and assumes the preferred model is valid.
+      logger.info(`Creating Deepgram Voice Agent stream for call ${callId}`, {
+        model: modelToUse,
+        language: streamOptions.language,
+      });
 
-                this.emit(DeepgramEvent.FALLBACK_USED, {
-                  callId,
-                  originalModel: options?.model || this.defaultModel,
-                  fallbackModel: fallbackModel,
-                  reason: 'Model validation failed'
-                });
-                
-                logger.info(`Using fallback model ${fallbackModel} for stream`);
-                break;
-              }
-            }
-          }
-          
-          if (!fallbackFound) {
-            throw new Error(`No compatible models available for streaming`);
-          }
-        }
+      const url = 'wss://agent.deepgram.com/v1/agent/converse';
+      const connection = new WebSocket(url, {
+        headers: { Authorization: `Token ${this.apiKey}` },
+      });
 
-        logger.info(`Creating Deepgram transcription stream for call ${callId}`, {
-          model: streamOptions.model,
-          language: streamOptions.language
-        });
+      this.activeConnections.set(connectionId, {
+        connection,
+        callId,
+        model: modelToUse,
+        createdAt: new Date(),
+      });
 
-        // Create live transcription with latest API
-        const connectionOptions = {
-          language: streamOptions.language,
-          model: streamOptions.model,
-          tier: streamOptions.tier || 'base',
-          punctuate: streamOptions.punctuate !== false,
-          diarize: streamOptions.diarize || false,
-          multichannel: false,
-          alternatives: 1,
-          endpointing: streamOptions.endpointing !== undefined ? streamOptions.endpointing : this.defaultOptions.endpointing,
-          utterance_end_ms: streamOptions.utteranceEndMs !== undefined ? streamOptions.utteranceEndMs : this.defaultOptions.utteranceEndMs,
-          smart_format: true,
-          encoding: 'linear16',
-          sample_rate: 16000,
-          interim_results: true,
-          keywords: streamOptions.keywords || []
-        };
-
-        logger.info(`Creating Deepgram WebSocket connection with options:`, {
-          callId,
-          model: connectionOptions.model,
-          tier: connectionOptions.tier,
-          language: connectionOptions.language
-        });
-
-        // Create WebSocket connection - API key is already included in client initialization
-        const connection = this.client.listen.live(connectionOptions);
-       
-
-        // Store connection for management with metadata
-        this.activeConnections.set(connectionId, {
-          connection,
-          callId,
-          model: streamOptions.model,
-          createdAt: new Date()
-        });
-
-        // Emit connection status
-        this.emit(DeepgramEvent.CONNECTION_STATUS, {
-          connectionId,
-          callId,
-          status: 'connected',
-          model: streamOptions.model
-        });
-
-        // Set up event handlers for the connection
-        this.setupConnectionHandlers(connection, connectionId, callId, streamOptions.model);
-        
-        return connectionId;
-      } catch (error) {
-        logger.error(`Error creating Deepgram stream: ${getErrorMessage(error)}`);
-        throw new Error(`Failed to create transcription stream: ${getErrorMessage(error)}`);
-      }
+      this.setupConnectionHandlers(connection, connectionId, callId, streamOptions);
+      
+      return connectionId;
     };
-    
+
     try {
-      // For streaming, we don't use the normal circuit breaker pattern
-      // as we need to maintain the connection ID return value
-      // Instead, we just check if the circuit is open before attempting
       const circuitBreaker = getCircuitBreakerService().getCircuit(this.CIRCUIT_NAME);
-      
       if (circuitBreaker.status.state === 'open') {
-        logger.warn(`Deepgram circuit is open, using degraded mode for stream`);
-        this.emit(DeepgramEvent.FALLBACK_USED, { 
-          callId,
-          message: 'Using degraded transcription mode due to service issues'
-        });
-        
-        // Return a special connection ID that indicates we're in fallback mode
-        const fallbackId = `fallback-${uuidv4()}`;
-        const fallbackEmitter = new EventEmitter();
-        this.activeConnections.set(fallbackId, { 
-          isFallback: true, 
-          callId,
-          connection: fallbackEmitter,
-          createdAt: new Date()
-        });
-        return fallbackId;
+        throw new Error('Deepgram circuit is open.');
       }
-      
       return await createStreamFunction();
     } catch (error) {
-      logger.error(`Failed to create transcription stream with circuit check: ${getErrorMessage(error)}`);
-      
-      // Try graceful degradation - return a fallback ID that provides minimal functionality
+      logger.error(`Failed to create transcription stream: ${getErrorMessage(error)}`);
+      this.emit(DeepgramEvent.ERROR, { callId, error: getErrorMessage(error) });
+      // Return an emergency fallback ID
       const emergencyFallbackId = `emergency-${uuidv4()}`;
-      const emergencyFallbackEmitter = new EventEmitter();
       this.activeConnections.set(emergencyFallbackId, { 
         isEmergencyFallback: true, 
         callId,
-        connection: emergencyFallbackEmitter,
+        connection: new EventEmitter(),
         createdAt: new Date()
       });
-      
-      this.emit(DeepgramEvent.FALLBACK_USED, {
-        callId,
-        message: 'Using emergency fallback mode - transcription may be limited',
-        error: getErrorMessage(error)
-      });
-      
       return emergencyFallbackId;
     }
   }
-  
-  /**
-   * Set up event handlers for a Deepgram connection
-   * Extracted to a separate method for better code organization
-   */
-  private setupConnectionHandlers(connection: any, connectionId: string, callId: string, model?: string): void {
-    // Handle transcript results
-    connection.on(LiveTranscriptionEvents.Transcript, (data) => {
-      // Only process if we have valid results
-      if (data?.channel?.alternatives?.[0]) {
-        const alt = data.channel.alternatives[0];
-        
-        // Create structured transcript result
-        const result: TranscriptResult = {
-          id: uuidv4(),
-          callId,
-          text: alt.transcript || '',
-          isFinal: data.is_final || false,
-          confidence: alt.confidence || 0,
-          words: alt.words?.map((word: any) => ({ word: word.word, start: word.start, end: word.end, confidence: word.confidence })) || [],
-          metadata: { startTime: data.start || 0, endTime: data.end || 0, processingLatency: data.audio_meta?.processing_latency_ms || 0 }
-        };
 
-        if (result.isFinal) {
-          this.emit(DeepgramEvent.TRANSCRIPT_FINAL, result);
+  private setupConnectionHandlers(
+    connection: WebSocket,
+    connectionId: string,
+    callId: string,
+    streamOptions: DeepgramStreamOptions
+  ): void {
+    connection.on('open', () => {
+      logger.info(`Deepgram Agent WebSocket connection opened for call ${callId}`);
+      
+      const settings = {
+        type: 'Settings',
+        audio: {
+          input: {
+            encoding: 'linear16',
+            sample_rate: 16000,
+          },
+        },
+        agent: {
+          language: streamOptions.language || 'en',
+          listen: {
+            provider: {
+              type: 'deepgram',
+              model: streamOptions.model || this.defaultModel,
+            },
+          },
+          // TODO: Add think and speak configuration
+        },
+      };
+
+      connection.send(JSON.stringify(settings));
+      logger.info('Sent Agent Settings:', JSON.stringify(settings, null, 2));
+      
+      this.emit(DeepgramEvent.CONNECTION_STATUS, {
+        connectionId,
+        callId,
+        status: 'connected',
+        model: streamOptions.model,
+      });
+    });
+
+    connection.on('message', (data: Buffer) => {
+      try {
+        const message = JSON.parse(data.toString());
+
+        switch (message.type) {
+          case 'Welcome':
+            logger.info('Received Welcome message from Deepgram Agent.');
+            break;
+          case 'SettingsApplied':
+            logger.info('Deepgram Agent settings were applied.');
+            this.emit(DeepgramEvent.AGENT_READY, { connectionId, callId });
+            break;
+          case 'ConversationText':
+            if (message.role === 'user') {
+              const result: TranscriptResult = {
+                id: uuidv4(),
+                callId,
+                text: message.content,
+                isFinal: true, // Agent API doesn't provide interim results in this format
+                confidence: message.confidence || 0,
+                words: [], // Word-level detail not available in this message type
+                metadata: { startTime: 0, endTime: 0, processingLatency: 0 },
+              };
+              this.emit(DeepgramEvent.TRANSCRIPT_RECEIVED, result);
+              this.emit(DeepgramEvent.TRANSCRIPT_FINAL, result); // Also emit as final
+            } else {
+              logger.info(`Agent Transcript: "${message.content}"`);
+            }
+            break;
+          case 'AgentStartedSpeaking':
+          case 'AgentThinking':
+          case 'UserStartedSpeaking':
+          case 'UserEndedSpeaking':
+            logger.debug(`Received Agent event: ${message.type}`);
+            break;
+          case 'Error':
+             logger.error('Received Error message from Deepgram Agent:', message);
+             this.emit(DeepgramEvent.ERROR, { connectionId, callId, error: message.description });
+             break;
+          default:
+            logger.debug('Received unhandled message type from Agent:', message.type);
+        }
+      } catch (error) {
+        // If it's not JSON, it's likely audio data
+        if (data instanceof Buffer) {
+            // TODO: Handle incoming agent audio
+            // For now, we'll just log that we received it.
+            logger.debug(`Received agent audio data chunk of size: ${data.length}`);
         } else {
-          this.emit(DeepgramEvent.TRANSCRIPT_RECEIVED, result);
+            logger.error('Failed to parse message from Deepgram Agent', { error: getErrorMessage(error) });
         }
       }
     });
 
-
-    // Handle errors and mark the circuit as potentially failing
-    connection.on(LiveTranscriptionEvents.Error, (error) => {
-      const errorMessage = getErrorMessage(error);
-      logger.error(`Deepgram stream error for call ${callId} with model ${model || 'unknown'}: ${errorMessage}`);
-      
-      // Check for specific WebSocket connection errors
-      if (errorMessage.includes('network error') || errorMessage.includes('non-101 status code')) {
-        logger.error(`WebSocket connection failed for call ${callId}. This may be due to network issues, proxy settings, or firewall restrictions.`);
-        logger.error(`Please check: 1) Network connectivity to api.deepgram.com, 2) Firewall/proxy settings, 3) WebSocket support`);
-      }
-      
-      // Check if this is a model compatibility error
-      if (this.isModelCompatibilityError(error)) {
-        logger.warn(`Model compatibility error detected for ${model}, may need fallback`);
-        
-        this.emit(DeepgramEvent.FALLBACK_USED, {
-          callId,
-          connectionId,
-          originalModel: model,
-          reason: `Stream error: ${errorMessage}`
-        });
-      }
-      
-      // Notify the circuit breaker of the failure for tracking
-      try {
-        getCircuitBreakerService().getCircuit(this.CIRCUIT_NAME).fire(() => {
-          throw new Error(getErrorMessage(error));
-        }).catch(() => {
-          // We expect this to fail, we're just notifying the circuit
-        });
-      } catch (e) {
-        // Ignore any errors from the circuit breaker itself
-      }
-      
-      this.emit(DeepgramEvent.ERROR, {
-        connectionId,
-        callId,
-        error: getErrorMessage(error),
-        model: model || 'unknown'
-      });
-    });
-
     connection.on('error', (error) => {
-      logger.error(`Deepgram stream error for call ${callId}: ${getErrorMessage(error)}`);
-      this.emit(DeepgramEvent.ERROR, { connectionId, callId, error: getErrorMessage(error), model });
+      logger.error(`Deepgram Agent WebSocket error for call ${callId}: ${getErrorMessage(error)}`);
+      this.emit(DeepgramEvent.ERROR, { connectionId, callId, error: getErrorMessage(error) });
     });
 
-    connection.on('close', () => {
-      logger.info(`Deepgram stream closed for call ${callId}`);
+    connection.on('close', (code, reason) => {
+      logger.info(`Deepgram Agent WebSocket closed for call ${callId}: ${code} ${reason}`);
       this.activeConnections.delete(connectionId);
       this.emit(DeepgramEvent.CONNECTION_STATUS, { connectionId, callId, status: 'disconnected' });
     });
@@ -851,7 +759,11 @@ export class DeepgramService extends EventEmitter {
 
     const { connection } = connectionData;
     if (connection.readyState === WebSocket.OPEN) {
-      connection.send(audioData);
+      try {
+        connection.send(audioData);
+      } catch (e) {
+        logger.error(`Failed to send audio chunk to Deepgram connection ${connectionId}: ${getErrorMessage(e)}`);
+      }
     } else {
       if (!this.warnedConnections.has(connectionId)) {
         logger.warn(`Deepgram connection ${connectionId} is not open (state: ${connection.readyState})`);
@@ -897,6 +809,15 @@ export class DeepgramService extends EventEmitter {
     }
   }
 
+  public isStreamOpen(connectionId: string): boolean {
+    const connectionData = this.activeConnections.get(connectionId);
+    if (!connectionData) {
+      return false;
+    }
+    const { connection } = connectionData;
+    return connection.readyState === WebSocket.OPEN;
+  }
+
   public async validateApiKey(): Promise<boolean> {
     try {
       const compatibleModels = await this.modelCompatibilityService.getCompatibleModels(this.apiKey);
@@ -905,6 +826,95 @@ export class DeepgramService extends EventEmitter {
       logger.error(`Deepgram API key validation failed: ${getErrorMessage(error)}`);
       return false;
     }
+  }
+
+  /**
+   * Get all active connection IDs
+   */
+  public getActiveConnectionIds(): string[] {
+    return Array.from(this.activeConnections.keys());
+  }
+
+  /**
+   * Close all active connections
+   */
+  public closeAllConnections(): void {
+    const connectionIds = this.getActiveConnectionIds();
+    logger.info(`Closing ${connectionIds.length} active connections`);
+    
+    connectionIds.forEach(connectionId => {
+      this.closeTranscriptionStream(connectionId);
+    });
+  }
+
+  /**
+   * Get connection data by ID
+   */
+  public getConnection(connectionId: string): any {
+    return this.activeConnections.get(connectionId);
+  }
+
+  /**
+   * Transcribe audio buffer
+   */
+  public async transcribeBuffer(audioBuffer: Buffer, options?: any): Promise<any> {
+    return this.transcribeAudio(audioBuffer, options);
+  }
+
+  /**
+   * Transcribe audio from URL
+   */
+  public async transcribeUrl(audioUrl: string, options?: any): Promise<any> {
+    const MAX_RETRIES = 3;
+    const INITIAL_BACKOFF = 500; // ms
+
+    // Retry/backoff loop for transient errors (5xx and network errors)
+    let attempt = 0;
+    let lastError: any = null;
+
+    while (attempt < MAX_RETRIES) {
+      try {
+      const audioBuffer = await validateAndFetch(audioUrl, { maxSizeBytes: 50 * 1024 * 1024 });
+        if (!audioBuffer) {
+          const err: any = new Error(`Remote media unavailable: ${audioUrl}`);
+          err.code = 'REMOTE_CONTENT_ERROR';
+          throw err;
+        }
+        return await this.transcribeAudio(audioBuffer, options);
+      } catch (err) {
+        lastError = err;
+
+        const status = err?.status || err?.response?.status;
+
+        // If Deepgram returned a REMOTE_CONTENT_ERROR via SDK, unwrap and rethrow with context
+        const errMsg = getErrorMessage(err).toString();
+        if (errMsg.includes('REMOTE_CONTENT_ERROR') || errMsg.includes('remote server hosting the media')) {
+          logger.error(`Deepgram remote content error for URL ${audioUrl}: ${errMsg}`);
+          // Surface a clear error to callers
+          const wrapped: any = new Error(`Remote media error: ${errMsg}`);
+          wrapped.code = 'REMOTE_CONTENT_ERROR';
+          wrapped.original = err;
+          throw wrapped;
+        }
+
+        // Don't retry on 4xx client errors (except 429 rate limit)
+        if (status && status >= 400 && status < 500 && status !== 429) {
+          logger.error(`Non-retriable HTTP error fetching ${audioUrl}: ${status}`);
+          throw err;
+        }
+
+        attempt++;
+        const backoff = INITIAL_BACKOFF * Math.pow(2, attempt - 1);
+        logger.warn(`Fetch attempt ${attempt} failed for ${audioUrl}: ${getErrorMessage(err)}; retrying in ${backoff}ms`);
+        await new Promise(res => setTimeout(res, backoff));
+      }
+    }
+
+    // If we exhausted retries, throw the last error with extra context
+    logger.error(`Failed to fetch remote audio after ${MAX_RETRIES} attempts: ${getErrorMessage(lastError)}`);
+    const finalErr: any = new Error(`Failed to fetch remote audio: ${getErrorMessage(lastError)}`);
+    finalErr.original = lastError;
+    throw finalErr;
   }
 }
 

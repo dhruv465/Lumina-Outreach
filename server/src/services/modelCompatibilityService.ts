@@ -1,6 +1,9 @@
 import { createClient, DeepgramClient } from '@deepgram/sdk';
+import * as fs from 'fs';
+import * as path from 'path';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
+import { validateAndFetch } from './deepgramUtils';
 import { alertSystem, AlertLevel, AlertType } from '../monitoring/alert_system';
 import { deepgramModelMetrics } from '../monitoring/deepgramModelMetrics';
 
@@ -208,20 +211,19 @@ export class ModelCompatibilityService {
       // Create a temporary client for validation
       const testClient = createClient(apiKey);
       
-      // Test model access with a simple request
-      const testUrl = 'https://res.cloudinary.com/dvfrcaw1c/video/upload/v1711698492/test-samples/test-sample-en.mp3';
-      
-      await testClient.listen.prerecorded.transcribeUrl(
-        { url: testUrl },
-        { 
-          model: model,
-          language: 'en',
-          smart_format: true
-        }
-      );
+      // Use a local silent audio file for testing
+      const audioFilePath = path.join(__dirname, '../examples/test-data/test-sample-en.wav');
+      const audioBuffer = fs.readFileSync(audioFilePath);
 
-      const modelInfo = this.modelRegistry.models[model];
+      // Call transcribeFile with the local audio buffer
+      await testClient.listen.prerecorded.transcribeFile(audioBuffer, {
+        model: model,
+        language: 'en',
+        smart_format: true
+      } as any);
+
       const validationDuration = Date.now() - validationStartTime;
+      const modelInfo = this.modelRegistry.models[model];
       
       const result: ModelValidationResult = {
         isValid: true,

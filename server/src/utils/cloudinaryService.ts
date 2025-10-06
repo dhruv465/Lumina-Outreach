@@ -2,7 +2,11 @@
  * Cloudinary Service for handling audio file uploads
  * Used to store and retrieve audio files for Twilio voice responses
  */
-import { v2 as cloudinary } from 'cloudinary';
+// Lazy-load Cloudinary at runtime to guard against module-load crashes
+// (some transitive deps like `q` may throw during require/import).
+// We'll attempt to import on first use and fail gracefully if unavailable.
+let cloudinary: any | null = null;
+let _cloudinaryLoadAttempted = false;
 import streamifier from 'streamifier';
 import fs from 'fs';
 import path from 'path';
@@ -59,6 +63,21 @@ export async function uploadAudioBuffer(
   contentType: string = 'audio/mpeg'
 ): Promise<string> {
   try {
+    // Ensure Cloudinary is available (lazy-load)
+    if (!_cloudinaryLoadAttempted) {
+      _cloudinaryLoadAttempted = true;
+      try {
+        const mod = await import('cloudinary');
+        cloudinary = mod && (mod.v2 || mod.default?.v2) ? (mod.v2 || mod.default.v2) : mod;
+      } catch (loadErr) {
+        cloudinary = null;
+        logger.error('Failed to load Cloudinary module dynamically', { error: getErrorMessage(loadErr) });
+      }
+    }
+
+    if (!cloudinary) {
+      throw new Error('Cloudinary module not available; upload disabled');
+    }
     // Check cache first
     const cacheKey = generateCacheKey(audioBuffer);
     const cached = urlCache.get(cacheKey);
@@ -137,8 +156,8 @@ export async function uploadAudioFile(
     const contentType = isMP3 ? 'audio/mpeg' : 'audio/mp3'; // Default to MP3 content type
     logger.info(`Uploading audio file with content type: ${contentType}, size: ${audioBuffer.length} bytes`);
     
-    // Use the buffer upload method with explicit content type
-    const cloudinaryUrl = await uploadAudioBuffer(audioBuffer, folder, contentType);
+  // Use the buffer upload method with explicit content type
+  const cloudinaryUrl = await uploadAudioBuffer(audioBuffer, folder, contentType);
     
     // Clean up source file if requested
     if (cleanupFile) {
@@ -169,15 +188,24 @@ export function isCloudinaryConfigured(): boolean {
     process.env.CLOUDINARY_API_SECRET
   );
   
+  // If Cloudinary hasn't loaded yet, be conservative and only rely on env vars
+  if (!cloudinary) {
+    return envVarsExist;
+  }
+
   // Check if cloudinary configuration has the values
-  const cloudinaryConfig = cloudinary.config();
-  const configHasValues = !!(
-    cloudinaryConfig.cloud_name &&
-    cloudinaryConfig.api_key &&
-    cloudinaryConfig.api_secret
-  );
-  
-  return envVarsExist && configHasValues;
+  try {
+    const cloudinaryConfig = cloudinary.config();
+    const configHasValues = !!(
+      cloudinaryConfig.cloud_name &&
+      cloudinaryConfig.api_key &&
+      cloudinaryConfig.api_secret
+    );
+    return envVarsExist && configHasValues;
+  } catch (err) {
+    logger.warn('Cloudinary config check failed', { error: getErrorMessage(err) });
+    return envVarsExist;
+  }
 }
 
 /**
@@ -185,21 +213,28 @@ export function isCloudinaryConfigured(): boolean {
  * Checks configuration and logs status
  */
 export function initCloudinary(): void {
-  // Configure Cloudinary with environment variables (do this again to ensure variables are loaded)
-  cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
-  });
-  
-  if (isCloudinaryConfigured()) {
-    logger.info(`Cloudinary service initialized successfully with cloud_name: ${process.env.CLOUDINARY_CLOUD_NAME}`);
-    logger.info(`API key length: ${process.env.CLOUDINARY_API_KEY?.length || 0}, API secret length: ${process.env.CLOUDINARY_API_SECRET?.length || 0}`);
-  } else {
-    logger.warn('Cloudinary service not properly configured - some or all environment variables are missing');
-    logger.warn(`CLOUDINARY_CLOUD_NAME: ${process.env.CLOUDINARY_CLOUD_NAME ? 'present' : 'missing'}`);
-    logger.warn(`CLOUDINARY_API_KEY: ${process.env.CLOUDINARY_API_KEY ? 'present' : 'missing'}`);
-    logger.warn(`CLOUDINARY_API_SECRET: ${process.env.CLOUDINARY_API_SECRET ? 'present' : 'missing'}`);
+  // Attempt to lazy-load and configure Cloudinary asynchronously. Do not throw on failure.
+  if (!_cloudinaryLoadAttempted) {
+    _cloudinaryLoadAttempted = true;
+    import('cloudinary')
+      .then((mod) => {
+        cloudinary = mod && (mod.v2 || mod.default?.v2) ? (mod.v2 || mod.default.v2) : mod;
+        try {
+          cloudinary.config({
+            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+            api_key: process.env.CLOUDINARY_API_KEY,
+            api_secret: process.env.CLOUDINARY_API_SECRET
+          });
+          logger.info(`Cloudinary service initialized successfully with cloud_name: ${process.env.CLOUDINARY_CLOUD_NAME}`);
+          logger.info(`API key length: ${process.env.CLOUDINARY_API_KEY?.length || 0}, API secret length: ${process.env.CLOUDINARY_API_SECRET?.length || 0}`);
+        } catch (err) {
+          logger.warn('Cloudinary loaded but configuration failed', { error: getErrorMessage(err) });
+        }
+      })
+      .catch((err) => {
+        cloudinary = null;
+        logger.warn('Cloudinary module failed to load during init; continuing without Cloudinary', { error: getErrorMessage(err) });
+      });
   }
 }
 
@@ -209,8 +244,21 @@ export function initCloudinary(): void {
  */
 export async function testCloudinaryConnection(): Promise<boolean> {
   try {
+    // Ensure Cloudinary module is loaded before testing
+    if (!_cloudinaryLoadAttempted) {
+      _cloudinaryLoadAttempted = true;
+      try {
+        const mod = await import('cloudinary');
+        cloudinary = mod && (mod.v2 || mod.default?.v2) ? (mod.v2 || mod.default.v2) : mod;
+      } catch (loadErr) {
+        cloudinary = null;
+        logger.warn('Cannot test Cloudinary connection - module failed to load', { error: getErrorMessage(loadErr) });
+        return false;
+      }
+    }
+
     if (!isCloudinaryConfigured()) {
-      logger.warn('Cannot test Cloudinary connection - not configured');
+      logger.warn('Cannot test Cloudinary connection - not configured or module missing');
       return false;
     }
     

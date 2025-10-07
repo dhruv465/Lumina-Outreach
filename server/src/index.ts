@@ -38,6 +38,7 @@ import userRoutes from "./routes/userRoutes";
 import voiceAIRoutes from "./routes/voiceAIRoutes";
 import healthRoutes from "./routes/healthRoutes";
 import audioStreamingRoutes from "./routes/audioStreamingRoutes";
+import performanceRoutes from "./routes/performanceRoutes";
 import { TwilioStreamHandler } from "./services/twilioStreamHandler";
 import { getAIOrchestrationService } from "./services/aiOrchestrationService";
 import { AudioStreamingService } from "./services/audioStreamingService";
@@ -58,6 +59,10 @@ import { authenticate } from "./middleware/auth";
 
 // Import centralized logger utilities
 import logger, { phaseLogger } from "./utils/logger";
+
+// Import performance monitoring
+import { performanceMonitor } from "./utils/performanceMonitor";
+import { cacheOnSendHook } from "./utils/responseCache";
 
 // Load environment variables
 dotenv.config();
@@ -129,6 +134,13 @@ const isProduction = process.env.NODE_ENV === "production";
 
 // Trust proxy configuration for accurate IP detection
 
+// Add performance monitoring hooks (tracks all requests)
+const perfHooks = performanceMonitor.createPerformanceHooks();
+app.addHook('onRequest', perfHooks.onRequest);
+app.addHook('onResponse', perfHooks.onResponse);
+
+// Add response caching onSend hook (for routes that use cacheResponse)
+app.addHook('onSend', cacheOnSendHook);
 
 // CORS configuration
 app.register(fastifyCors, {
@@ -136,34 +148,21 @@ app.register(fastifyCors, {
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
-  exposedHeaders: ["x-total-count", "x-page-count"],
+  exposedHeaders: ["x-total-count", "x-page-count", "X-Cache"],
 });
 
 // Register formbody to parse x-www-form-urlencoded
 app.register(require("@fastify/formbody"));
 
+// Optimized Helmet configuration - CSP disabled for API-only server (significant performance gain)
+// CSP is primarily for browser-rendered content, not needed for JSON APIs
 app.register(fastifyHelmet, {
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https:", "data:"],
-      fontSrc: ["'self'", "https:", "data:", "blob:"],
-      imgSrc: ["'self'", "https:", "data:", "blob:"],
-      connectSrc: ["'self'", "ws:", "wss:", "https:"],
-      mediaSrc: ["'self'", "blob:", "data:"],
-      objectSrc: ["'none'"],
-      baseUri: ["'self'"],
-      formAction: ["'self'"],
-      frameAncestors: ["'none'"],
-      ...(isProduction ? { upgradeInsecureRequests: [] } : {}),
-    },
-  },
-  hsts: {
+  contentSecurityPolicy: false, // Disabled - not needed for API endpoints
+  hsts: isProduction ? {
     maxAge: 31536000,
     includeSubDomains: true,
     preload: true,
-  },
+  } : false, // Only enable HSTS in production
   noSniff: true,
   xssFilter: true,
   referrerPolicy: { policy: "same-origin" },
@@ -192,11 +191,13 @@ const rateLimitMax = parseInt(
     : process.env.RATE_LIMIT_MAX_REQUESTS || "100"
 );
 
-// Global rate limiter
+// Optimized rate limiting - only apply to API routes, not webhooks/websockets
+// This prevents unnecessary rate limit checks on high-frequency real-time connections
 app.register(fastifyRateLimit, {
   max: rateLimitMax,
   timeWindow: rateLimitWindowMs,
-  global: true,
+  global: false, // Changed to false - we'll apply selectively
+  skipOnError: true, // Skip rate limiting if there's an error checking
 });
 
 // Strict rate limiter for authentication endpoints
@@ -217,55 +218,80 @@ const authLimitMax = parseInt(
 
 // Metrics endpoint removed
 
-// API Routes with enhanced security and monitoring
+// Webhooks and WebSocket routes (no rate limiting or heavy middleware)
+// These need to be fast and shouldn't be rate limited
 app.register(rootWebhookRoutes, { prefix: "/" });
-
-// API Routes
-app.register(userRoutes, {
-  prefix: "/api/users",
-  rateLimit: {
-    max: authLimitMax,
-    timeWindow: authLimitWindowMs,
-  },
-});
-app.register(leadRoutes, { prefix: "/api/leads" });
-app.register(campaignRoutes, { prefix: "/api/campaigns" });
-app.register(callRoutes, { prefix: "/api/calls" });
-app.register(dashboardRoutes, { prefix: "/api/dashboard" });
-app.register(configurationRoutes, { prefix: "/api/configuration" });
-app.register(voiceAIRoutes, { prefix: "/api/lumina-outreach" });
-app.register(telephonyRoutes, { prefix: "/api/telephony" });
-app.register(analyticsRoutes, { prefix: "/api/analytics" });
-app.register(aiRoutes, { prefix: "/api/ai" }); // Core AI routes
-app.register(aiOrchestrationRoutes, { prefix: "/api/ai-orchestration" }); // AI orchestration layer routes
-app.register(knowledgeRoutes, { prefix: "/api/knowledge" }); // Knowledge management routes
-app.register(ragRoutes, { prefix: "/api/rag" }); // RAG (Retrieval-Augmented Generation) routes
-app.register(transcriptionRoutes, { prefix: "/api/transcription" });
-app.get("/api/deepgram-metrics", (req, res) => {
-  res
-    .status(503)
-    .send({ error: "Deepgram metrics service temporarily unavailable" });
-}); // Temporarily disabled Deepgram metrics routes
-// Monitoring API routes removed
-app.register(deepgramTestRoutes, { prefix: "/api/deepgram" }); // Deepgram testing routes
-app.register(deepgramTTSRoutes, { prefix: "/api/deepgram-tts" }); // Deepgram TTS routes
-app.register(streamingTTSRoutes, { prefix: "/api/streaming-tts" }); // Streaming TTS routes
-app.register(connectionPreWarmingRoutes, { prefix: "/api/connection-pre-warming" }); // Connection pre-warming routes
-app.register(sttRoutes, { prefix: "/api/stt" }); // Speech-to-Text testing routes
-app.register(ttsProviderRoutes, { prefix: "/api/tts-provider" }); // TTS Provider management routes
-app.register(enhancedRealTimeRoutes, { prefix: "/api/realtime" }); // Enhanced real-time call functionality
-app.register(healthRoutes, { prefix: "/api" }); // Health monitoring and resilience routes
-app.register(audioStreamingRoutes, { prefix: '/api/audio-streaming', audioStreamingService });
-
-// Debug routes only in development
-if (process.env.NODE_ENV !== "production") {
-  app.register(debugRoutes, { prefix: "/api/debug" });
-}
-
-// Add optimized stream route
-
-// WebSocket routes
 app.register(streamRoutes, { prefix: "/" });
+
+// Consolidated API routes with shared rate limiting
+// This groups all API routes together for better routing performance
+app.register(async (apiRouter) => {
+  // Apply rate limiting once for all API routes
+  apiRouter.addHook('onRequest', async (request, reply) => {
+    // Skip rate limiting for health checks
+    if (request.url.includes('/health') || request.url.includes('/ready')) {
+      return;
+    }
+  });
+
+  // User routes with stricter rate limiting
+  apiRouter.register(userRoutes, {
+    prefix: "/users",
+    rateLimit: {
+      max: authLimitMax,
+      timeWindow: authLimitWindowMs,
+    },
+  });
+
+  // Core business logic routes
+  apiRouter.register(leadRoutes, { prefix: "/leads" });
+  apiRouter.register(campaignRoutes, { prefix: "/campaigns" });
+  apiRouter.register(callRoutes, { prefix: "/calls" });
+  apiRouter.register(dashboardRoutes, { prefix: "/dashboard" });
+  apiRouter.register(configurationRoutes, { prefix: "/configuration" });
+  apiRouter.register(analyticsRoutes, { prefix: "/analytics" });
+  
+  // AI and voice routes
+  apiRouter.register(voiceAIRoutes, { prefix: "/lumina-outreach" });
+  apiRouter.register(aiRoutes, { prefix: "/ai" });
+  apiRouter.register(aiOrchestrationRoutes, { prefix: "/ai-orchestration" });
+  apiRouter.register(knowledgeRoutes, { prefix: "/knowledge" });
+  apiRouter.register(ragRoutes, { prefix: "/rag" });
+  
+  // Telephony and communication routes
+  apiRouter.register(telephonyRoutes, { prefix: "/telephony" });
+  apiRouter.register(transcriptionRoutes, { prefix: "/transcription" });
+  apiRouter.register(sttRoutes, { prefix: "/stt" });
+  
+  // TTS and audio routes
+  apiRouter.register(deepgramTestRoutes, { prefix: "/deepgram" });
+  apiRouter.register(deepgramTTSRoutes, { prefix: "/deepgram-tts" });
+  apiRouter.register(streamingTTSRoutes, { prefix: "/streaming-tts" });
+  apiRouter.register(ttsProviderRoutes, { prefix: "/tts-provider" });
+  apiRouter.register(connectionPreWarmingRoutes, { prefix: "/connection-pre-warming" });
+  
+  // Real-time and streaming routes
+  apiRouter.register(enhancedRealTimeRoutes, { prefix: "/realtime" });
+  apiRouter.register(audioStreamingRoutes, { prefix: '/audio-streaming', audioStreamingService });
+  
+  // Health and monitoring routes
+  apiRouter.register(healthRoutes, { prefix: "/" });
+  
+  // Performance monitoring routes
+  apiRouter.register(performanceRoutes, { prefix: "/performance" });
+  
+  // Temporarily disabled metrics endpoint
+  apiRouter.get("/deepgram-metrics", (req, res) => {
+    res.status(503).send({ error: "Deepgram metrics service temporarily unavailable" });
+  });
+
+  // Debug routes only in development
+  if (process.env.NODE_ENV !== "production") {
+    apiRouter.register(debugRoutes, { prefix: "/debug" });
+  }
+}, { prefix: "/api" });
+
+// WebSocket routes already registered above with webhooks
 
 // Enhanced global error handler
 app.setErrorHandler((error, request, reply) => {

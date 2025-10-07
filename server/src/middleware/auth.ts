@@ -1,6 +1,15 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import jwt from 'jsonwebtoken';
+import NodeCache from 'node-cache';
 import { logger } from '../index';
+
+// JWT token cache - 5 minute TTL, check for expired tokens every minute
+// This dramatically reduces JWT verification overhead (crypto operations)
+const tokenCache = new NodeCache({ 
+  stdTTL: 300, // 5 minutes
+  checkperiod: 60, // Check for expired entries every 60 seconds
+  useClones: false // Better performance, we don't mutate the cached objects
+});
 
 export const authenticate = async (
   request: FastifyRequest,
@@ -23,8 +32,18 @@ export const authenticate = async (
       return reply.status(401).send({ message: 'Token is invalid or malformed' });
     }
     
-    // Verify token
+    // Check cache first - avoids expensive JWT verification
+    const cached = tokenCache.get<any>(token);
+    if (cached) {
+      request.user = cached;
+      return;
+    }
+    
+    // Verify token (only if not cached)
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_secret');
+    
+    // Cache the decoded token for future requests
+    tokenCache.set(token, decoded);
     
     // Add user from payload
     request.user = decoded;
@@ -36,3 +55,6 @@ export const authenticate = async (
     return reply.status(401).send({ message: 'Token is not valid' });
   }
 };
+
+// Export cache stats for monitoring
+export const getAuthCacheStats = () => tokenCache.getStats();

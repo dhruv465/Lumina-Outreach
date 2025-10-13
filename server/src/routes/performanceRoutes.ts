@@ -1,9 +1,8 @@
-import { FastifyInstance } from 'fastify';
 import { performanceMonitor } from '../utils/performanceMonitor';
 import { responseCache } from '../utils/responseCache';
 import { getAuthCacheStats } from '../middleware/auth';
 
-const performanceRoutes = async (fastify: FastifyInstance, opts: Record<string, any>) => {
+const performanceRoutes = async (fastify, opts: Record<string, any>) => {
   // Only allow in development or for authenticated admin users
   if (process.env.NODE_ENV === 'production') {
     fastify.addHook('onRequest', fastify.authenticate);

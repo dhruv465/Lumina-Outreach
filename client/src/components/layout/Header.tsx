@@ -5,10 +5,12 @@ import {
   Menu,
   Moon,
   Sun,
+  Monitor,
   User,
   PanelLeftClose,
   PanelLeft,
   LogOut,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,8 +39,9 @@ const Header = ({ toggleSidebar, sidebarCollapsed }: HeaderProps) => {
   const { theme, setTheme } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
 
-  const toggleTheme = () => {
-    setTheme(theme === "dark" ? "light" : "dark");
+  const getThemeIcon = () => {
+    if (theme === "system") return <Monitor size={18} />;
+    return theme === "dark" ? <Moon size={18} /> : <Sun size={18} />;
   };
 
   return (
@@ -94,15 +97,40 @@ const Header = ({ toggleSidebar, sidebarCollapsed }: HeaderProps) => {
         {/* Right side actions - moved to absolute right */}
         <div className="flex items-center gap-1 ml-auto">
           {/* Theme toggle */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="rounded-md"
-            onClick={toggleTheme}
-          >
-            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-            <span className="sr-only">Toggle theme</span>
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="rounded-md">
+                {getThemeIcon()}
+                <span className="sr-only">Toggle theme</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => setTheme("light")}
+                className="cursor-pointer"
+              >
+                <Sun className="mr-2 h-4 w-4" />
+                <span>Light</span>
+                {theme === "light" && <Check className="ml-auto h-4 w-4" />}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setTheme("dark")}
+                className="cursor-pointer"
+              >
+                <Moon className="mr-2 h-4 w-4" />
+                <span>Dark</span>
+                {theme === "dark" && <Check className="ml-auto h-4 w-4" />}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setTheme("system")}
+                className="cursor-pointer"
+              >
+                <Monitor className="mr-2 h-4 w-4" />
+                <span>System</span>
+                {theme === "system" && <Check className="ml-auto h-4 w-4" />}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* User menu */}
           <DropdownMenu>

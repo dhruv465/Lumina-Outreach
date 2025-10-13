@@ -15,7 +15,7 @@ import { ConversationTurn } from './conversationEngineService';
 import { ElevenLabsSDKService } from './elevenlabsSDKService';
 import { LLMService } from './llm/service';
 import { LLMMessage, MessageRole } from './llm/types';
-import responseCache from '../utils/responseCache';
+import { responseCache } from '../utils/responseCache';
 import { voiceSettings, parallelProcessingSettings } from '../config/latencyOptimization';
 
 // Audio cue types for more human-like interactions
@@ -178,10 +178,12 @@ export class ParallelProcessingService extends EventEmitter {
       const cacheKey = `${voiceId}_${userInput.toLowerCase()}`;
       if (responseCache.has(cacheKey)) {
         logger.info(`Using cached response for input: "${userInput.substring(0, 20)}..."`);
-        const audioBuffer = responseCache.get(cacheKey);
+        const audioBuffer = responseCache.get<Buffer>(cacheKey);
         
-        // Send the cached audio
-        options.streamCallback(audioBuffer);
+        // Send the cached audio if it exists
+        if (audioBuffer) {
+          options.streamCallback(audioBuffer);
+        }
         
         // Complete the processing
         this.activeProcessingIds.delete(processingId);
@@ -634,7 +636,10 @@ Language: ${context.language || 'English'}`
         // Check cache first
         const cacheKey = `${voiceId}_${partialResponse}`;
         if (responseCache.has(cacheKey)) {
-          streamCallback(responseCache.get(cacheKey));
+          const cached = responseCache.get<Buffer>(cacheKey);
+          if (cached) {
+            streamCallback(cached);
+          }
         } else {
           // Generate speech for the partial response
           await this.sdkService.streamOptimizedSpeech(
@@ -697,8 +702,11 @@ Language: ${context.language || 'English'}`
       // Check cache first
       const cacheKey = `${voiceId}_${text}`;
       if (responseCache.has(cacheKey)) {
-        onAudioChunk(responseCache.get(cacheKey));
-        return;
+        const cached = responseCache.get<Buffer>(cacheKey);
+        if (cached) {
+          onAudioChunk(cached);
+          return;
+        }
       }
       
       // Use optimized settings for latency by default

@@ -5,7 +5,7 @@ import { getErrorMessage } from '../utils/logger';
 import ElevenLabs from 'elevenlabs-node';
 import WebSocket from 'ws';
 import * as latencyConfig from '../config/latencyOptimization';
-import responseCache from '../utils/responseCache';
+import { responseCache } from '../utils/responseCache';
 import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';

@@ -6,7 +6,7 @@
 
 import { ElevenLabsSDKService } from './elevenlabsSDKService';
 import { logger, getErrorMessage } from '../index';
-import responseCache from '../utils/responseCache';
+import { responseCache } from '../utils/responseCache';
 
 /**
  * Extend the ElevenLabsSDKService prototype with the streamSpeechGeneration method
@@ -27,7 +27,7 @@ ElevenLabsSDKService.prototype.streamSpeechGeneration = async function(
     // Check cache first for common phrases
     const cacheKey = `${voiceId}_${text}`;
     if (responseCache.has(cacheKey)) {
-      const cachedAudio = responseCache.get(cacheKey);
+      const cachedAudio = responseCache.get<Buffer>(cacheKey);
       if (cachedAudio) {
         logger.debug(`Using cached audio for text: "${text.substring(0, 20)}..."`);
         onAudioChunk(cachedAudio);

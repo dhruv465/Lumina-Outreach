@@ -97,7 +97,7 @@ export class DeepgramService extends EventEmitter {
     language: 'en',
     model: 'nova-2',
     punctuate: true,
-    endpointing: 150, 
+    endpointing: 150,
     utteranceEndMs: 500
   };
   private readonly CIRCUIT_NAME = 'deepgram-api';
@@ -110,14 +110,14 @@ export class DeepgramService extends EventEmitter {
     this.apiKey = apiKey;
     this.client = createClient(apiKey);
     this.modelCompatibilityService = initializeModelCompatibilityService(apiKey);
-    
+
     const circuitOptions: CircuitBreakerOptions = {
       resetTimeout: 10000,
       errorThresholdPercentage: 30,
       timeout: 5000
     };
     getCircuitBreakerService().getCircuit(this.CIRCUIT_NAME, circuitOptions);
-    
+
     logger.info('Deepgram Service initialized');
   }
 
@@ -127,7 +127,7 @@ export class DeepgramService extends EventEmitter {
     this.modelCompatibilityService.updateApiKey(apiKey);
     this.clearModelValidationCache();
     logger.info('Deepgram API key updated');
-    
+
     // Re-initialize optimal model with new API key
     this.initializeOptimalModel().catch(error => {
       logger.warn(`Failed to re-initialize optimal model after API key update: ${getErrorMessage(error)}`);
@@ -141,23 +141,23 @@ export class DeepgramService extends EventEmitter {
     try {
       const config = await Configuration.findOne();
       const deepgramConfig = (config?.deepgramConfig || {}) as DeepgramConfig;
-      
+
       // Use auto-configuration service if available
       try {
         const { getDeepgramAutoConfigService } = await import('./deepgramAutoConfigService');
         const autoConfigService = getDeepgramAutoConfigService();
-        
+
         // Initialize auto-config service if not already done
         await autoConfigService.initialize(this.apiKey);
-        
+
         // Get optimal configuration
         const autoConfigResult = await autoConfigService.autoConfigureOptimalModel();
-        
+
         if (autoConfigResult.success) {
           this.defaultModel = autoConfigResult.model;
           this.fallbackModels = autoConfigResult.fallbackModels;
           this.defaultOptions.model = autoConfigResult.model;
-          
+
           logger.info(`Auto-configured optimal model: primary=${autoConfigResult.model}, fallbacks=[${autoConfigResult.fallbackModels.join(', ')}]`);
           return;
         } else {
@@ -166,10 +166,10 @@ export class DeepgramService extends EventEmitter {
       } catch (autoConfigError) {
         logger.warn(`Auto-configuration service unavailable: ${getErrorMessage(autoConfigError)}, using manual configuration`);
       }
-      
+
       // Fallback to manual configuration
       const capabilities = await this.modelCompatibilityService.getAccountCapabilities(this.apiKey);
-      
+
       // Set up model preferences
       const preferences: ModelPreferences = {
         preferredModels: [deepgramConfig.primaryModel || deepgramConfig.model || this.defaultModel],
@@ -177,22 +177,22 @@ export class DeepgramService extends EventEmitter {
         language: deepgramConfig.language || 'en',
         realtime: true
       };
-      
+
       // Select best available model
       const bestModel = this.modelCompatibilityService.selectBestModel(
         capabilities.availableModels,
         preferences
       );
-      
+
       // Update default model and fallback models
       this.defaultModel = bestModel;
       this.fallbackModels = capabilities.availableModels.filter(model => model !== bestModel);
-      
+
       // Update default options
       this.defaultOptions.model = bestModel;
-      
+
       logger.info(`Manually configured optimal model: primary=${bestModel}, fallbacks=[${this.fallbackModels.join(', ')}]`);
-      
+
     } catch (error) {
       logger.warn(`Failed to initialize optimal model, using defaults: ${getErrorMessage(error)}`);
     }
@@ -204,17 +204,17 @@ export class DeepgramService extends EventEmitter {
   public async validateAndSetModel(model: string): Promise<boolean> {
     const cacheKey = `${this.apiKey.slice(-8)}-${model}`;
     const validationStartTime = Date.now();
-    
+
     // Check cache first
     const cached = this.modelValidationCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp) < this.MODEL_VALIDATION_TTL) {
       return cached.isValid;
     }
-    
+
     try {
       const validation = await this.modelCompatibilityService.validateModelAccess(this.apiKey, model);
       const validationTime = Date.now() - validationStartTime;
-      
+
       // Record validation metrics
       deepgramModelMetrics.recordModelValidation(
         model,
@@ -222,13 +222,13 @@ export class DeepgramService extends EventEmitter {
         validationTime,
         validation.error ? this.classifyErrorType(validation.error) : undefined
       );
-      
+
       // Cache the result
       this.modelValidationCache.set(cacheKey, {
         isValid: validation.isValid,
         timestamp: Date.now()
       });
-      
+
       if (validation.isValid) {
         this.defaultModel = model;
         this.defaultOptions.model = model;
@@ -241,10 +241,10 @@ export class DeepgramService extends EventEmitter {
     } catch (error) {
       const validationTime = Date.now() - validationStartTime;
       const errorType = this.classifyErrorType(getErrorMessage(error));
-      
+
       // Record failed validation metrics
       deepgramModelMetrics.recordModelValidation(model, false, validationTime, errorType);
-      
+
       logger.error(`Error validating model ${model}: ${getErrorMessage(error)}`);
       return false;
     }
@@ -255,14 +255,14 @@ export class DeepgramService extends EventEmitter {
    */
   public async getAccountCapabilities() {
     const capabilities = await this.modelCompatibilityService.getAccountCapabilities(this.apiKey);
-    
+
     // Record account tier detection metrics
     deepgramModelMetrics.recordAccountTierDetection(
       capabilities.tier,
       capabilities.availableModels,
       0 // Detection time is handled by the compatibility service
     );
-    
+
     return capabilities;
   }
 
@@ -272,19 +272,19 @@ export class DeepgramService extends EventEmitter {
   public async autoConfigureModel(): Promise<string> {
     try {
       const capabilities = await this.getAccountCapabilities();
-      
+
       const preferences: ModelPreferences = {
         preferredModels: [this.defaultModel],
         useCase: 'phone',
         language: 'en',
         realtime: true
       };
-      
+
       const optimalModel = this.modelCompatibilityService.selectBestModel(
         capabilities.availableModels,
         preferences
       );
-      
+
       await this.validateAndSetModel(optimalModel);
       return optimalModel;
     } catch (error) {
@@ -299,7 +299,7 @@ export class DeepgramService extends EventEmitter {
   private async handleModelFallback(currentModel: string, error: any): Promise<string> {
     try {
       const fallbackModel = this.modelCompatibilityService.handleModelFallback(currentModel, error);
-      
+
       // Validate the fallback model
       const isValid = await this.validateAndSetModel(fallbackModel);
       if (isValid) {
@@ -308,7 +308,7 @@ export class DeepgramService extends EventEmitter {
           fallbackModel: fallbackModel,
           reason: getErrorMessage(error)
         });
-        
+
         logger.info(`Successfully fell back from ${currentModel} to ${fallbackModel}`);
         return fallbackModel;
       } else {
@@ -343,18 +343,18 @@ export class DeepgramService extends EventEmitter {
     }
   ): Promise<any> {
     const circuitBreaker = getCircuitBreakerService();
-    
+
     // Define the main function to execute with circuit breaker
     const transcribeFunction = async () => {
       const startTime = Date.now();
-      
+
       // Get configuration from database
       const config = await Configuration.findOne();
       const deepgramConfig = (config?.deepgramConfig || {}) as DeepgramConfig;
-      
+
       // Determine the model to use
       let modelToUse = options?.model || deepgramConfig.model || this.defaultModel;
-      
+
       // Create transcription options
       const transcriptionOptions = {
         language: options?.language || deepgramConfig.language || 'en',
@@ -375,10 +375,10 @@ export class DeepgramService extends EventEmitter {
       // Attempt transcription with model fallback support
       let lastError: any;
       const modelsToTry = [modelToUse, ...this.fallbackModels].filter((model, index, arr) => arr.indexOf(model) === index);
-      
+
       for (let i = 0; i < modelsToTry.length; i++) {
         const currentModel = modelsToTry[i];
-        
+
         try {
           // Validate model before use (skip validation for fallback attempts to save time)
           if (i === 0) {
@@ -388,12 +388,12 @@ export class DeepgramService extends EventEmitter {
               continue;
             }
           }
-          
+
           // Update transcription options with current model
           transcriptionOptions.model = currentModel;
-          
+
           logger.info(`Attempting transcription with model: ${currentModel}`);
-          
+
           // Perform the transcription
           const response = await this.client.listen.prerecorded.transcribeFile(audioBuffer, {
             mimetype: 'audio/wav',
@@ -407,10 +407,10 @@ export class DeepgramService extends EventEmitter {
 
           // Extract result with corrected property access
           const channels = response.result?.results?.channels;
-          const result = channels && channels.length > 0 && channels[0].alternatives && channels[0].alternatives.length > 0 
-            ? channels[0].alternatives[0] 
+          const result = channels && channels.length > 0 && channels[0].alternatives && channels[0].alternatives.length > 0
+            ? channels[0].alternatives[0]
             : null;
-            
+
           const transcriptionResult = {
             transcript: result?.transcript || '', // Always ensure transcript is at least an empty string
             confidence: result?.confidence || 0,
@@ -420,7 +420,7 @@ export class DeepgramService extends EventEmitter {
             modelUsed: currentModel,
             fallback: i > 0 // Mark as fallback if not the first model
           };
-          
+
           // Record model usage metrics
           const capabilities = await this.getAccountCapabilities();
           deepgramModelMetrics.recordModelUsage(
@@ -462,19 +462,19 @@ export class DeepgramService extends EventEmitter {
               latency
             });
           }
-          
+
           // Cache result in memory
           this.transcriptionCache.set(cacheKey, {
             data: transcriptionResult,
             timestamp: Date.now()
           });
-          
+
           return transcriptionResult;
-          
+
         } catch (error) {
           lastError = error;
           const errorType = this.classifyErrorType(getErrorMessage(error));
-          
+
           // Record failed model usage metrics
           try {
             const capabilities = await this.getAccountCapabilities();
@@ -488,9 +488,9 @@ export class DeepgramService extends EventEmitter {
           } catch (metricsError) {
             logger.debug(`Failed to record metrics: ${getErrorMessage(metricsError)}`);
           }
-          
+
           logger.warn(`Transcription failed with model ${currentModel}: ${getErrorMessage(error)}`);
-          
+
           // If this was a permission or model error, try fallback
           if (this.isModelCompatibilityError(error)) {
             if (i < modelsToTry.length - 1) {
@@ -503,16 +503,16 @@ export class DeepgramService extends EventEmitter {
           }
         }
       }
-      
+
       // If we get here, all models failed
       throw new Error(`Transcription failed with all available models. Last error: ${getErrorMessage(lastError)}`);
     };
-    
+
     // Define fallback function for when circuit is open
     const fallbackFunction = async (error: Error) => {
       logger.warn(`Using fallback for transcription due to circuit breaker: ${error.message}`);
       this.emit(DeepgramEvent.FALLBACK_USED, { error: error.message });
-      
+
       // Return a minimal result 
       return {
         transcript: '[Transcription temporarily unavailable]',
@@ -523,7 +523,7 @@ export class DeepgramService extends EventEmitter {
         fallback: true
       };
     };
-    
+
     // Execute with circuit breaker
     return circuitBreaker.execute(
       this.CIRCUIT_NAME,
@@ -538,7 +538,7 @@ export class DeepgramService extends EventEmitter {
   private isModelCompatibilityError(error: any): boolean {
     const errorMessage = getErrorMessage(error).toLowerCase();
     const statusCode = error?.status || error?.response?.status;
-    
+
     return (
       statusCode === 403 || // Forbidden/insufficient permissions
       statusCode === 400 || // Bad request (invalid model)
@@ -617,7 +617,7 @@ export class DeepgramService extends EventEmitter {
       });
 
       this.setupConnectionHandlers(connection, connectionId, callId, streamOptions);
-      
+
       return connectionId;
     };
 
@@ -632,8 +632,8 @@ export class DeepgramService extends EventEmitter {
       this.emit(DeepgramEvent.ERROR, { callId, error: getErrorMessage(error) });
       // Return an emergency fallback ID
       const emergencyFallbackId = `emergency-${uuidv4()}`;
-      this.activeConnections.set(emergencyFallbackId, { 
-        isEmergencyFallback: true, 
+      this.activeConnections.set(emergencyFallbackId, {
+        isEmergencyFallback: true,
         callId,
         connection: new EventEmitter(),
         createdAt: new Date()
@@ -648,9 +648,78 @@ export class DeepgramService extends EventEmitter {
     callId: string,
     streamOptions: DeepgramStreamOptions
   ): void {
-    connection.on('open', () => {
+    connection.on('open', async () => {
       logger.info(`Deepgram Agent WebSocket connection opened for call ${callId}`);
-      
+
+      // Get campaign configuration for custom agent behavior
+      let agentConfig: any = {
+        language: streamOptions.language || 'en',
+        listen: {
+          provider: {
+            type: 'deepgram',
+            model: streamOptions.model || this.defaultModel,
+          },
+        },
+      };
+
+      // Try to load campaign-specific LLM configuration
+      try {
+        const config = await Configuration.findOne();
+        const Call = require('../models/Call').default;
+        const call = await Call.findOne({ twilioSid: callId }).populate('campaignId');
+
+        if (call?.campaignId && config?.llmConfig?.providers) {
+          const campaign = call.campaignId;
+
+          // Find an enabled LLM provider with API key
+          const googleProvider = config.llmConfig.providers.find((p: any) => p.name === 'google' && p.isEnabled && p.apiKey);
+          const openAIProvider = config.llmConfig.providers.find((p: any) => p.name === 'openai' && p.isEnabled && p.apiKey);
+          const anthropicProvider = config.llmConfig.providers.find((p: any) => p.name === 'anthropic' && p.isEnabled && p.apiKey);
+
+          let selectedProvider = googleProvider || openAIProvider || anthropicProvider;
+
+          if (selectedProvider) {
+            // Map provider names to Deepgram-compatible format
+            const providerMap: any = {
+              'google': { type: 'google', model: 'gemini-2.5-flash' },
+              'openai': { type: 'open_ai', model: 'gpt-4o-mini' },
+              'anthropic': { type: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+            };
+
+            const providerConfig = providerMap[selectedProvider.name];
+
+            if (providerConfig) {
+              // Configure the LLM for thinking/response generation
+              agentConfig.think = {
+                provider: {
+                  type: providerConfig.type,
+                  model: providerConfig.model,
+                },
+                prompt: campaign.llmConfiguration.systemPrompt || 'You are a helpful AI assistant.',
+              };
+
+
+
+              // Add Deepgram TTS voice if campaign specifies it
+              if (campaign.voiceConfiguration?.provider === 'deepgram' && campaign.voiceConfiguration?.voiceId) {
+                agentConfig.speak = {
+                  provider: {
+                    type: 'deepgram',
+                    model: campaign.voiceConfiguration.voiceId,
+                  },
+                };
+              }
+
+              logger.info(`Configured LLM: ${selectedProvider.name} with model ${providerConfig.model} and campaign personality`);
+            }
+          } else {
+            logger.warn('No LLM provider configured - using Deepgram built-in defaults');
+          }
+        }
+      } catch (error) {
+        logger.warn(`Could not load campaign config: ${getErrorMessage(error)}`);
+      }
+
       const settings = {
         type: 'Settings',
         audio: {
@@ -658,22 +727,18 @@ export class DeepgramService extends EventEmitter {
             encoding: 'linear16',
             sample_rate: 16000,
           },
-        },
-        agent: {
-          language: streamOptions.language || 'en',
-          listen: {
-            provider: {
-              type: 'deepgram',
-              model: streamOptions.model || this.defaultModel,
-            },
+          output: {
+            encoding: 'linear16',
+            sample_rate: 16000,
+            container: 'none',
           },
-          // TODO: Add think and speak configuration
         },
+        agent: agentConfig,
       };
 
+      console.log("DEEPGRAM SETTINGS:", JSON.stringify(settings, null, 2));
       connection.send(JSON.stringify(settings));
-      logger.info('Sent Agent Settings:', JSON.stringify(settings, null, 2));
-      
+
       this.emit(DeepgramEvent.CONNECTION_STATUS, {
         connectionId,
         callId,
@@ -718,18 +783,18 @@ export class DeepgramService extends EventEmitter {
             logger.debug(`Received Agent event: ${message.type}`);
             break;
           case 'Error':
-             logger.error('Received Error message from Deepgram Agent:', message);
-             this.emit(DeepgramEvent.ERROR, { connectionId, callId, error: message.description });
-             break;
+            logger.error('Received Error message from Deepgram Agent:', message);
+            this.emit(DeepgramEvent.ERROR, { connectionId, callId, error: message.description });
+            break;
           default:
             logger.debug('Received unhandled message type from Agent:', message.type);
         }
       } catch (error) {
         // If it's not JSON, it's likely audio data
         if (data instanceof Buffer) {
-            this.emit(DeepgramEvent.AGENT_AUDIO_RECEIVED, { connectionId, callId, audio: data });
+          this.emit(DeepgramEvent.AGENT_AUDIO_RECEIVED, { connectionId, callId, audio: data });
         } else {
-            logger.error('Failed to parse message from Deepgram Agent', { error: getErrorMessage(error) });
+          logger.error('Failed to parse message from Deepgram Agent', { error: getErrorMessage(error) });
         }
       }
     });
@@ -787,7 +852,7 @@ export class DeepgramService extends EventEmitter {
       }
 
       const connection = connectionData.connection;
-      
+
       // Close the connection if it's open
       if (connection && connection.readyState === 1) { // 1 = OPEN
         if (typeof connection.finish === 'function') {
@@ -799,7 +864,7 @@ export class DeepgramService extends EventEmitter {
         }
         logger.info(`Closed Deepgram connection ${connectionId} (model: ${connectionData.model || 'unknown'})`);
       }
-      
+
       // Clean up the connection
       this.activeConnections.delete(connectionId);
       this.warnedConnections.delete(connectionId);
@@ -840,7 +905,7 @@ export class DeepgramService extends EventEmitter {
   public closeAllConnections(): void {
     const connectionIds = this.getActiveConnectionIds();
     logger.info(`Closing ${connectionIds.length} active connections`);
-    
+
     connectionIds.forEach(connectionId => {
       this.closeTranscriptionStream(connectionId);
     });
@@ -873,7 +938,7 @@ export class DeepgramService extends EventEmitter {
 
     while (attempt < MAX_RETRIES) {
       try {
-      const audioBuffer = await validateAndFetch(audioUrl, { maxSizeBytes: 50 * 1024 * 1024 });
+        const audioBuffer = await validateAndFetch(audioUrl, { maxSizeBytes: 50 * 1024 * 1024 });
         if (!audioBuffer) {
           const err: any = new Error(`Remote media unavailable: ${audioUrl}`);
           err.code = 'REMOTE_CONTENT_ERROR';

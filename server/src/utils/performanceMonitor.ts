@@ -36,12 +36,14 @@ class PerformanceMonitor {
         
         if (startTime) {
           const duration = Date.now() - startTime;
-          this.recordRequest(request.url, duration);
+          const url = request.raw.url || '';
+          const method = request.raw.method || '';
+          this.recordRequest(url, duration);
           requestTimes.delete(requestId);
 
           // Log slow requests (over 1 second)
           if (duration > 1000) {
-            logger.warn(`Slow request detected: ${request.method} ${request.url} took ${duration}ms`);
+            logger.warn(`Slow request detected: ${method} ${url} took ${duration}ms`);
           }
         }
       }
@@ -52,7 +54,7 @@ class PerformanceMonitor {
    * Record a request's performance
    */
   private recordRequest(route: string, duration: number) {
-    this.totalRequests++;
+    this.metrics.totalRequests++;
     
     // Update response times
     this.responseTimes.push(duration);
@@ -61,18 +63,18 @@ class PerformanceMonitor {
     }
 
     // Calculate average
-    this.averageResponseTime = 
+    this.metrics.averageResponseTime = 
       this.responseTimes.reduce((a, b) => a + b, 0) / this.responseTimes.length;
 
     // Track per-route metrics
     const routeKey = this.normalizeRoute(route);
-    const existing = this.slowestRoutes.get(routeKey) || { count: 0, avgTime: 0, maxTime: 0 };
+    const existing = this.metrics.slowestRoutes.get(routeKey) || { count: 0, avgTime: 0, maxTime: 0 };
     
     const newCount = existing.count + 1;
     const newAvg = (existing.avgTime * existing.count + duration) / newCount;
     const newMax = Math.max(existing.maxTime, duration);
 
-    this.slowestRoutes.set(routeKey, {
+    this.metrics.slowestRoutes.set(routeKey, {
       count: newCount,
       avgTime: newAvg,
       maxTime: newMax,
@@ -104,7 +106,7 @@ class PerformanceMonitor {
     const p99 = sorted[Math.floor(sorted.length * 0.99)] || 0;
 
     // Get top 10 slowest routes
-    const topSlowestRoutes = Array.from(this.slowestRoutes.entries())
+    const topSlowestRoutes = Array.from(this.metrics.slowestRoutes.entries())
       .map(([route, metrics]) => ({ route, ...metrics }))
       .sort((a, b) => b.avgTime - a.avgTime)
       .slice(0, 10);

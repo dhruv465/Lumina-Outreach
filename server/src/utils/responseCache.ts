@@ -21,7 +21,7 @@ class ResponseCache {
    * Generate cache key from request
    */
   private generateCacheKey(request: FastifyRequest): string {
-    const url = request.url;
+    const url = request.raw.url || '';
     const userId = (request.user as any)?.id || 'anonymous';
     return crypto.createHash('md5').update(`${userId}:${url}`).digest('hex');
   }
@@ -34,11 +34,11 @@ class ResponseCache {
     
     return async (request: FastifyRequest, reply: FastifyReply) => {
       // Only cache GET requests
-      if (request.method !== 'GET') {
+      if (request.raw.method !== 'GET') {
         return;
       }
 
-      const url = request.url;
+      const url = request.raw.url || '';
       const userId = (request.user as any)?.id || 'anonymous';
       const cacheKey = crypto.createHash('md5').update(`${userId}:${url}`).digest('hex');
       
@@ -64,7 +64,7 @@ class ResponseCache {
     const cache = this.cache;
     
     return async (request: FastifyRequest, reply: FastifyReply, payload: any) => {
-      if ((reply as any)._shouldCache && reply.statusCode === 200 && payload) {
+      if ((reply as any)._shouldCache && reply.raw.statusCode === 200 && payload) {
         const cacheKey = (reply as any)._cacheKey;
         const ttl = (reply as any)._cacheTTL || 60;
         cache.set(cacheKey, payload, ttl);
@@ -95,6 +95,27 @@ class ResponseCache {
    */
   public getStats() {
     return this.cache.getStats();
+  }
+
+  /**
+   * Check if a key exists in cache
+   */
+  public has(key: string): boolean {
+    return this.cache.has(key);
+  }
+
+  /**
+   * Get a value from cache
+   */
+  public get<T>(key: string): T | undefined {
+    return this.cache.get<T>(key);
+  }
+
+  /**
+   * Set a value in cache
+   */
+  public set<T>(key: string, value: T, ttl?: number): boolean {
+    return this.cache.set(key, value, ttl || 60);
   }
 }
 

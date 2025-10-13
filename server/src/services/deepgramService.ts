@@ -725,11 +725,11 @@ export class DeepgramService extends EventEmitter {
         audio: {
           input: {
             encoding: 'linear16',
-            sample_rate: 16000,
+            sample_rate: 48000,
           },
           output: {
             encoding: 'linear16',
-            sample_rate: 16000,
+            sample_rate: 24000,
             container: 'none',
           },
         },

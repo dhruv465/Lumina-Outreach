@@ -2,9 +2,8 @@ import { logger } from '../index';
 import { getErrorMessage } from './logger';
 
 /**
- * Convert μ-law audio to 16-bit PCM format with proper WAV header for Deepgram,
- * resampling from 8kHz to 16kHz.
- * Twilio sends audio in μ-law format (8kHz), but Deepgram's Nova-2 model often expects 16kHz Linear16.
+ * Convert μ-law audio to 16-bit PCM format, resampling from 8kHz to 48kHz.
+ * Twilio sends audio in μ-law format (8kHz), we upsample to 48kHz for Deepgram Agent.
  */
 export function convertMuLawToPCM(muLawBuffer: Buffer): Buffer {
     try {
@@ -53,20 +52,33 @@ export function convertMuLawToPCM(muLawBuffer: Buffer): Buffer {
         pcm8kHzBuffer.writeInt16LE(pcmSample, i * 2);
       }
       
-      // Resample from 8kHz to 16kHz using linear interpolation
-      const pcm16kHzBuffer = Buffer.alloc(pcm8kHzBuffer.length * 2);
+      // Resample from 8kHz to 48kHz (6x upsampling) using linear interpolation
+      const numSamples8k = Math.floor(pcm8kHzBuffer.length / 2);
+      const numSamples48k = numSamples8k * 6;
+      const pcm48kHzBuffer = Buffer.alloc(numSamples48k * 2);
       
-      for (let i = 0; i < pcm8kHzBuffer.length / 2; i++) { // Iterate over 16-bit samples
-          const sample1 = pcm8kHzBuffer.readInt16LE(i * 2);
-          const sample2 = (i * 2 + 2 < pcm8kHzBuffer.length) ? pcm8kHzBuffer.readInt16LE(i * 2 + 2) : sample1; // Handle last sample
-
-          pcm16kHzBuffer.writeInt16LE(sample1, i * 4); // Write original sample
-          const interpolatedSample = Math.round((sample1 + sample2) / 2);
-          pcm16kHzBuffer.writeInt16LE(interpolatedSample, i * 4 + 2); // Write interpolated sample
+      for (let i = 0; i < numSamples8k - 1; i++) {
+        const sample1 = pcm8kHzBuffer.readInt16LE(i * 2);
+        const sample2 = pcm8kHzBuffer.readInt16LE((i + 1) * 2);
+        
+        // Write 6 interpolated samples for each original sample
+        for (let j = 0; j < 6; j++) {
+          const ratio = j / 6;
+          const interpolated = Math.round(sample1 * (1 - ratio) + sample2 * ratio);
+          pcm48kHzBuffer.writeInt16LE(interpolated, (i * 6 + j) * 2);
+        }
+      }
+      
+      // Handle the last sample
+      if (numSamples8k > 0) {
+        const lastSample = pcm8kHzBuffer.readInt16LE((numSamples8k - 1) * 2);
+        for (let j = 0; j < 6; j++) {
+          pcm48kHzBuffer.writeInt16LE(lastSample, ((numSamples8k - 1) * 6 + j) * 2);
+        }
       }
 
-      // Return the raw 16kHz PCM buffer
-      return pcm16kHzBuffer;
+      // Return the raw 48kHz PCM buffer
+      return pcm48kHzBuffer;
     } catch (error) {
       logger.warn(`Error converting μ-law to PCM and resampling: ${getErrorMessage(error)}, using original buffer`);
       return muLawBuffer; // Return original buffer if conversion fails
@@ -108,12 +120,38 @@ function createWavFile(pcmData: Buffer, sampleRate: number, channels: number, bi
 
 /**
  * Convert 16-bit PCM audio to μ-law format.
- * This is the inverse of the μ-law to PCM conversion.
+ * Downsamples from 24kHz to 8kHz (Deepgram output → Twilio input)
  */
-export function convertPCMToMuLaw(pcmBuffer: Buffer): Buffer {
-    const muLawBuffer = Buffer.alloc(Math.floor(pcmBuffer.length / 2));
-    for (let i = 0; i < pcmBuffer.length - 1; i += 2) {
-        const pcmSample = pcmBuffer.readInt16LE(i);
+export function convertPCMToMuLaw(pcmBuffer: Buffer, inputSampleRate: number = 24000): Buffer {
+    // Downsample from inputSampleRate to 8kHz if needed
+    let pcm8kHzBuffer = pcmBuffer;
+    
+    if (inputSampleRate === 24000) {
+        // Downsample 24kHz → 8kHz (take every 3rd sample)
+        const numSamples = Math.floor(pcmBuffer.length / 2);
+        const downSampledLength = Math.floor(numSamples / 3);
+        pcm8kHzBuffer = Buffer.alloc(downSampledLength * 2);
+        
+        for (let i = 0; i < downSampledLength; i++) {
+            const sample = pcmBuffer.readInt16LE(i * 3 * 2);
+            pcm8kHzBuffer.writeInt16LE(sample, i * 2);
+        }
+    } else if (inputSampleRate === 16000) {
+        // Downsample 16kHz → 8kHz (take every 2nd sample)
+        const numSamples = Math.floor(pcmBuffer.length / 2);
+        const downSampledLength = Math.floor(numSamples / 2);
+        pcm8kHzBuffer = Buffer.alloc(downSampledLength * 2);
+        
+        for (let i = 0; i < downSampledLength; i++) {
+            const sample = pcmBuffer.readInt16LE(i * 2 * 2);
+            pcm8kHzBuffer.writeInt16LE(sample, i * 2);
+        }
+    }
+    
+    // Convert PCM to μ-law
+    const muLawBuffer = Buffer.alloc(Math.floor(pcm8kHzBuffer.length / 2));
+    for (let i = 0; i < pcm8kHzBuffer.length - 1; i += 2) {
+        const pcmSample = pcm8kHzBuffer.readInt16LE(i);
         const muLawSample = linearToMuLaw(pcmSample);
         muLawBuffer.writeUInt8(muLawSample, i / 2);
     }

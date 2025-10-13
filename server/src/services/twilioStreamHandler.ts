@@ -33,7 +33,8 @@ export class TwilioStreamHandler {
 
   private handleAgentAudio(data: { connectionId: string, callId: string, audio: Buffer }): void {
     if (data.connectionId === this.deepgramConnectionId) {
-        const muLawBuffer = convertPCMToMuLaw(data.audio);
+        // Deepgram Agent outputs at 24kHz, downsample to 8kHz for Twilio
+        const muLawBuffer = convertPCMToMuLaw(data.audio, 24000);
         const mediaMessage = {
             event: 'media',
             streamSid: this.streamSid,

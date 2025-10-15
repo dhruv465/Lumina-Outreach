@@ -21,7 +21,7 @@ import {
   batchTestDeepgramModels
 } from '../controllers/configurationController';
 import { testDeepgramASRConnection } from '../controllers/testDeepgramASRConnection';
-import { testLLMChat, testLLMConnection, getAllLLMModels, getProviderLLMModels, getDynamicProviderModels } from '../controllers/llmControllers';
+// llmControllers removed (file deleted)
 import { 
   testModelCompatibility,
   getAvailableModels,
@@ -40,17 +40,17 @@ const configurationRoutes = async (fastify, opts: Record<string, any>) => {
   fastify.get('/llm-options', getLLMOptions);
   fastify.get('/voice-options', getVoiceOptions);
 
-  // LLM model listing routes
-  fastify.get('/llm-models', getAllLLMModels);
-  fastify.get('/llm-models/:provider', getProviderLLMModels);
-  fastify.post('/llm-models/dynamic', getDynamicProviderModels);
+  // LLM model listing routes (controllers removed)
+  // fastify.get('/llm-models', getAllLLMModels);
+  // fastify.get('/llm-models/:provider', getProviderLLMModels);
+  // fastify.post('/llm-models/dynamic', getDynamicProviderModels);
 
   // API key management
   fastify.delete('/api-key/:provider/:name?', deleteApiKey);
 
-  // Connection tests
-  fastify.post('/test-llm', testLLMConnection);
-  fastify.post('/test-llm-chat', testLLMChat);
+  // Connection tests (LLM controllers removed)
+  // fastify.post('/test-llm', testLLMConnection);
+  // fastify.post('/test-llm-chat', testLLMChat);
   fastify.post('/test-twilio', testTwilioConnection);
   fastify.post('/test-elevenlabs', testElevenLabsConnection);
   fastify.post('/test-deepgram-tts', testDeepgramTTSConnection);

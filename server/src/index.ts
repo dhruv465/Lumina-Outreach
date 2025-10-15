@@ -18,9 +18,6 @@ import campaignRoutes from "./routes/campaignRoutes";
 import configurationRoutes from "./routes/configurationRoutes";
 import dashboardRoutes from "./routes/dashboardRoutes";
 import debugRoutes from "./routes/debugRoutes";
-import deepgramTestRoutes, {
-  setupDeepgramWebSocketServer,
-} from "./routes/deepgramTestRoutes";
 import deepgramTTSRoutes from "./routes/deepgramTTSRoutes";
 import streamingTTSRoutes from "./routes/streamingTTSRoutes";
 import connectionPreWarmingRoutes from "./routes/connectionPreWarmingRoutes";
@@ -107,9 +104,7 @@ const io = new SocketIOServer(server, {
 // Initialize Audio Streaming Service
 const audioStreamingService = new AudioStreamingService(io);
 
-// Initialize Deepgram WebSocket server (it's a 'ws' server instance)
-const deepgramWss = setupDeepgramWebSocketServer(server);
-bootstrapLogger.info("Deepgram WebSocket server initialized");
+// Deepgram WebSocket server removed (deepgramTestRoutes deleted)
 
 // Register fastify-websocket plugin
 app.register(fastifyWebsocket);
@@ -121,10 +116,7 @@ app.register(async function (fastify) {
     new TwilioStreamHandler(connection, req.raw);
   });
 
-  // Handle Deepgram connections
-  fastify.get('/api/deepgram/ws', { websocket: true }, (connection, req) => {
-    deepgramWss.emit('connection', connection.socket, req.raw);
-  });
+  // Deepgram WebSocket endpoint removed (deepgramTestRoutes deleted)
 });
 
 // Enhanced middleware setup for production
@@ -264,7 +256,7 @@ app.register(async (apiRouter) => {
   apiRouter.register(sttRoutes, { prefix: "/stt" });
   
   // TTS and audio routes
-  apiRouter.register(deepgramTestRoutes, { prefix: "/deepgram" });
+  // deepgramTestRoutes removed (file deleted)
   apiRouter.register(deepgramTTSRoutes, { prefix: "/deepgram-tts" });
   apiRouter.register(streamingTTSRoutes, { prefix: "/streaming-tts" });
   apiRouter.register(ttsProviderRoutes, { prefix: "/tts-provider" });
@@ -330,7 +322,7 @@ app.setErrorHandler((error, request, reply) => {
 
 // 404 handler
 app.setNotFoundHandler((request, reply) => {
-  logger.warn(`404 - Route not found: ${request.method} ${request.raw.originalUrl}`, {
+  logger.warn(`404 - Route not found: ${request.method} ${request.url}`, {
     ip: request.ip,
     userAgent: request.headers["user-agent"],
   });
@@ -338,7 +330,7 @@ app.setNotFoundHandler((request, reply) => {
   reply.status(404).send({
     error: true,
     message: "Route not found",
-    path: request.raw.originalUrl,
+    path: request.url,
     method: request.method,
     timestamp: new Date().toISOString(),
   });

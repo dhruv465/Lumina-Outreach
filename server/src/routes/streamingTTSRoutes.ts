@@ -75,12 +75,12 @@ export default async function streamingTTSRoutes(fastify: FastifyInstance<any, a
       };
 
       if (!text) {
-        connection.socket.close(1000, 'Text parameter is required');
+        (connection as any).socket.close(1000, 'Text parameter is required');
         return;
       }
 
       await handleWebSocketStreaming(
-        connection.socket,
+        (connection as any).socket,
         req,
         callId,
         conversationId,

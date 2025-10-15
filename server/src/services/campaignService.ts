@@ -186,9 +186,8 @@ export class CampaignService {
         conversionRate: 0,
         variantPerformance: {}
       },
-      callRecords: [],
-      settings: {}
-    };
+      callRecords: []
+    } as any;
     
     // Initialize variant performance metrics
     campaign.variants.forEach(variant => {

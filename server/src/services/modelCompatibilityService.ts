@@ -211,11 +211,35 @@ export class ModelCompatibilityService {
       // Create a temporary client for validation
       const testClient = createClient(apiKey);
       
-      // Use a local silent audio file for testing
-      const audioFilePath = path.join(__dirname, '../examples/test-data/test-sample-en.wav');
-      const audioBuffer = fs.readFileSync(audioFilePath);
+      // Create a minimal WAV file buffer for testing (1 second of silence)
+      // WAV header for 16-bit PCM, 16kHz, mono, 1 second
+      const sampleRate = 16000;
+      const numChannels = 1;
+      const bitsPerSample = 16;
+      const duration = 1; // seconds
+      const numSamples = sampleRate * duration;
+      const dataSize = numSamples * numChannels * (bitsPerSample / 8);
+      const fileSize = 44 + dataSize;
+      
+      const audioBuffer = Buffer.alloc(fileSize);
+      
+      // WAV header
+      audioBuffer.write('RIFF', 0);
+      audioBuffer.writeUInt32LE(fileSize - 8, 4);
+      audioBuffer.write('WAVE', 8);
+      audioBuffer.write('fmt ', 12);
+      audioBuffer.writeUInt32LE(16, 16); // fmt chunk size
+      audioBuffer.writeUInt16LE(1, 20); // audio format (PCM)
+      audioBuffer.writeUInt16LE(numChannels, 22);
+      audioBuffer.writeUInt32LE(sampleRate, 24);
+      audioBuffer.writeUInt32LE(sampleRate * numChannels * (bitsPerSample / 8), 28); // byte rate
+      audioBuffer.writeUInt16LE(numChannels * (bitsPerSample / 8), 32); // block align
+      audioBuffer.writeUInt16LE(bitsPerSample, 34);
+      audioBuffer.write('data', 36);
+      audioBuffer.writeUInt32LE(dataSize, 40);
+      // Audio data is already zeros (silence)
 
-      // Call transcribeFile with the local audio buffer
+      // Call transcribeFile with the generated audio buffer
       await testClient.listen.prerecorded.transcribeFile(audioBuffer, {
         model: model,
         language: 'en',

@@ -335,7 +335,7 @@ export async function processAudio(req: FastifyRequest, reply: FastifyReply): Pr
     }
 
     // Send audio data to the transcription stream
-    deepgramService.sendAudioToStream(connectionId, req.body);
+    deepgramService.sendAudioToStream(connectionId, req.body as Buffer);
 
     reply.code(200).send({ success: true });
   } catch (error) {

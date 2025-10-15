@@ -383,7 +383,8 @@ export async function handleTwilioVoiceWebhook(req: FastifyRequest, reply: Fasti
                   logger.info(`Using advanced WebSocket streaming for call ${callId} with features: Deepgram=${!!configuration?.deepgramConfig?.isEnabled}, Flash=${!!configuration?.elevenLabsConfig?.useFlashModel}, Realtime=${!!configuration?.llmConfig?.providers?.some(p => p.useRealtimeAPI)}`);
 
                   const host = req.headers.host;
-                  const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || `http${req.raw.protocol === 'https' ? 's' : ''}://${host}`;
+                  const protocol = req.headers['x-forwarded-proto'] || 'http';
+                  const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || `${protocol}://${host}`;
 
                   const baseUrl = webhookBaseUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
                   const streamPath = `/voice/stream/${callId}/${conversationId}`;
@@ -396,7 +397,7 @@ export async function handleTwilioVoiceWebhook(req: FastifyRequest, reply: Fasti
                         callId,
                         conversationId,
                         fullUrl: wsUrl,
-                        secure: req.raw.protocol === 'https',
+                        secure: protocol === 'https',
                         forwardedProto: req.headers['x-forwarded-proto']
                   });
 

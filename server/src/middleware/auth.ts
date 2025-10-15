@@ -46,7 +46,7 @@ export const authenticate = async (
     tokenCache.set(token, decoded);
     
     // Add user from payload
-    request.user = decoded;
+    request.user = decoded as any;
   } catch (error) {
     logger.error(`Authentication error for ${request.raw.method} ${request.raw.url}:`, {
       error: error.message,

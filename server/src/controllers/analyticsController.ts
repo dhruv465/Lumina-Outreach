@@ -1,5 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { callAnalyticsService } from '../services';
+// callAnalyticsService removed - using unifiedAnalyticsService instead
 import { unifiedAnalyticsService } from '../services/unifiedAnalyticsService';
 import logger from '../utils/logger';
 
@@ -8,12 +8,12 @@ import logger from '../utils/logger';
  */
 export const getCallTimeline = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    const { startDate, endDate, interval, campaignId } = req.query as any;
+    const { startDate, endDate, campaignId } = req.query as any;
     
-    const timeline = await callAnalyticsService.getCallTimeline(
+    // Using unifiedAnalyticsService (interval parameter not supported)
+    const timeline = await unifiedAnalyticsService.getCallTimeline(
       startDate ? new Date(startDate) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
       endDate ? new Date(endDate) : new Date(),
-      interval || 'day',
       campaignId
     );
     
@@ -32,20 +32,14 @@ export const getCallTimeline = async (req: FastifyRequest, reply: FastifyReply):
 
 /**
  * Get campaign performance metrics
+ * TODO: Implement this method in unifiedAnalyticsService
  */
 export const getCampaignPerformance = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    const { startDate, endDate, campaignIds } = req.query as any;
-    
-    const performance = await callAnalyticsService.getCampaignPerformanceMetrics(
-      startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-      endDate ? new Date(endDate) : new Date(),
-      campaignIds ? campaignIds.split(',') : undefined
-    );
-    
-    reply.send({
-      success: true,
-      data: performance
+    // Method not available in unifiedAnalyticsService - return placeholder
+    reply.code(501).send({
+      success: false,
+      error: 'Campaign performance metrics endpoint not yet implemented'
     });
   } catch (error) {
     logger.error('Error getting campaign performance:', error);
@@ -58,20 +52,14 @@ export const getCampaignPerformance = async (req: FastifyRequest, reply: Fastify
 
 /**
  * Get call distribution metrics
+ * TODO: Implement this method in unifiedAnalyticsService
  */
 export const getCallDistribution = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    const { startDate, endDate, campaignId } = req.query as any;
-    
-    const distribution = await callAnalyticsService.getCallDistributionMetrics(
-      startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-      endDate ? new Date(endDate) : new Date(),
-      campaignId
-    );
-    
-    reply.send({
-      success: true,
-      data: distribution
+    // Method not available in unifiedAnalyticsService - return placeholder
+    reply.code(501).send({
+      success: false,
+      error: 'Call distribution metrics endpoint not yet implemented'
     });
   } catch (error) {
     logger.error('Error getting call distribution:', error);
@@ -84,20 +72,14 @@ export const getCallDistribution = async (req: FastifyRequest, reply: FastifyRep
 
 /**
  * Get conversation metrics
+ * TODO: Implement this method in unifiedAnalyticsService
  */
 export const getConversationMetrics = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    const { startDate, endDate, campaignId } = req.query as any;
-    
-    const metrics = await callAnalyticsService.getConversationMetrics(
-      startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-      endDate ? new Date(endDate) : new Date(),
-      campaignId
-    );
-    
-    reply.send({
-      success: true,
-      data: metrics
+    // Method not available in unifiedAnalyticsService - return placeholder
+    reply.code(501).send({
+      success: false,
+      error: 'Conversation metrics endpoint not yet implemented'
     });
   } catch (error) {
     logger.error('Error getting conversation metrics:', error);
@@ -110,15 +92,15 @@ export const getConversationMetrics = async (req: FastifyRequest, reply: Fastify
 
 /**
  * Get detailed metrics for a specific call
+ * TODO: Implement this method in unifiedAnalyticsService
  */
 export const getDetailedCallMetrics = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   const { id } = req.params as any;
   try {
-    const metrics = await callAnalyticsService.getDetailedCallMetrics(id);
-    
-    reply.send({
-      success: true,
-      data: metrics
+    // Method not available in unifiedAnalyticsService - return placeholder
+    reply.code(501).send({
+      success: false,
+      error: 'Detailed call metrics endpoint not yet implemented'
     });
   } catch (error) {
     logger.error(`Error getting detailed metrics for call ${id}:`, error);

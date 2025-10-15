@@ -10,7 +10,6 @@ import {
 import { Mic, MicOff, RotateCcw, AlertCircle, CheckCircle } from "lucide-react";
 import { toast } from "@/hooks/useToast";
 import { configApi } from "@/services/configApi";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface RealTimeSTTProps {
   apiKey?: string;
@@ -30,7 +29,6 @@ const RealTimeSTT: React.FC<RealTimeSTTProps> = ({
     "idle" | "connected" | "error" | "verifying" | "verified"
   >("idle");
   const [apiKey, setApiKey] = useState<string | null>(propApiKey || null);
-  const [showVerificationSuccess, setShowVerificationSuccess] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -146,7 +144,6 @@ const RealTimeSTT: React.FC<RealTimeSTTProps> = ({
           if (isVerification) {
             setConnectionStatus("verified");
             if (onVerificationComplete) onVerificationComplete(true);
-            setShowVerificationSuccess(true);
 
             // For verification, we'll close the socket after 2 seconds
             setTimeout(() => {
@@ -296,10 +293,6 @@ const RealTimeSTT: React.FC<RealTimeSTTProps> = ({
 
   const resetTranscript = () => {
     setTranscript("");
-  };
-
-  const verifyConnection = () => {
-    startRecording(true);
   };
 
   return (

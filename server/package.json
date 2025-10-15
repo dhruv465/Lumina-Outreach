@@ -34,7 +34,9 @@
     "migrate:deepgram:compatibility": "ts-node src/migrations/deepgram-model-compatibility-migration.ts migrate",
     "migrate:deepgram:compatibility:rollback": "ts-node src/migrations/deepgram-model-compatibility-migration.ts rollback",
     "migrate:deepgram:compatibility:report": "ts-node src/migrations/deepgram-model-compatibility-migration.ts report",
-    "migrate:deepgram:compatibility:check": "ts-node src/migrations/deepgram-model-compatibility-migration.ts compatibility"
+    "migrate:deepgram:compatibility:check": "ts-node src/migrations/deepgram-model-compatibility-migration.ts compatibility",
+    "analyze:unused": "ts-node scripts/find-unused-files.ts",
+    "cleanup:unused": "bash scripts/delete-unused-files.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.62.0",

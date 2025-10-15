@@ -182,9 +182,6 @@ export { conversationStateMachine };
 // Also export as namespace for backward compatibility if needed
   export * as webhookHandlers from './webhookHandlers';
 
-// Export analytics services
-export { callAnalyticsService } from './callAnalyticsService';
-
 // Export individual services
 export {
   AdvancedCampaignService, AdvancedConversationEngine, ConversationEngineService,
@@ -198,11 +195,6 @@ export {
     getModelCompatibilityService, initializeModelCompatibilityService, ModelCompatibilityService
   } from './modelCompatibilityService';
 
-// Export Deepgram Validation Service
-export {
-  DeepgramValidationService, getDeepgramValidationService, initializeDeepgramValidationService
-} from './deepgramValidationService';
-
 // Deepgram Model Metrics removed
 
 // Export service instances
@@ -212,11 +204,8 @@ export {
 
 // Export optimized latency services
 export { optimizedRealTimeAudioPipeline } from './optimizedRealTimeAudioPipeline';
-export { ultraLowLatencyAudioPipeline } from './ultraLowLatencyAudioPipeline';
 export { enhancedBargeInDetectionService } from './enhancedBargeInDetectionService';
 export { realTimeCallStateMachine } from './realTimeCallStateMachine';
-export { latencyMonitoringService } from './latencyMonitoringService';
-export { connectionPoolService } from './connectionPoolService';
 
 // Export initialization function for post-database services
 export const initializeServicesAfterDB = async () => {

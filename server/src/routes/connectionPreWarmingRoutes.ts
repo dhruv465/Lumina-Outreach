@@ -101,7 +101,7 @@ export default async function connectionPreWarmingRoutes(fastify: FastifyInstanc
         totalConnections: health.totalConnections
       });
     } catch (error) {
-      logger.error(`Error checking model readiness for ${req.params.model}`, {
+      logger.error(`Error checking model readiness for ${(req.params as any).model}`, {
         error: getErrorMessage(error)
       });
 
@@ -209,7 +209,7 @@ export default async function connectionPreWarmingRoutes(fastify: FastifyInstanc
         }))
       });
     } catch (error) {
-      logger.error(`Error getting connections for model ${req.params.model}`, {
+      logger.error(`Error getting connections for model ${(req.params as any).model}`, {
         error: getErrorMessage(error)
       });
 
@@ -250,7 +250,7 @@ export default async function connectionPreWarmingRoutes(fastify: FastifyInstanc
         }))
       });
     } catch (error) {
-      logger.error(`Error getting connections for call ${req.params.callId}`, {
+      logger.error(`Error getting connections for call ${(req.params as any).callId}`, {
         error: getErrorMessage(error)
       });
 
@@ -283,7 +283,7 @@ export default async function connectionPreWarmingRoutes(fastify: FastifyInstanc
         message: `Closed ${closedCount} connections for call ${callId}`
       });
     } catch (error) {
-      logger.error(`Error closing connections for call ${req.params.callId}`, {
+      logger.error(`Error closing connections for call ${(req.params as any).callId}`, {
         error: getErrorMessage(error)
       });
 

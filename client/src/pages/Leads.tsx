@@ -11,7 +11,11 @@ import {
   Trash2, 
   Edit, 
   Phone, 
-  AlertTriangle
+  AlertTriangle,
+  PhoneCall,
+  X,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -37,6 +41,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import LeadForm from '../components/leads/LeadForm';
 import DeleteLeadDialog from '../components/leads/DeleteLeadDialog';
 import CallLeadSheet from '../components/leads/CallLeadSheet';
+import BatchCallSheet from '../components/leads/BatchCallSheet';
 import ErrorBoundary from '../components/common/ErrorBoundary';
 
 // Import lead API service
@@ -80,6 +85,10 @@ const Leads = () => {
   // Call sheet state
   const [isCallSheetOpen, setIsCallSheetOpen] = useState(false);
   const [leadToCall, setLeadToCall] = useState<Lead | null>(null);
+
+  // Batch calling state
+  const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
+  const [isBatchCallSheetOpen, setIsBatchCallSheetOpen] = useState(false);
 
   // Fetch leads data
   const { data: leadsData, isLoading, error, refetch } = useQuery({
@@ -145,6 +154,43 @@ const Leads = () => {
         variant: "destructive",
       });
     }
+  };
+
+  // Handle batch selection
+  const handleSelectLead = (leadId: string) => {
+    setSelectedLeads(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(leadId)) {
+        newSet.delete(leadId);
+      } else {
+        newSet.add(leadId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedLeads.size === leadsData?.leads.length) {
+      setSelectedLeads(new Set());
+    } else {
+      setSelectedLeads(new Set(leadsData?.leads.map((lead: Lead) => lead.id) || []));
+    }
+  };
+
+  const handleBatchCall = () => {
+    if (selectedLeads.size === 0) {
+      toast({
+        title: "No Leads Selected",
+        description: "Please select at least one lead to call.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsBatchCallSheetOpen(true);
+  };
+
+  const handleClearSelection = () => {
+    setSelectedLeads(new Set());
   };
 
   // Handle add lead
@@ -323,6 +369,41 @@ const Leads = () => {
         </div>
       </div>
 
+      {/* Batch Action Toolbar */}
+      {selectedLeads.size > 0 && (
+        <Card className="p-4 bg-primary/5 border-primary/20">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <CheckSquare className="h-5 w-5 text-primary" />
+                <span className="font-medium">
+                  {selectedLeads.size} lead{selectedLeads.size !== 1 ? 's' : ''} selected
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearSelection}
+                className="h-8"
+              >
+                <X className="h-4 w-4 mr-1" />
+                Clear
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={handleBatchCall}
+                size="sm"
+                className="bg-primary hover:bg-primary/90"
+              >
+                <PhoneCall className="h-4 w-4 mr-2" />
+                Start Batch Call ({selectedLeads.size})
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Filters and Search */}
       <div className="flex flex-col gap-4 sm:flex-row">
         <div className="relative flex-grow">
@@ -382,6 +463,20 @@ const Leads = () => {
           <table className="w-full">
             <thead>
               <tr className="border-b">
+                <th className="p-4 text-left font-medium w-12">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleSelectAll}
+                    className="h-8 w-8 p-0"
+                  >
+                    {selectedLeads.size === leadsData?.leads.length && leadsData?.leads.length > 0 ? (
+                      <CheckSquare className="h-4 w-4" />
+                    ) : (
+                      <Square className="h-4 w-4" />
+                    )}
+                  </Button>
+                </th>
                 <th className="p-4 text-left font-medium">Name</th>
                 <th className="p-4 text-left font-medium">Phone</th>
                 <th className="p-4 text-left font-medium">Source</th>
@@ -395,6 +490,20 @@ const Leads = () => {
               {(leadsData?.leads || []).length > 0 ? (
                 (leadsData?.leads || []).map((lead: Lead) => (
                   <tr key={lead.id} className="border-b hover:bg-muted/50">
+                    <td className="p-4">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleSelectLead(lead.id)}
+                        className="h-8 w-8 p-0"
+                      >
+                        {selectedLeads.has(lead.id) ? (
+                          <CheckSquare className="h-4 w-4 text-primary" />
+                        ) : (
+                          <Square className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </td>
                     <td className="p-4">
                       <div>
                         <p className="font-medium">{lead.name}</p>
@@ -486,16 +595,56 @@ const Leads = () => {
 
       {/* Leads Cards - Mobile/Tablet */}
       <div className="lg:hidden space-y-4">
+        {/* Mobile Select All */}
+        {(leadsData?.leads || []).length > 0 && (
+          <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+            <span className="text-sm font-medium">
+              {selectedLeads.size > 0 ? `${selectedLeads.size} selected` : 'Select leads'}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSelectAll}
+              className="h-8"
+            >
+              {selectedLeads.size === leadsData?.leads.length && leadsData?.leads.length > 0 ? (
+                <>
+                  <CheckSquare className="h-4 w-4 mr-2" />
+                  Deselect All
+                </>
+              ) : (
+                <>
+                  <Square className="h-4 w-4 mr-2" />
+                  Select All
+                </>
+              )}
+            </Button>
+          </div>
+        )}
         {(leadsData?.leads || []).length > 0 ? (
           (leadsData?.leads || []).map((lead: Lead) => (
             <Card key={lead.id} className="p-4">
               <div className="flex flex-col space-y-3">
                 <div className="flex items-start justify-between">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-semibold text-base truncate">{lead.name}</h3>
-                    {lead.company && (
-                      <p className="text-sm text-muted-foreground truncate">{lead.company}</p>
-                    )}
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleSelectLead(lead.id)}
+                      className="h-8 w-8 p-0 flex-shrink-0"
+                    >
+                      {selectedLeads.has(lead.id) ? (
+                        <CheckSquare className="h-5 w-5 text-primary" />
+                      ) : (
+                        <Square className="h-5 w-5" />
+                      )}
+                    </Button>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-semibold text-base truncate">{lead.name}</h3>
+                      {lead.company && (
+                        <p className="text-sm text-muted-foreground truncate">{lead.company}</p>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-1 ml-2">
                     <Button
@@ -712,6 +861,20 @@ const Leads = () => {
           />
         </ErrorBoundary>
       )}
+
+      {/* Batch Call Sheet */}
+      <BatchCallSheet
+        isOpen={isBatchCallSheetOpen}
+        onClose={() => {
+          setIsBatchCallSheetOpen(false);
+          handleClearSelection();
+        }}
+        selectedLeadIds={Array.from(selectedLeads)}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['leads'] });
+          queryClient.invalidateQueries({ queryKey: ['calls'] });
+        }}
+      />
     </div>
   );
 };

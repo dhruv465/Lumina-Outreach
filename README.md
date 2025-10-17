@@ -410,7 +410,131 @@ cd client && npm run build
 - Regularly update dependencies
 - Review and rotate API keys periodically
 
-## TODO: Batch Calling Improvements
+## Batch Calling Feature
+
+### ✅ Frontend Implementation (Complete)
+
+The batch calling UI is fully implemented and ready to use. Developers only need to connect the backend API endpoint.
+
+**What's Already Built:**
+
+1. **Lead Selection System**
+   - Checkbox selection on desktop table view
+   - Checkbox selection on mobile/tablet card view
+   - "Select All" / "Deselect All" functionality
+   - Visual feedback with selected count
+
+2. **Batch Action Toolbar**
+   - Appears when leads are selected
+   - Shows count of selected leads
+   - "Start Batch Call" button
+   - "Clear Selection" option
+
+3. **Batch Call Sheet Component**
+   - Campaign selector dropdown (loads from `/api/campaigns`)
+   - Campaign selection with visual confirmation
+   - Summary section showing selected leads and campaign
+   - Information about concurrent call limits and queue behavior
+   - Fully responsive (works on mobile, tablet, desktop)
+
+4. **API Service Layer**
+   - `client/src/services/campaignsApi.ts` - Campaign CRUD operations
+   - Ready to integrate with batch call endpoint
+
+**Files Created:**
+- `client/src/components/leads/BatchCallSheet.tsx` - Main batch calling UI
+- `client/src/services/campaignsApi.ts` - Campaign API service
+
+**Files Modified:**
+- `client/src/pages/Leads.tsx` - Added selection state and batch UI
+
+**What Developers Need to Do:**
+
+### Backend API Endpoint Required
+
+Create the following endpoint to enable batch calling:
+
+```typescript
+POST /api/calls/batch
+Content-Type: application/json
+
+Request Body:
+{
+  "leadIds": ["lead_id_1", "lead_id_2", "lead_id_3"],
+  "campaignId": "campaign_id"
+}
+
+Response:
+{
+  "success": true,
+  "queuedCalls": 3,
+  "message": "Batch call initiated successfully"
+}
+```
+
+**Backend Implementation Requirements:**
+
+1. **Validate Request**
+   - Check if campaign exists
+   - Verify all lead IDs are valid
+   - Ensure user has permission to use the campaign
+
+2. **Queue Management**
+   - Check current concurrent call count
+   - Queue calls if limit is reached (max: 50 concurrent)
+   - Implement priority queue for urgent leads
+
+3. **Call Initiation**
+   - Use campaign's voice configuration and script
+   - Initiate calls respecting concurrent limit
+   - Track call status in database
+
+4. **Error Handling**
+   - Handle invalid campaign/lead IDs
+   - Return appropriate error messages
+   - Implement retry logic for failed calls
+
+**Frontend Integration Point:**
+
+Update `client/src/components/leads/BatchCallSheet.tsx`:
+
+```typescript
+// Line ~60: Replace the TODO with actual API call
+const handleInitiateBatchCall = async () => {
+  // ... validation code ...
+  
+  try {
+    // Replace this placeholder with actual API call
+    const response = await api.post('/calls/batch', {
+      leadIds: selectedLeadIds,
+      campaignId: selectedCampaignId
+    });
+    
+    toast({
+      title: "Batch Call Started",
+      description: `${response.data.queuedCalls} calls have been queued.`,
+    });
+    
+    onSuccess?.();
+    handleClose();
+  } catch (error) {
+    // ... error handling ...
+  }
+};
+```
+
+**Testing the UI (Without Backend):**
+
+The UI is fully functional and can be tested:
+1. Navigate to Leads page
+2. Select multiple leads using checkboxes
+3. Click "Start Batch Call"
+4. Select a campaign from dropdown
+5. Click "Start Batch Call" button (shows placeholder toast)
+
+---
+
+## TODO: Batch Calling Backend & Improvements
 
 ### Current Limitations
 The system has partial batch calling capability but requires improvements for production-scale concurrent calling:
@@ -422,36 +546,42 @@ The system has partial batch calling capability but requires improvements for pr
 - ⚠️ Max concurrent calls: 50 (configured in `.env`)
 - ⚠️ Sequential batch processing (10 leads every 30 seconds)
 
-**Critical Issues to Address:**
+**Backend Implementation Tasks:**
 
-1. **[ ] Concurrent Call Limit Enforcement**
+1. **[ ] Batch Call API Endpoint** (HIGH PRIORITY)
+   - Create `POST /api/calls/batch` endpoint
+   - Accept `leadIds[]` and `campaignId` in request body
+   - Return queue status and confirmation
+   - Connect to frontend BatchCallSheet component
+
+2. **[ ] Concurrent Call Limit Enforcement**
    - System doesn't check if max concurrent limit is reached before making new calls
    - Need to implement pre-call validation against `MAX_CONCURRENT_CALLS`
    - Add queue system for calls exceeding limit
 
-2. **[ ] Parallel Campaign Processing**
+3. **[ ] Parallel Campaign Processing**
    - Current: Sequential processing (10 leads → wait 30s → next 10)
    - Target: True parallel processing up to concurrent limit
    - Implement worker pool pattern for call distribution
 
-3. **[ ] Call Queue System**
+4. **[ ] Call Queue System**
    - Implement proper queue for hundreds/thousands of leads
    - Priority-based queue (urgent leads first)
    - Retry logic for failed calls
    - Queue persistence across server restarts
 
-4. **[ ] Resource Management & Monitoring**
+5. **[ ] Resource Management & Monitoring**
    - Track Deepgram connection limits and usage
    - Monitor ElevenLabs rate limits
    - Memory usage monitoring for 50+ WebSocket connections
    - Implement circuit breaker pattern for external APIs
 
-5. **[ ] Database Connection Pool Optimization**
+6. **[ ] Database Connection Pool Optimization**
    - Current: 10 connections (too low for 50 concurrent calls)
    - Target: Scale pool size to match concurrent call capacity
    - Implement connection pooling best practices
 
-6. **[ ] Modular Voice Agent Pipeline**
+7. **[ ] Modular Voice Agent Pipeline**
    - Current: Using Deepgram Agent API (all-in-one STT+LLM+TTS)
    - Target: Separate pipeline: `User Audio → Deepgram STT → LLM → TTS → Agent Audio`
    - Implement manual barge-in handling
@@ -459,14 +589,23 @@ The system has partial batch calling capability but requires improvements for pr
    - Support for custom LLM providers (Gemini, OpenAI, Anthropic)
 
 **Implementation Priority:**
-1. Concurrent limit enforcement (High - prevents system overload)
-2. Database pool optimization (High - prevents connection errors)
-3. Call queue system (Medium - enables scalability)
-4. Parallel processing (Medium - improves throughput)
-5. Resource monitoring (Medium - operational visibility)
-6. Modular pipeline (Low - architectural improvement)
+1. **Batch Call API Endpoint** (Critical - enables the feature)
+2. Concurrent limit enforcement (High - prevents system overload)
+3. Database pool optimization (High - prevents connection errors)
+4. Call queue system (Medium - enables scalability)
+5. Parallel processing (Medium - improves throughput)
+6. Resource monitoring (Medium - operational visibility)
+7. Modular pipeline (Low - architectural improvement)
 
 **Related Files:**
+
+*Frontend (Complete):*
+- `client/src/components/leads/BatchCallSheet.tsx` - Batch calling UI
+- `client/src/pages/Leads.tsx` - Lead selection interface
+- `client/src/services/campaignsApi.ts` - Campaign API service
+
+*Backend (Needs Implementation):*
+- `server/src/controllers/callController.ts` - Add batch call endpoint
 - `server/src/services/realTelephonyService.ts` - Call management
 - `server/src/services/campaignService.ts` - Campaign processing
 - `server/src/services/twilioStreamHandler.ts` - WebSocket handling
@@ -588,6 +727,25 @@ cd client && npm run dev
 # run server tests
 cd server && npm test
 ```
+
+## Quick Reference: Batch Calling
+
+**For Frontend Developers:**
+- UI is complete and ready to use
+- Test at: Leads page → Select leads → "Start Batch Call"
+- Component: `client/src/components/leads/BatchCallSheet.tsx`
+
+**For Backend Developers:**
+- Need to implement: `POST /api/calls/batch`
+- Integration point: Line ~60 in `BatchCallSheet.tsx`
+- See "Batch Calling Feature" section above for full specs
+
+**For QA/Testing:**
+- Frontend can be tested without backend (shows placeholder toast)
+- Mobile/tablet responsive design included
+- Works with existing campaigns from `/api/campaigns`
+
+---
 
 ## License
 

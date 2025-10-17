@@ -410,6 +410,69 @@ cd client && npm run build
 - Regularly update dependencies
 - Review and rotate API keys periodically
 
+## TODO: Batch Calling Improvements
+
+### Current Limitations
+The system has partial batch calling capability but requires improvements for production-scale concurrent calling:
+
+**Current State:**
+- ✅ Call tracking via `activeCalls` Map
+- ✅ Campaign processing in batches of 10 leads
+- ✅ WebSocket handling per call
+- ⚠️ Max concurrent calls: 50 (configured in `.env`)
+- ⚠️ Sequential batch processing (10 leads every 30 seconds)
+
+**Critical Issues to Address:**
+
+1. **[ ] Concurrent Call Limit Enforcement**
+   - System doesn't check if max concurrent limit is reached before making new calls
+   - Need to implement pre-call validation against `MAX_CONCURRENT_CALLS`
+   - Add queue system for calls exceeding limit
+
+2. **[ ] Parallel Campaign Processing**
+   - Current: Sequential processing (10 leads → wait 30s → next 10)
+   - Target: True parallel processing up to concurrent limit
+   - Implement worker pool pattern for call distribution
+
+3. **[ ] Call Queue System**
+   - Implement proper queue for hundreds/thousands of leads
+   - Priority-based queue (urgent leads first)
+   - Retry logic for failed calls
+   - Queue persistence across server restarts
+
+4. **[ ] Resource Management & Monitoring**
+   - Track Deepgram connection limits and usage
+   - Monitor ElevenLabs rate limits
+   - Memory usage monitoring for 50+ WebSocket connections
+   - Implement circuit breaker pattern for external APIs
+
+5. **[ ] Database Connection Pool Optimization**
+   - Current: 10 connections (too low for 50 concurrent calls)
+   - Target: Scale pool size to match concurrent call capacity
+   - Implement connection pooling best practices
+
+6. **[ ] Modular Voice Agent Pipeline**
+   - Current: Using Deepgram Agent API (all-in-one STT+LLM+TTS)
+   - Target: Separate pipeline: `User Audio → Deepgram STT → LLM → TTS → Agent Audio`
+   - Implement manual barge-in handling
+   - Add conversation state management
+   - Support for custom LLM providers (Gemini, OpenAI, Anthropic)
+
+**Implementation Priority:**
+1. Concurrent limit enforcement (High - prevents system overload)
+2. Database pool optimization (High - prevents connection errors)
+3. Call queue system (Medium - enables scalability)
+4. Parallel processing (Medium - improves throughput)
+5. Resource monitoring (Medium - operational visibility)
+6. Modular pipeline (Low - architectural improvement)
+
+**Related Files:**
+- `server/src/services/realTelephonyService.ts` - Call management
+- `server/src/services/campaignService.ts` - Campaign processing
+- `server/src/services/twilioStreamHandler.ts` - WebSocket handling
+- `server/src/services/deepgramService.ts` - STT/Agent integration
+- `server/.env` - Configuration (MAX_CONCURRENT_CALLS, DB_CONNECTION_POOL_SIZE)
+
 ## Contributing
 
 See `CONTRIBUTING.md` for detailed guidelines. Quick summary:

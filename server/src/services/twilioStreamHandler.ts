@@ -18,6 +18,7 @@ export class TwilioStreamHandler {
   private callId?: string;
   private isDeepgramReady: boolean = false;
   private audioQueue: Buffer[] = [];
+  private isUserSpeaking: boolean = false;
 
   constructor(private readonly connection: any, private readonly request: http.IncomingMessage) {
     logger.info('TwilioStreamHandler initialized using SocketStream.');
@@ -28,11 +29,17 @@ export class TwilioStreamHandler {
 
     if (this.deepgramService) {
       this.deepgramService.on(DeepgramEvent.AGENT_AUDIO_RECEIVED, this.handleAgentAudio.bind(this));
+      this.deepgramService.on(DeepgramEvent.USER_STARTED_SPEAKING, this.handleUserStartedSpeaking.bind(this));
+      this.deepgramService.on(DeepgramEvent.USER_ENDED_SPEAKING, this.handleUserEndedSpeaking.bind(this));
     }
   }
 
   private handleAgentAudio(data: { connectionId: string, callId: string, audio: Buffer }): void {
     if (data.connectionId === this.deepgramConnectionId) {
+        if (this.isUserSpeaking) {
+          // Do not send audio to Twilio if the user is speaking
+          return;
+        }
         // Deepgram Agent outputs at 24kHz, downsample to 8kHz for Twilio
         const muLawBuffer = convertPCMToMuLaw(data.audio, 24000);
         const mediaMessage = {
@@ -43,6 +50,20 @@ export class TwilioStreamHandler {
             },
         };
         this.connection.send(JSON.stringify(mediaMessage));
+    }
+  }
+
+  private handleUserStartedSpeaking(data: { connectionId: string, callId: string }): void {
+    if (data.connectionId === this.deepgramConnectionId) {
+      logger.info('User started speaking, interrupting agent.');
+      this.isUserSpeaking = true;
+    }
+  }
+
+  private handleUserEndedSpeaking(data: { connectionId: string, callId: string }): void {
+    if (data.connectionId === this.deepgramConnectionId) {
+      logger.info('User stopped speaking.');
+      this.isUserSpeaking = false;
     }
   }
 

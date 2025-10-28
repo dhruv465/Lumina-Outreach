@@ -31,9 +31,8 @@ export class TextToSpeechService {
   private circuitBreakerName: string = 'tts-service';
 
   constructor() {
-    // Create output directory for audio files
+    // Output directory for audio files (used as fallback if Cloudinary fails)
     this.outputDir = path.join(__dirname, '../../uploads/audio/tts');
-    fs.mkdirSync(this.outputDir, { recursive: true });
     
     // Default API URL for ElevenLabs (can be overridden by database config)
     this.apiUrl = 'https://api.elevenlabs.io/v1';
@@ -213,6 +212,11 @@ export class TextToSpeechService {
     try {
       // Generate audio buffer
       const audioBuffer = await this.generateSpeech(text, options);
+      
+      // Ensure output directory exists (lazy creation)
+      if (!fs.existsSync(this.outputDir)) {
+        fs.mkdirSync(this.outputDir, { recursive: true });
+      }
       
       // Generate a unique filename for the audio
       const fileName = `${uuidv4()}.mp3`;

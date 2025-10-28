@@ -53,10 +53,7 @@ export class KnowledgeService {
     this.vectorStore = new VectorStore();
     this.uploadPath = path.join(process.cwd(), 'uploads', 'documents');
 
-    // Ensure upload directory exists
-    if (!fs.existsSync(this.uploadPath)) {
-      fs.mkdirSync(this.uploadPath, { recursive: true });
-    }
+    // Upload directory will be created lazily when first document is uploaded
   }
 
   /**

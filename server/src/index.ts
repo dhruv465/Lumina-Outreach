@@ -68,12 +68,10 @@ dotenv.config();
 const bootstrapLogger = phaseLogger("BOOTSTRAP");
 
 // Initialize fastify app
+// Socket.IO will be attached to the same HTTP server
 const app = fastify({
   serverFactory: (handler) => {
-    const server = http.createServer((req, res) => {
-      handler(req, res);
-    });
-
+    const server = http.createServer(handler);
     return server;
   },
 });
@@ -81,30 +79,27 @@ const app = fastify({
 app.decorate("authenticate", authenticate);
 
 const server = app.server;
-// Find this section in your index.ts file:
 
-// Initialize Socket.IO server first (before other WebSocket servers)
-// Configure it to avoid conflicts with Twilio Media Streams
+// Initialize Socket.IO server with proper configuration
+// Socket.IO will intercept /socket.io/ requests before Fastify
 const io = new SocketIOServer(server, {
+  path: '/socket.io/',
   cors: {
     origin: process.env.CLIENT_URL || "http://localhost:3000",
     methods: ["GET", "POST"],
     credentials: true,
   },
-  pingTimeout: parseInt(process.env.WS_PING_TIMEOUT || "120000"), // Use environment variable or default to 120 seconds
-  pingInterval: parseInt(process.env.WS_PING_INTERVAL || "15000"), // Use environment variable or default to 15 seconds
-  connectTimeout: parseInt(process.env.WS_CONNECT_TIMEOUT || "60000"), // Use environment variable or default to 60 seconds
-  maxHttpBufferSize: 1e8, // 100MB max buffer size for larger audio chunks
-  transports: ["websocket", "polling"], // Prefer WebSocket, fallback to polling
-  // Configure Socket.IO to avoid interfering with Twilio Media Streams
-  allowEIO3: true, // Allow Engine.IO v3 clients
-  serveClient: false, // Don't serve the client files
+  pingTimeout: parseInt(process.env.WS_PING_TIMEOUT || "120000"),
+  pingInterval: parseInt(process.env.WS_PING_INTERVAL || "15000"),
+  connectTimeout: parseInt(process.env.WS_CONNECT_TIMEOUT || "60000"),
+  maxHttpBufferSize: 1e8, // 100MB max buffer size
+  transports: ["websocket", "polling"],
+  allowEIO3: true,
+  serveClient: false,
 });
 
 // Initialize Audio Streaming Service
 const audioStreamingService = new AudioStreamingService(io);
-
-// Deepgram WebSocket server removed (deepgramTestRoutes deleted)
 
 // Register fastify-websocket plugin
 app.register(fastifyWebsocket);

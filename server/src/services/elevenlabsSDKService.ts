@@ -657,8 +657,8 @@ export class ElevenLabsSDKService extends EventEmitter {
 
       // Use a more reliable file path with absolute path
       const uploadsDir = path.join(__dirname, '../../uploads');
-
-      // Ensure uploads directory exists
+      
+      // Ensure uploads directory exists (lazy creation only when needed)
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }

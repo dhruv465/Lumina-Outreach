@@ -149,11 +149,6 @@ const BatchCallSheet = ({
                 <SelectContent>
                   {(campaignsData?.campaigns?.length ?? 0) > 0 ? (
                     campaignsData?.campaigns?.map((campaign: any) => {
-                      // Debug each campaign
-                      console.log("Rendering campaign:", campaign);
-                      console.log("Campaign ID:", campaign.id || campaign._id);
-                      console.log("Campaign name:", campaign.name);
-
                       // Use _id if id doesn't exist (MongoDB default)
                       const campaignId =
                         campaign.id || campaign._id || campaign.campaignId;

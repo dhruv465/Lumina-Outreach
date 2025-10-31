@@ -47,6 +47,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/useToast";
 import api from "@/services/api";
 import { configApi } from "@/services/configApi";
+import { sttApi } from "@/services/sttApi";
 import {
   AlertTriangle,
   CheckCircle,
@@ -158,7 +159,7 @@ const Configuration = () => {
     deepgramApiKey: "",
     deepgramStatus: "unverified",
     deepgramEnabled: true,
-    deepgramModel: "nova-2",
+    deepgramModel: "",
 
     // Phone Settings
     twilioAccountSid: "",
@@ -216,6 +217,9 @@ Keep the conversation natural and engaging. If they're not interested, politely 
     [provider: string]: ModelInfo[];
   }>({});
   const [loadingModels, setLoadingModels] = useState(false);
+  const [availableSTTModels, setAvailableSTTModels] = useState<string[]>([]);
+  const [loadingSTTModels, setLoadingSTTModels] = useState(false);
+  const [sttTier, setSTTTier] = useState<'free' | 'basic' | 'premium'>('free');
   const [apiKeyDebounceTimer, setApiKeyDebounceTimer] =
     useState<NodeJS.Timeout | null>(null);
   const [elevenLabsDebounceTimer, setElevenLabsDebounceTimer] =
@@ -378,21 +382,30 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           apiKey
         );
 
-        if (response.success && response.models) {
+        console.log(`Models fetched for ${provider}:`, response);
+
+        if (response.success && response.models && response.models.length > 0) {
           // Store models under the original provider name requested
-          setAvailableModels((prev) => ({
-            ...prev,
-            [provider]: response.models,
-          }));
+          setAvailableModels((prev) => {
+            const updated = {
+              ...prev,
+              [provider]: response.models,
+            };
+            console.log(`Updated availableModels:`, updated);
+            return updated;
+          });
 
           // If no model is currently selected and models are available, select the first one
           // Use a separate function to avoid circular dependencies
           setConfig((prevConfig) => {
             if (!prevConfig.llmModel && response.models.length > 0) {
+              console.log(`Auto-selecting first model: ${response.models[0].id}`);
               return { ...prevConfig, llmModel: response.models[0].id };
             }
             return prevConfig;
           });
+        } else {
+          console.warn(`No models returned for ${provider}:`, response);
         }
       } catch (error) {
         console.error(`Failed to fetch models for ${provider}:`, error);
@@ -417,6 +430,54 @@ Keep the conversation natural and engaging. If they're not interested, politely 
     },
     [toast, setConfig, setAvailableModels, setLoadingModels]
   );
+
+  // Fetch available STT models from Deepgram based on configured API key
+  const fetchSTTModels = useCallback(async () => {
+    if (!config.deepgramApiKey || config.deepgramApiKey.length < 10) {
+      setAvailableSTTModels([]);
+      return;
+    }
+
+    try {
+      setLoadingSTTModels(true);
+      const response = await sttApi.getAvailableModels();
+      
+      if (response.success && response.models && response.models.length > 0) {
+        setAvailableSTTModels(response.models);
+        setSTTTier(response.tier);
+        
+        // If current model is not in available models, select the first one
+        // Use a ref to the current model to avoid dependency loop
+        setConfig((prev) => {
+          if (!response.models.includes(prev.deepgramModel || '')) {
+            return {
+              ...prev,
+              deepgramModel: response.models[0]
+            };
+          }
+          return prev;
+        });
+      } else {
+        console.warn('Failed to fetch STT models:', response.message);
+        setAvailableSTTModels([]);
+        toast({
+          title: "No Models Available",
+          description: response.message || "Unable to fetch available models for this API key. Please check your API key permissions.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching STT models:', error);
+      setAvailableSTTModels([]);
+      toast({
+        title: "Error Fetching Models",
+        description: "Failed to fetch available models. Please check your API key and try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingSTTModels(false);
+    }
+  }, [config.deepgramApiKey, toast]);
 
   // Clean up debounce timer on unmount
   useEffect(() => {
@@ -487,6 +548,21 @@ Keep the conversation natural and engaging. If they're not interested, politely 
     loadVoices();
   }, [config.ttsProvider, loadVoices]);
 
+  // Fetch STT models when Deepgram API key changes
+  useEffect(() => {
+    if (config.deepgramApiKey && config.deepgramApiKey.length >= 10) {
+      const timer = setTimeout(() => {
+        fetchSTTModels();
+      }, 1000); // Debounce for 1 second
+      
+      return () => clearTimeout(timer);
+    } else {
+      // Clear models if API key is removed or too short
+      setAvailableSTTModels([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.deepgramApiKey]);
+
   // Fetch available models (general list) when component mounts or when the LLM provider changes.
   // This should not run on every keystroke of the llmApiKey.
   useEffect(() => {
@@ -530,6 +606,11 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           },
         });
 
+        const llmProvider = data.llmConfig?.defaultProvider || "openai";
+        const llmApiKey = data.llmConfig?.providers.find(
+          (p: any) => p.name === llmProvider
+        )?.apiKey || "";
+
         setConfig({
           // Set defaults for any missing properties
           voiceProvider: data.elevenLabsConfig?.isEnabled
@@ -567,22 +648,19 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           deepgramApiKey: data.deepgramConfig?.apiKey || "",
           deepgramStatus: data.deepgramConfig?.status || "unverified",
           deepgramEnabled: data.deepgramConfig?.isEnabled !== false, // Default to true if not specified
-          deepgramModel: data.deepgramConfig?.model || "nova-2",
+          deepgramModel: data.deepgramConfig?.model || "",
 
           twilioAccountSid: data.twilioConfig?.accountSid || "",
           twilioAuthToken: data.twilioConfig?.authToken || "",
           twilioPhoneNumber: data.twilioConfig?.phoneNumbers?.[0] || "",
           twilioStatus: data.twilioConfig?.status || "unverified",
 
-          llmProvider: data.llmConfig?.defaultProvider || "openai",
+          llmProvider: llmProvider,
           llmModel: data.llmConfig?.defaultModel || "gpt-4",
-          llmApiKey:
-            data.llmConfig?.providers.find(
-              (p: any) => p.name === data.llmConfig?.defaultProvider
-            )?.apiKey || "",
+          llmApiKey: llmApiKey,
           llmStatus:
             data.llmConfig?.providers.find(
-              (p: any) => p.name === data.llmConfig?.defaultProvider
+              (p: any) => p.name === llmProvider
             )?.status || "unverified",
           systemPrompt:
             data.generalSettings?.defaultSystemPrompt ||
@@ -601,6 +679,22 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           webhookSecret: data.webhookConfig?.secret || "",
           webhookStatus: data.webhookConfig?.status || "unverified",
         });
+
+        // Fetch LLM models if API key exists
+        if (llmApiKey && llmApiKey.length >= 10) {
+          console.log(`Fetching models on page load for provider: ${llmProvider}`);
+          setTimeout(() => {
+            fetchModelsWithApiKey(llmProvider, llmApiKey);
+          }, 500);
+        }
+
+        // Fetch STT models if Deepgram API key exists
+        if (data.deepgramConfig?.apiKey && data.deepgramConfig.apiKey.length >= 10) {
+          console.log('Fetching STT models on page load');
+          setTimeout(() => {
+            fetchSTTModels();
+          }, 500);
+        }
       } catch (error) {
         console.error("Error fetching configuration:", error);
         toast({
@@ -688,7 +782,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
         deepgramConfig: {
           apiKey: config.deepgramApiKey,
           isEnabled: config.deepgramEnabled,
-          model: config.deepgramModel || "nova-2",
+          model: config.deepgramModel || "",
           tier: "enhanced",
           status: config.deepgramStatus,
         },
@@ -1270,20 +1364,31 @@ Keep the conversation natural and engaging. If they're not interested, politely 
   const handleProviderChange = useCallback(
     (newProvider: "openai" | "anthropic" | "google") => {
       // Update the provider and reset related state
-      setConfig((prevConfig) => ({
-        ...prevConfig,
-        llmProvider: newProvider,
-        llmModel: "", // Reset model when provider changes
-        llmStatus: "unverified", // Reset status
-      }));
+      setConfig((prevConfig) => {
+        const newConfig = {
+          ...prevConfig,
+          llmProvider: newProvider,
+          llmModel: "", // Reset model when provider changes
+          llmStatus: "unverified", // Reset status
+        };
+        
+        // Fetch models for the new provider if API key exists
+        if (prevConfig.llmApiKey && prevConfig.llmApiKey.length >= 10) {
+          setTimeout(() => {
+            fetchModelsWithApiKey(newProvider, prevConfig.llmApiKey);
+          }, 100);
+        }
+        
+        return newConfig;
+      });
 
-      // Clear current models for the new provider
+      // Clear current models for the new provider temporarily
       setAvailableModels((prev) => ({
         ...prev,
         [newProvider]: [],
       }));
     },
-    [setConfig, setAvailableModels]
+    [setConfig, setAvailableModels, fetchModelsWithApiKey]
   );
 
   // Handler for API key changes with debouncing
@@ -2391,19 +2496,38 @@ Keep the conversation natural and engaging. If they're not interested, politely 
               <Select
                 value={config.deepgramModel}
                 onValueChange={(value) => updateConfig("deepgramModel", value)}
+                disabled={loadingSTTModels || !config.deepgramApiKey}
               >
                 <SelectTrigger
                   id="deepgramModel"
                   className="w-full h-10 rounded-xl"
                 >
-                  <SelectValue placeholder="Select a model" />
+                  <SelectValue placeholder={loadingSTTModels ? "Loading models..." : "Select a model"} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="nova-2">Nova-2 (Recommended)</SelectItem>
-                  <SelectItem value="nova">Nova</SelectItem>
-                  <SelectItem value="enhanced">Enhanced</SelectItem>
+                  {loadingSTTModels ? (
+                    <SelectItem value="loading" disabled>
+                      Loading models...
+                    </SelectItem>
+                  ) : availableSTTModels.length > 0 ? (
+                    availableSTTModels.map((model) => (
+                      <SelectItem key={model} value={model}>
+                        {model}
+                        {model.includes('nova-2') && ' (Recommended)'}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="none" disabled>
+                      {config.deepgramApiKey ? 'No models available' : 'Enter API key to load models'}
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
+              {sttTier && availableSTTModels.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Account tier: <span className="font-medium capitalize">{sttTier}</span> • {availableSTTModels.length} model{availableSTTModels.length !== 1 ? 's' : ''} available
+                </p>
+              )}
             </div>
           </div>
 

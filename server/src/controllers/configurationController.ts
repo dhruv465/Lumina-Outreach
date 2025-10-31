@@ -216,8 +216,8 @@ export const getSystemConfiguration = async (_req: FastifyRequest, res: FastifyR
         deepgramConfig: {
           apiKey: process.env.DEEPGRAM_API_KEY || '',
           isEnabled: !!process.env.DEEPGRAM_API_KEY,
-          primaryModel: 'nova-2',
-          fallbackModels: ['nova', 'base'],
+          primaryModel: '',
+          fallbackModels: [],
           autoFallback: true,
           tier: 'enhanced',
           retryAttempts: 3,
@@ -232,8 +232,8 @@ export const getSystemConfiguration = async (_req: FastifyRequest, res: FastifyR
       configuration.deepgramConfig = {
         apiKey: process.env.DEEPGRAM_API_KEY || '',
         isEnabled: !!process.env.DEEPGRAM_API_KEY,
-        primaryModel: 'nova-2',
-        fallbackModels: ['nova', 'base'],
+        primaryModel: '',
+        fallbackModels: [],
         autoFallback: true,
         tier: 'enhanced',
         retryAttempts: 3,
@@ -837,8 +837,8 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
         config.deepgramConfig = {
           apiKey: '',
           isEnabled: false,
-          primaryModel: 'nova-2',
-          fallbackModels: ['nova', 'base'],
+          primaryModel: '',
+          fallbackModels: [],
           autoFallback: true,
           tier: 'enhanced',
           retryAttempts: 3,
@@ -913,8 +913,8 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
         ...existingConfig.deepgramConfig,
         apiKey: updateApiKeyIfChanged(updatedConfig.deepgramConfig.apiKey, existingConfig.deepgramConfig?.apiKey || ''),
         isEnabled: handleFieldUpdate(updatedConfig.deepgramConfig.isEnabled, existingConfig.deepgramConfig?.isEnabled || false),
-        primaryModel: handleFieldUpdate(updatedConfig.deepgramConfig.primaryModel, existingConfig.deepgramConfig?.primaryModel || 'nova-2'),
-        fallbackModels: handleFieldUpdate(updatedConfig.deepgramConfig.fallbackModels, existingConfig.deepgramConfig?.fallbackModels || ['nova', 'base']),
+        primaryModel: handleFieldUpdate(updatedConfig.deepgramConfig.primaryModel, existingConfig.deepgramConfig?.primaryModel || ''),
+        fallbackModels: handleFieldUpdate(updatedConfig.deepgramConfig.fallbackModels, existingConfig.deepgramConfig?.fallbackModels || []),
         autoFallback: handleFieldUpdate(updatedConfig.deepgramConfig.autoFallback, existingConfig.deepgramConfig?.autoFallback ?? true),
         tier: handleFieldUpdate(updatedConfig.deepgramConfig.tier, existingConfig.deepgramConfig?.tier || 'enhanced'),
         availableModels: handleFieldUpdate(updatedConfig.deepgramConfig.availableModels, existingConfig.deepgramConfig?.availableModels || []),
@@ -2761,6 +2761,307 @@ export const batchTestDeepgramModels = async (req: FastifyRequest, res: FastifyR
       success: false,
       message: 'Internal server error during batch model testing',
       error: errorMessage
+    });
+  }
+};
+
+/**
+
+ * @desc    Fetch LLM models dynamically with API key
+ * @route   POST /api/configuration/llm-models/dynamic
+ * @access  Private
+ */
+export const getDynamicProviderModels = async (req: FastifyRequest, res: FastifyReply) => {
+  try {
+    const { provider, apiKey } = req.body as { provider: string; apiKey: string };
+
+    if (!provider || !apiKey) {
+      return res.status(400).send({
+        success: false,
+        message: 'Provider and API key are required'
+      });
+    }
+
+    logger.info(`Fetching models for provider: ${provider}`);
+
+    let models: any[] = [];
+
+    switch (provider.toLowerCase()) {
+      case 'openai':
+        try {
+          const openaiResponse = await axios.get('https://api.openai.com/v1/models', {
+            headers: {
+              'Authorization': `Bearer ${apiKey}`
+            }
+          });
+          
+          // Filter for chat models only
+          models = openaiResponse.data.data
+            .filter((model: any) => 
+              model.id.includes('gpt') && 
+              !model.id.includes('instruct') &&
+              !model.id.includes('vision')
+            )
+            .map((model: any) => ({
+              id: model.id,
+              name: model.id,
+              description: `OpenAI ${model.id}`
+            }))
+            .sort((a: any, b: any) => b.id.localeCompare(a.id));
+        } catch (error: any) {
+          logger.error(`OpenAI API error: ${getErrorMessage(error)}`);
+          throw new Error(error.response?.data?.error?.message || 'Failed to fetch OpenAI models');
+        }
+        break;
+
+      case 'anthropic':
+        // Anthropic doesn't have a models list endpoint, return known models
+        models = [
+          { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', description: 'Most intelligent model' },
+          { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', description: 'Fastest model' },
+          { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', description: 'Powerful model for complex tasks' },
+          { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet', description: 'Balanced performance' },
+          { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', description: 'Fast and compact' }
+        ];
+        
+        // Verify API key by making a test request
+        try {
+          await axios.post('https://api.anthropic.com/v1/messages', {
+            model: 'claude-3-haiku-20240307',
+            max_tokens: 1,
+            messages: [{ role: 'user', content: 'test' }]
+          }, {
+            headers: {
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json'
+            }
+          });
+        } catch (error: any) {
+          if (error.response?.status === 401) {
+            throw new Error('Invalid Anthropic API key');
+          }
+          // Other errors are okay, we just wanted to verify the key
+        }
+        break;
+
+      case 'google':
+        // Fetch actual available models from Google API
+        try {
+          const listModelsResponse = await axios.get(
+            `https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`
+          );
+          
+          // Filter for models that support generateContent
+          const availableModels = listModelsResponse.data.models
+            .filter((model: any) => 
+              model.supportedGenerationMethods?.includes('generateContent')
+            )
+            .map((model: any) => {
+              // Extract model name from full path (e.g., "models/gemini-1.5-flash" -> "gemini-1.5-flash")
+              const modelId = model.name.replace('models/', '');
+              
+              // Create friendly names
+              let friendlyName = modelId;
+              let description = model.description || '';
+              
+              if (modelId.includes('gemini-2.5')) {
+                friendlyName = modelId.includes('pro') ? 'Gemini 2.5 Pro' : 'Gemini 2.5 Flash';
+                description = modelId.includes('pro') ? 'Latest, most capable model' : 'Latest, fast and efficient';
+              } else if (modelId.includes('gemini-2.0')) {
+                friendlyName = 'Gemini 2.0 Flash';
+                description = 'Stable 2.0 version';
+              } else if (modelId.includes('gemini-1.5')) {
+                friendlyName = modelId.includes('pro') ? 'Gemini 1.5 Pro' : 'Gemini 1.5 Flash';
+                description = modelId.includes('pro') ? 'Most capable 1.5 model' : 'Fast and efficient 1.5 model';
+              } else if (modelId.includes('gemini-1.0')) {
+                friendlyName = 'Gemini 1.0 Pro';
+                description = 'Stable production model';
+              }
+              
+              return {
+                id: modelId,
+                name: friendlyName,
+                description: description
+              };
+            })
+            // Sort by version (newest first)
+            .sort((a: any, b: any) => b.id.localeCompare(a.id));
+          
+          models = availableModels;
+          
+          if (models.length === 0) {
+            throw new Error('No models available for this API key');
+          }
+          
+          logger.info(`Found ${models.length} available Google models`);
+        } catch (error: any) {
+          if (error.response?.status === 400 && error.response?.data?.error?.message?.includes('API key')) {
+            throw new Error('Invalid Google API key');
+          }
+          logger.error(`Error fetching Google models: ${getErrorMessage(error)}`);
+          throw new Error('Failed to fetch available models from Google API');
+        }
+        break;
+
+      default:
+        return res.status(400).send({
+          success: false,
+          message: `Unsupported provider: ${provider}`
+        });
+    }
+
+    logger.info(`Successfully fetched ${models.length} models for ${provider}`);
+
+    return res.status(200).send({
+      success: true,
+      provider,
+      models
+    });
+
+  } catch (error) {
+    const errorMessage = handleError(error);
+    logger.error(`Error fetching dynamic models: ${errorMessage}`);
+    
+    return res.status(500).send({
+      success: false,
+      message: errorMessage
+    });
+  }
+};
+
+
+/**
+ * @desc    Test LLM chat functionality
+ * @route   POST /api/configuration/test-llm-chat
+ * @access  Private
+ */
+export const testLLMChat = async (req: FastifyRequest, res: FastifyReply) => {
+  try {
+    const { provider, apiKey, model, prompt, temperature } = req.body as any;
+
+    if (!provider || !prompt) {
+      return res.status(400).send({
+        success: false,
+        message: 'Provider and prompt are required'
+      });
+    }
+
+    logger.info(`Testing LLM chat for provider: ${provider}`);
+
+    let response: any;
+    let content = '';
+
+    switch (provider.toLowerCase()) {
+      case 'openai':
+        try {
+          const openaiResponse = await axios.post(
+            'https://api.openai.com/v1/chat/completions',
+            {
+              model: model || 'gpt-4o-mini',
+              messages: [{ role: 'user', content: prompt }],
+              temperature: temperature || 0.7,
+              max_tokens: 150
+            },
+            {
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          content = openaiResponse.data.choices[0].message.content;
+        } catch (error: any) {
+          logger.error(`OpenAI chat error: ${getErrorMessage(error)}`);
+          throw new Error(error.response?.data?.error?.message || 'OpenAI chat test failed');
+        }
+        break;
+
+      case 'anthropic':
+        try {
+          const anthropicResponse = await axios.post(
+            'https://api.anthropic.com/v1/messages',
+            {
+              model: model || 'claude-3-haiku-20240307',
+              max_tokens: 150,
+              messages: [{ role: 'user', content: prompt }],
+              temperature: temperature || 0.7
+            },
+            {
+              headers: {
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json'
+              }
+            }
+          );
+          content = anthropicResponse.data.content[0].text;
+        } catch (error: any) {
+          logger.error(`Anthropic chat error: ${getErrorMessage(error)}`);
+          throw new Error(error.response?.data?.error?.message || 'Anthropic chat test failed');
+        }
+        break;
+
+      case 'google':
+        try {
+          // Use provided model or fetch the first available model
+          let modelToUse = model;
+          
+          if (!modelToUse) {
+            // Fetch available models to get a default
+            const listModelsResponse = await axios.get(
+              `https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`
+            );
+            const availableModels = listModelsResponse.data.models
+              .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+              .map((m: any) => m.name.replace('models/', ''));
+            
+            modelToUse = availableModels[0] || 'gemini-1.5-flash';
+          }
+          
+          const googleResponse = await axios.post(
+            `https://generativelanguage.googleapis.com/v1/models/${modelToUse}:generateContent?key=${apiKey}`,
+            {
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                temperature: temperature || 0.7,
+                maxOutputTokens: 150
+              }
+            }
+          );
+          content = googleResponse.data.candidates[0].content.parts[0].text;
+        } catch (error: any) {
+          logger.error(`Google chat error: ${getErrorMessage(error)}`);
+          throw new Error(error.response?.data?.error?.message || 'Google chat test failed');
+        }
+        break;
+
+      default:
+        return res.status(400).send({
+          success: false,
+          message: `Unsupported provider: ${provider}`
+        });
+    }
+
+    logger.info(`LLM chat test successful for ${provider}`);
+
+    return res.status(200).send({
+      success: true,
+      provider,
+      model: model || 'default',
+      response: {
+        content,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    const errorMessage = handleError(error);
+    logger.error(`LLM chat test error: ${errorMessage}`);
+    
+    return res.status(500).send({
+      success: false,
+      message: errorMessage
     });
   }
 };

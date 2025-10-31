@@ -625,7 +625,7 @@ const Campaigns = () => {
                       {/* Overview Section */}
                       <div className="bg-card p-4 rounded-lg border">
                         <h3 className="text-base font-medium flex items-center gap-2 mb-3 text-card-foreground">
-                          <Zap size={16} className="text-primary" />
+                          <Zap size={16} className="text-muted-foreground" />
                           Overview
                         </h3>
                         <div className="grid sm:grid-cols-2 gap-4">
@@ -681,25 +681,25 @@ const Campaigns = () => {
                       {selectedCampaign.metrics && (
                         <div className="bg-card p-4 rounded-lg border">
                           <h3 className="text-base font-medium flex items-center gap-2 mb-3 text-card-foreground">
-                            <BarChart3 size={16} className="text-primary" />
+                            <BarChart3 size={16} className="text-muted-foreground" />
                             Performance Metrics
                           </h3>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                            <div className="p-3 bg-background rounded-md flex flex-col items-center justify-center">
-                              <span className="text-xs text-muted-foreground mb-1">Total Calls</span>
-                              <span className="text-2xl font-bold text-primary">{selectedCampaign.metrics.totalCalls}</span>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div className="p-3 bg-muted/50 rounded-md border">
+                              <span className="text-xs text-muted-foreground block mb-1">Total Calls</span>
+                              <span className="text-xl font-semibold text-foreground">{selectedCampaign.metrics.totalCalls}</span>
                             </div>
-                            <div className="p-3 bg-background rounded-md flex flex-col items-center justify-center">
-                              <span className="text-xs text-muted-foreground mb-1">Successful</span>
-                              <span className="text-2xl font-bold text-green-600">{selectedCampaign.metrics.successfulCalls}</span>
+                            <div className="p-3 bg-muted/50 rounded-md border">
+                              <span className="text-xs text-muted-foreground block mb-1">Successful</span>
+                              <span className="text-xl font-semibold text-foreground">{selectedCampaign.metrics.successfulCalls}</span>
                             </div>
-                            <div className="p-3 bg-background rounded-md flex flex-col items-center justify-center">
-                              <span className="text-xs text-muted-foreground mb-1">Avg Duration</span>
-                              <span className="text-2xl font-bold text-blue-600">{selectedCampaign.metrics.avgCallDuration}m</span>
+                            <div className="p-3 bg-muted/50 rounded-md border">
+                              <span className="text-xs text-muted-foreground block mb-1">Avg Duration</span>
+                              <span className="text-xl font-semibold text-foreground">{selectedCampaign.metrics.avgCallDuration}m</span>
                             </div>
-                            <div className="p-3 bg-background rounded-md flex flex-col items-center justify-center">
-                              <span className="text-xs text-muted-foreground mb-1">Conversion</span>
-                              <span className="text-2xl font-bold text-purple-600">{selectedCampaign.metrics.conversionRate}%</span>
+                            <div className="p-3 bg-muted/50 rounded-md border">
+                              <span className="text-xs text-muted-foreground block mb-1">Conversion</span>
+                              <span className="text-xl font-semibold text-foreground">{selectedCampaign.metrics.conversionRate}%</span>
                             </div>
                           </div>
                         </div>
@@ -708,22 +708,24 @@ const Campaigns = () => {
                       {/* Script Section */}
                       <div className="bg-card p-4 rounded-lg border">
                         <h3 className="text-base font-medium flex items-center gap-2 mb-3 text-card-foreground">
-                          <MessageSquare size={16} className="text-primary" />
-                          Script: {selectedCampaign.script.name}
+                          <MessageSquare size={16} className="text-muted-foreground" />
+                          Script: {selectedCampaign.script?.name || 'Unnamed Script'}
                         </h3>
-                        <div className="mt-3 p-4 bg-muted rounded-lg text-sm whitespace-pre-wrap max-h-48 overflow-y-auto">
-                          {selectedCampaign.script.content}
-                        </div>
+                        {selectedCampaign.script && (
+                          <div className="mt-3 p-4 bg-muted/50 rounded-lg border text-sm whitespace-pre-wrap max-h-48 overflow-y-auto text-foreground">
+                            {selectedCampaign.script.content || selectedCampaign.script.versions?.[0]?.content || 'No script content available'}
+                          </div>
+                        )}
                         
-                        {selectedCampaign.script.versions.length > 0 && (
+                        {selectedCampaign.script.versions && selectedCampaign.script.versions.length > 0 && (
                           <div className="mt-4 pt-3 border-t border-border">
                             <p className="text-xs text-muted-foreground mb-2">Script Versions</p>
                             <div className="space-y-2">
                               {selectedCampaign.script.versions.map((version: any, idx: number) => (
-                                <div key={idx} className="flex items-center justify-between p-2 bg-background rounded-md">
+                                <div key={idx} className="flex items-center justify-between p-2 bg-muted/50 rounded-md border">
                                   <span className="text-sm">{version.name}</span>
                                   {version.isActive && (
-                                    <Badge variant="default" className="text-xs">Active</Badge>
+                                    <Badge variant="secondary" className="text-xs">Active</Badge>
                                   )}
                                 </div>
                               ))}
@@ -736,7 +738,7 @@ const Campaigns = () => {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="bg-card p-4 rounded-lg border">
                           <h3 className="text-base font-medium flex items-center gap-2 mb-3 text-card-foreground">
-                            <Zap size={16} className="text-primary" />
+                            <Zap size={16} className="text-muted-foreground" />
                             LLM Config
                           </h3>
                           <div className="space-y-2">
@@ -757,7 +759,7 @@ const Campaigns = () => {
                         
                         <div className="bg-card p-4 rounded-lg border">
                           <h3 className="text-base font-medium flex items-center gap-2 mb-3 text-card-foreground">
-                            <Zap size={16} className="text-primary" />
+                            <Zap size={16} className="text-muted-foreground" />
                             Voice Config
                           </h3>
                           <div className="space-y-2">

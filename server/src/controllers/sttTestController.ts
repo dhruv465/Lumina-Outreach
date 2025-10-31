@@ -4,6 +4,7 @@
  */
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { getDeepgramService } from '../services/deepgramService';
+import { getModelCompatibilityService } from '../services/modelCompatibilityService';
 import Configuration from '../models/Configuration';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
@@ -479,6 +480,84 @@ export async function transcribeStreamChunk(req: FastifyRequest, res: FastifyRep
       message: 'STT chunk transcription failed',
       error: errorMessage,
       latencyMs
+    });
+  }
+}
+/*
+*
+ * GET /api/stt/models
+ * Fetch available Deepgram STT models based on the provided API key
+ */
+export async function getAvailableModels(req: FastifyRequest, res: FastifyReply): Promise<void> {
+  try {
+    logger.info('Fetching available Deepgram STT models');
+
+    // Check ASR configuration
+    const asrCheck = await checkASRConfiguration();
+    if (!asrCheck.configured) {
+      res.status(400).send({
+        success: false,
+        message: asrCheck.message,
+        models: []
+      });
+      return;
+    }
+
+    // Get the API key from configuration
+    const config = await Configuration.findOne();
+    const configAny = config as any;
+    const apiKey = (configAny?.asrConfig?.apiKey || config?.deepgramConfig?.apiKey);
+
+    if (!apiKey) {
+      res.status(400).send({
+        success: false,
+        message: 'Deepgram API key not found in configuration',
+        models: []
+      });
+      return;
+    }
+
+    // Get the model compatibility service
+    const modelCompatibilityService = getModelCompatibilityService();
+    
+    if (!modelCompatibilityService) {
+      res.status(500).send({
+        success: false,
+        message: 'Model compatibility service not initialized',
+        models: []
+      });
+      return;
+    }
+
+    // Fetch account capabilities which includes available models
+    const capabilities = await modelCompatibilityService.getAccountCapabilities(apiKey);
+
+    logger.info('Successfully fetched available models', {
+      tier: capabilities.tier,
+      modelCount: capabilities.availableModels.length,
+      models: capabilities.availableModels
+    });
+
+    res.send({
+      success: true,
+      tier: capabilities.tier,
+      models: capabilities.availableModels,
+      features: capabilities.features,
+      limits: capabilities.limits
+    });
+
+  } catch (error) {
+    const errorMessage = getErrorMessage(error);
+    
+    logger.error('Failed to fetch available models', { 
+      error: errorMessage
+    });
+
+    res.status(500).send({
+      success: false,
+      message: 'Failed to fetch available models',
+      error: errorMessage,
+      models: []
     });
   }
 }

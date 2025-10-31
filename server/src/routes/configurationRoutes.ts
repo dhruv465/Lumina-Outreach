@@ -18,7 +18,9 @@ import {
   testDeepgramModelCompatibility,
   getSuggestedDeepgramModels,
   validateCompleteDeepgramConfiguration,
-  batchTestDeepgramModels
+  batchTestDeepgramModels,
+  getDynamicProviderModels,
+  testLLMChat
 } from '../controllers/configurationController';
 import { testDeepgramASRConnection } from '../controllers/testDeepgramASRConnection';
 // llmControllers removed (file deleted)
@@ -40,10 +42,11 @@ const configurationRoutes = async (fastify, opts: Record<string, any>) => {
   fastify.get('/llm-options', getLLMOptions);
   fastify.get('/voice-options', getVoiceOptions);
 
-  // LLM model listing routes (controllers removed)
-  // fastify.get('/llm-models', getAllLLMModels);
-  // fastify.get('/llm-models/:provider', getProviderLLMModels);
-  // fastify.post('/llm-models/dynamic', getDynamicProviderModels);
+  // LLM model listing routes
+  fastify.post('/llm-models/dynamic', getDynamicProviderModels);
+
+  // LLM testing routes
+  fastify.post('/test-llm-chat', testLLMChat);
 
   // API key management
   fastify.delete('/api-key/:provider/:name?', deleteApiKey);

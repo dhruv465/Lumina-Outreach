@@ -1,29 +1,24 @@
 import {
   createClient,
   DeepgramClient,
-  LiveTranscriptionEvents,
 } from "@deepgram/sdk";
-import { getErrorMessage } from "../utils/logger";
-import logger from "../utils/logger";
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
 import WebSocket from "ws";
-import util from "util";
 import Configuration from "../models/Configuration";
-import {
-  getCircuitBreakerService,
-  CircuitBreakerOptions,
-} from "./circuitBreakerService";
-import {
-  ModelCompatibilityService,
-  getModelCompatibilityService,
-  initializeModelCompatibilityService,
-  ModelValidationResult,
-  ModelPreferences,
-  DeepgramErrorType,
-} from "./modelCompatibilityService";
-import { validateAndFetch } from "./deepgramUtils";
 import { deepgramModelMetrics } from "../monitoring/deepgramModelMetrics";
+import logger, { getErrorMessage } from "../utils/logger";
+import {
+  CircuitBreakerOptions,
+  getCircuitBreakerService,
+} from "./circuitBreakerService";
+import { validateAndFetch } from "./deepgramUtils";
+import {
+  DeepgramErrorType,
+  initializeModelCompatibilityService,
+  ModelCompatibilityService,
+  ModelPreferences,
+} from "./modelCompatibilityService";
 
 // Define DeepgramStreamOptions interface directly to avoid circular dependencies
 export interface DeepgramStreamOptions {
@@ -97,12 +92,12 @@ export class DeepgramService extends EventEmitter {
   private client: DeepgramClient;
   private activeConnections: Map<string, any> = new Map();
   private warnedConnections: Set<string> = new Set();
-  private defaultModel: string = "nova-2";
-  private fallbackModels: string[] = ["nova", "base"];
+  private defaultModel: string | null = null;
+  private fallbackModels: string[] = [];
   private modelCompatibilityService: ModelCompatibilityService;
   private defaultOptions: DeepgramStreamOptions = {
     language: "en",
-    model: "nova-2",
+    model: undefined, // Will be set dynamically based on available models
     punctuate: true,
     endpointing: 150,
     utteranceEndMs: 500,
@@ -131,6 +126,15 @@ export class DeepgramService extends EventEmitter {
     getCircuitBreakerService().getCircuit(this.CIRCUIT_NAME, circuitOptions);
 
     logger.info("Deepgram Service initialized");
+
+    // Initialize optimal model based on account capabilities
+    this.initializeOptimalModel().catch((error) => {
+      logger.warn(
+        `Failed to initialize optimal model, using defaults: ${getErrorMessage(
+          error
+        )}`
+      );
+    });
   }
 
   public updateApiKey(apiKey: string): void {
@@ -178,8 +182,7 @@ export class DeepgramService extends EventEmitter {
           this.defaultOptions.model = autoConfigResult.model;
 
           logger.info(
-            `Auto-configured optimal model: primary=${
-              autoConfigResult.model
+            `Auto-configured optimal model: primary=${autoConfigResult.model
             }, fallbacks=[${autoConfigResult.fallbackModels.join(", ")}]`
           );
           return;
@@ -202,13 +205,20 @@ export class DeepgramService extends EventEmitter {
           this.apiKey
         );
 
+      // Check if any models are available
+      if (!capabilities.availableModels || capabilities.availableModels.length === 0) {
+        logger.error(
+          'No Deepgram models available for this API key. Please check your account permissions.'
+        );
+        throw new Error('No Deepgram models available for this API key');
+      }
+
       // Set up model preferences
       const preferences: ModelPreferences = {
         preferredModels: [
           deepgramConfig.primaryModel ||
-            deepgramConfig.model ||
-            this.defaultModel,
-        ],
+          deepgramConfig.model,
+        ].filter(Boolean), // Remove null/undefined values
         useCase: "phone", // Default to phone use case for voice calls
         language: deepgramConfig.language || "en",
         realtime: true,
@@ -423,6 +433,13 @@ export class DeepgramService extends EventEmitter {
       let modelToUse =
         options?.model || deepgramConfig.model || this.defaultModel;
 
+      // Ensure we have a valid model
+      if (!modelToUse) {
+        throw new Error(
+          'No Deepgram model configured. Please configure a model in the settings or ensure your API key has access to models.'
+        );
+      }
+
       // Create transcription options
       const transcriptionOptions = {
         language: options?.language || deepgramConfig.language || "en",
@@ -489,9 +506,9 @@ export class DeepgramService extends EventEmitter {
           const channels = response.result?.results?.channels;
           const result =
             channels &&
-            channels.length > 0 &&
-            channels[0].alternatives &&
-            channels[0].alternatives.length > 0
+              channels.length > 0 &&
+              channels[0].alternatives &&
+              channels[0].alternatives.length > 0
               ? channels[0].alternatives[0]
               : null;
 
@@ -1053,8 +1070,7 @@ export class DeepgramService extends EventEmitter {
           );
         }
         logger.info(
-          `Closed Deepgram connection ${connectionId} (model: ${
-            connectionData.model || "unknown"
+          `Closed Deepgram connection ${connectionId} (model: ${connectionData.model || "unknown"
           })`
         );
       }

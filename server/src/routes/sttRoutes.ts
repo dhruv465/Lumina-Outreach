@@ -3,7 +3,7 @@
  * Speech-to-Text testing routes with file upload support
  */
 import { FastifyInstance } from 'fastify';
-import { testSTT, transcribeStreamChunk } from '../controllers/sttTestController';
+import { testSTT, transcribeStreamChunk, getAvailableModels } from '../controllers/sttTestController';
 import logger from '../utils/logger';
 
 const sttRoutes = async (fastify, opts: Record<string, any>) => {
@@ -12,6 +12,12 @@ const sttRoutes = async (fastify, opts: Record<string, any>) => {
     logger.info(`STT route: ${request.raw.method} ${request.raw.url}`);
     done();
   });
+
+  /**
+   * GET /api/stt/models
+   * Fetch available Deepgram STT models based on the configured API key
+   */
+  fastify.get('/models', getAvailableModels);
 
   /**
    * POST /api/stt/test

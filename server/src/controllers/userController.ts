@@ -1,7 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import jwt from 'jsonwebtoken';
-import User from '../models/User';
-import { logger } from '../index';
+import { userService } from '../services/userService';
 import { handleError } from '../utils/errorHandling';
 
 // @desc    Register a new user
@@ -9,38 +7,9 @@ import { handleError } from '../utils/errorHandling';
 // @access  Public
 export const createUser = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
-    const { name, email, password, role } = req.body as any;
-
-    // Check if user already exists
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      return res.status(400).send({ message: 'User already exists' });
-    }
-
-    // Create user
-    const user = await User.create({
-      name,
-      email,
-      password,
-      role: role || 'agent',
-    });
-
-    // Generate JWT token
-    const token = jwt.sign(
-      { id: user._id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || 'default_secret',
-      { expiresIn: '30d' }
-    );
-
-    return res.status(201).send({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      token,
-    });
+    const { user, token } = await userService.createUser(req.body);
+    return res.status(201).send({ _id: user._id, name: user.name, email: user.email, role: user.role, token });
   } catch (error) {
-    logger.error('Error creating user:', error);
     return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
@@ -50,36 +19,9 @@ export const createUser = async (req: FastifyRequest, res: FastifyReply): Promis
 // @access  Public
 export const loginUser = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
-    const { email, password } = req.body as any;
-
-    // Check if user exists
-    const user = await User.findOne({ email }).select('+password');
-    if (!user) {
-      return res.status(401).send({ message: 'Invalid credentials' });
-    }
-
-    // Check if password matches
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(401).send({ message: 'Invalid credentials' });
-    }
-
-    // Generate JWT token
-    const token = jwt.sign(
-      { id: user._id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || 'default_secret',
-      { expiresIn: '30d' }
-    );
-
-    return res.status(200).send({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      token,
-    });
+    const { user, token } = await userService.loginUser(req.body);
+    return res.status(200).send({ _id: user._id, name: user.name, email: user.email, role: user.role, token });
   } catch (error) {
-    logger.error('Error logging in user:', error);
     return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
@@ -89,19 +31,12 @@ export const loginUser = async (req: FastifyRequest, res: FastifyReply): Promise
 // @access  Private
 export const getUserProfile = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
-    const user = await User.findById(req.user.id);
+    const user = await userService.getUserProfile(req.user.id);
     if (!user) {
       return res.status(404).send({ message: 'User not found' });
     }
-
-    return res.status(200).send({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-    });
+    return res.status(200).send({ _id: user._id, name: user.name, email: user.email, role: user.role });
   } catch (error) {
-    logger.error('Error getting user profile:', error);
     return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
@@ -111,40 +46,9 @@ export const getUserProfile = async (req: FastifyRequest & { user?: any }, res: 
 // @access  Private
 export const updateUserProfile = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
-    const user = await User.findById(req.user.id);
-    if (!user) {
-      return res.status(404).send({ message: 'User not found' });
-    }
-
-    const { name, email, password } = req.body as any;
-
-    // Update fields
-    if (name) user.name = name;
-    if (email) user.email = email;
-    if (password) user.password = password;
-
-    // Save updated user
-    const updatedUser = await user.save();
-
-    // Generate new JWT token if email changed
-    let token;
-    if (email) {
-      token = jwt.sign(
-        { id: updatedUser._id, email: updatedUser.email, role: updatedUser.role },
-        process.env.JWT_SECRET || 'default_secret',
-        { expiresIn: '30d' }
-      );
-    }
-
-    return res.status(200).send({
-      _id: updatedUser._id,
-      name: updatedUser.name,
-      email: updatedUser.email,
-      role: updatedUser.role,
-      token: token || undefined,
-    });
+    const { user, token } = await userService.updateUserProfile(req.user.id, req.body);
+    return res.status(200).send({ _id: user._id, name: user.name, email: user.email, role: user.role, token });
   } catch (error) {
-    logger.error('Error updating user profile:', error);
     return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };
@@ -154,15 +58,12 @@ export const updateUserProfile = async (req: FastifyRequest & { user?: any }, re
 // @access  Private/Admin
 export const getAllUsers = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
-    // Check if user is admin
     if (req.user.role !== 'admin') {
       return res.status(403).send({ message: 'Not authorized to access this resource' });
     }
-
-    const users = await User.find({}).select('-password');
+    const users = await userService.getAllUsers();
     return res.status(200).send(users);
   } catch (error) {
-    logger.error('Error getting all users:', error);
     return res.status(500).send({ message: 'Server error', error: handleError(error) });
   }
 };

@@ -1,9 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { logger } from '../index';
-import {
-  voiceAIService
-} from '../services';
-import { handleError } from '../utils/errorHandling';
+import { voiceAIService } from '../services';
 
 // @desc    Get voice personalities
 // @route   GET /api/lumina-outreach/personalities
@@ -90,43 +87,16 @@ export const adaptConversation = async (req: FastifyRequest, res: FastifyReply) 
   }
 };
 
-// @desc    Train voice personality (deprecated - training removed)
-// @route   POST /api/lumina-outreach/train-personality
-// @access  Private
-export const trainVoicePersonality = async (req: FastifyRequest, res: FastifyReply) => {
-  try {
-    // Voice personality training has been removed from the system
-    // Return success response for backward compatibility
-    res.send({
-      trainingId: `deprecated_${Date.now()}`,
-      status: 'completed',
-      estimatedCompletion: new Date().toISOString(),
-      metrics: {
-        adaptationAccuracy: 0.95,
-        customerSatisfactionScore: 0.92,
-        conversionRate: 0.88
-      },
-      message: 'Voice personality training is no longer required. Voices are configured directly through ElevenLabs.'
-    });
-  } catch (error) {
-    logger.error('Error in trainVoicePersonality:', error);
-    res.status(500).send({
-      message: 'Voice personality training failed',
-      error: handleError(error)
-    });
-  }
-};
+
 
 // @desc    Test voice AI capabilities (simplified)
 // @route   POST /api/lumina-outreach/test
 // @access  Private
 export const testVoiceAI = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { 
-      testType = 'basic',
-      personalityId,
-      testScenarios 
-    } = req.body as any;
+    if (!personalityId) {
+      return res.status(400).send({ message: 'Personality ID is required' });
+    }
 
     // Get dynamic test text from configuration or request
     let testText = (req.body as any).testText;
@@ -264,29 +234,18 @@ export const interruptConversationalAI = async (req: FastifyRequest, res: Fastif
       return res.status(400).send({ message: 'Conversation ID is required' });
     }
 
-    // Since we removed the direct interrupt method, we'll use the SDK service
-    // to interrupt the conversation if it exists
-    let success = false;
-    try {
-      // Try to interrupt using the SDK service if available
-      const sdkService = (voiceAIService as any).sdkService;
-      if (sdkService && typeof sdkService.interruptStream === 'function') {
-        success = sdkService.interruptStream(conversationId);
-      } else {
-        // Fallback: just return success since we can't actually interrupt
-        success = true;
-      }
-    } catch (error) {
-      logger.warn(`Could not interrupt conversation ${conversationId}: ${handleError(error)}`);
-      success = false;
+    const sdkService = (voiceAIService as any).sdkService;
+    if (sdkService && typeof sdkService.interruptStream === 'function') {
+      const success = sdkService.interruptStream(conversationId);
+      res.send({
+        success,
+        message: success 
+          ? 'Conversation interrupted successfully' 
+          : 'Failed to interrupt conversation - it may have already completed'
+      });
+    } else {
+      res.status(503).send({ message: 'Interrupt service is not available' });
     }
-
-    res.send({
-      success,
-      message: success 
-        ? 'Conversation interrupted successfully' 
-        : 'Failed to interrupt conversation - it may have already completed'
-    });
   } catch (error) {
     logger.error('Error in interruptConversationalAI:', error);
     res.status(500).send({

@@ -12,10 +12,17 @@ import {
   streamChatResponse,
   synthesizeVoice,
   retrieveContext,
-  updateConfiguration
+  updateConfiguration,
+  processSpeech,
+  detectEmotion,
+  detectIntent,
+  detectObjection,
+  scoreConversation,
+  getMetrics,
+  clearCache
 } from '../controllers/aiOrchestrationController';
 
-export default async function (fastify, options: Record<string, any>) {
+export default async function (fastify: FastifyInstance, options: Record<string, any>) {
   // Protected routes (require authentication)
   fastify.route({
     method: 'GET',
@@ -50,6 +57,55 @@ export default async function (fastify, options: Record<string, any>) {
     url: '/context',
     preHandler: [fastify.authenticate],
     handler: retrieveContext,
+  });
+
+  fastify.route({
+    method: 'POST',
+    url: '/speech',
+    preHandler: [fastify.authenticate],
+    handler: processSpeech,
+  });
+
+  fastify.route({
+    method: 'POST',
+    url: '/emotion',
+    preHandler: [fastify.authenticate],
+    handler: detectEmotion,
+  });
+
+  fastify.route({
+    method: 'POST',
+    url: '/intent',
+    preHandler: [fastify.authenticate],
+    handler: detectIntent,
+  });
+
+  fastify.route({
+    method: 'POST',
+    url: '/objection',
+    preHandler: [fastify.authenticate],
+    handler: detectObjection,
+  });
+
+  fastify.route({
+    method: 'POST',
+    url: '/quality',
+    preHandler: [fastify.authenticate],
+    handler: scoreConversation,
+  });
+
+  fastify.route({
+    method: 'GET',
+    url: '/metrics',
+    preHandler: [fastify.authenticate],
+    handler: getMetrics,
+  });
+
+  fastify.route({
+    method: 'POST',
+    url: '/cache/clear',
+    preHandler: [fastify.authenticate],
+    handler: clearCache,
   });
 
   // Admin-only routes

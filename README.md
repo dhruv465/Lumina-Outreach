@@ -165,6 +165,37 @@ User initiates call → Campaign Service → Twilio API → TwiML webhook
                                                     Call Recording & Logs
 ```
 
+## Project Status
+
+**Overall Progress: ~22.5%**
+
+This project is being developed in phases. The following table shows the current status of each phase:
+
+| Phase | Description | Weight | Status | Contribution |
+| :--- | :--- | :--- | :--- | :--- |
+| 0 | Code Refactoring | 20% | **Complete** | 20% |
+| 1 | NLU Integration | 25% | **Planned** | ~2.5% |
+| 2 | Dialogue Management | 30% | **Not Started** | 0% |
+| 3 | Self-Learning & Data | 25% | **Not Started** | 0% |
+| | **Total** | **100%** | | **~22.5%** |
+
+### Phase 0: Foundational Code Refactoring (100% Complete)
+
+- **Status:** We have completely refactored the server-side code, established a clean service layer, removed redundant controllers, and fixed the initial "patchwork" issues. This was a critical first step that sets us up for success.
+
+### Phase 1: NLU Engine and Integration (10% Complete)
+
+- **Status:** We have a detailed, professional-grade plan to use Google Dialogflow CX. The architectural decision is made, but no implementation has begun. The next step is setting up the Google Cloud project.
+
+### Phase 2: Dialogue Management & Response Generation (0% Complete)
+
+- **Status:** This is where we will build the "brain" of the AI—the state machine, the decision-making logic, and the library of responses. This is a major and crucial phase that has not yet started.
+
+### Phase 3: Self-Learning and Data Integration (0% Complete)
+
+- **Status:** This phase includes the "Call Review" interface for human coaching, the automated model retraining pipeline, and the integration with Google Sheets for data capture. This has not yet started.
+
+
 ## Key Technologies
 
 ### Frontend Stack

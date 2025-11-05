@@ -40,13 +40,21 @@ export const authenticate = async (
     }
     
     // Verify token (only if not cached)
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_secret');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_secret') as any;
+
+    // Check JWT version
+    const User = require('../models/User').default;
+    const user = await User.findById(decoded.id);
+
+    if (!user || user.jwtVersion !== decoded.jwtVersion) {
+      return reply.status(401).send({ message: 'Token is not valid' });
+    }
     
-    // Cache the decoded token for future requests
-    tokenCache.set(token, decoded);
+    // Cache the user object for future requests
+    tokenCache.set(token, user.toObject());
     
     // Add user from payload
-    request.user = decoded as any;
+    request.user = user.toObject();
   } catch (error) {
     logger.error(`Authentication error for ${request.raw.method} ${request.raw.url}:`, {
       error: error.message,

@@ -36,16 +36,35 @@ export const getCallTimeline = async (req: FastifyRequest, reply: FastifyReply):
  */
 export const getCampaignPerformance = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    // Method not available in unifiedAnalyticsService - return placeholder
-    reply.code(501).send({
-      success: false,
-      error: 'Campaign performance metrics endpoint not yet implemented'
+    const { campaignId } = req.query as any;
+
+    const callMetrics = await unifiedAnalyticsService.getCallMetrics(undefined, undefined, campaignId);
+
+    const campaignMetrics = await Campaign.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalCampaigns: { $sum: 1 },
+          activeCampaigns: { $sum: { $cond: [{ $eq: ["$status", "active"] }, 1, 0] } },
+          completedCampaigns: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
+        },
+      },
+    ]);
+
+    const result = {
+      ...callMetrics,
+      ...(campaignMetrics.length > 0 ? campaignMetrics[0] : {}),
+    };
+
+    reply.send({
+      success: true,
+      data: result,
     });
   } catch (error) {
     logger.error('Error getting campaign performance:', error);
     reply.code(500).send({
       success: false,
-      error: 'Failed to retrieve campaign performance data'
+      error: 'Failed to retrieve campaign performance data',
     });
   }
 };
@@ -56,16 +75,28 @@ export const getCampaignPerformance = async (req: FastifyRequest, reply: Fastify
  */
 export const getCallDistribution = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    // Method not available in unifiedAnalyticsService - return placeholder
-    reply.code(501).send({
-      success: false,
-      error: 'Call distribution metrics endpoint not yet implemented'
+    const { campaignId } = req.query as any;
+
+    const callMetrics = await unifiedAnalyticsService.getCallMetrics(undefined, undefined, campaignId);
+
+    const result = {
+      byStatus: {
+        completed: callMetrics.completedCalls,
+        failed: callMetrics.failedCalls,
+        other: callMetrics.totalCalls - callMetrics.completedCalls - callMetrics.failedCalls,
+      },
+      byOutcome: callMetrics.outcomes,
+    };
+
+    reply.send({
+      success: true,
+      data: result,
     });
   } catch (error) {
     logger.error('Error getting call distribution:', error);
     reply.code(500).send({
       success: false,
-      error: 'Failed to retrieve call distribution data'
+      error: 'Failed to retrieve call distribution data',
     });
   }
 };
@@ -76,16 +107,56 @@ export const getCallDistribution = async (req: FastifyRequest, reply: FastifyRep
  */
 export const getConversationMetrics = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    // Method not available in unifiedAnalyticsService - return placeholder
-    reply.code(501).send({
-      success: false,
-      error: 'Conversation metrics endpoint not yet implemented'
+    const { campaignId } = req.query as any;
+
+    const matchCriteria: any = {};
+    if (campaignId) {
+      matchCriteria.campaignId = new mongoose.Types.ObjectId(campaignId);
+    }
+
+    const conversationMetrics = await Call.aggregate([
+      { $match: matchCriteria },
+      {
+        $group: {
+          _id: null,
+          totalConversations: { $sum: 1 },
+          totalMessages: { $sum: { $size: "$conversationLog" } },
+          totalDuration: { $sum: "$duration" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          totalConversations: 1,
+          averageMessagesPerConversation: {
+            $cond: [
+              { $eq: ["$totalConversations", 0] },
+              0,
+              { $divide: ["$totalMessages", "$totalConversations"] },
+            ],
+          },
+          averageConversationDuration: {
+            $cond: [
+              { $eq: ["$totalConversations", 0] },
+              0,
+              { $divide: ["$totalDuration", "$totalConversations"] },
+            ],
+          },
+        },
+      },
+    ]);
+
+    const result = conversationMetrics.length > 0 ? conversationMetrics[0] : {};
+
+    reply.send({
+      success: true,
+      data: result,
     });
   } catch (error) {
     logger.error('Error getting conversation metrics:', error);
     reply.code(500).send({
       success: false,
-      error: 'Failed to retrieve conversation metrics data'
+      error: 'Failed to retrieve conversation metrics data',
     });
   }
 };
@@ -97,16 +168,25 @@ export const getConversationMetrics = async (req: FastifyRequest, reply: Fastify
 export const getDetailedCallMetrics = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   const { id } = req.params as any;
   try {
-    // Method not available in unifiedAnalyticsService - return placeholder
-    reply.code(501).send({
-      success: false,
-      error: 'Detailed call metrics endpoint not yet implemented'
+    const call = await Call.findById(id);
+
+    if (!call) {
+      reply.code(404).send({
+        success: false,
+        error: "Call not found",
+      });
+      return;
+    }
+
+    reply.send({
+      success: true,
+      data: call.metrics,
     });
   } catch (error) {
     logger.error(`Error getting detailed metrics for call ${id}:`, error);
     reply.code(500).send({
       success: false,
-      error: 'Failed to retrieve detailed call metrics'
+      error: "Failed to retrieve detailed call metrics",
     });
   }
 };
@@ -116,17 +196,7 @@ export const getDetailedCallMetrics = async (req: FastifyRequest, reply: Fastify
  */
 export const getSystemHealth = async (_req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
-    // This would use the callMonitoring service to get system health
-    // For now, we'll return a mock response
-    const health = {
-      cpuUsage: process.cpuUsage().user / 1000000,
-      memoryUsage: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
-      callsInLastHour: 42,
-      activeConversations: 5,
-      queuedCalls: 12,
-      systemStatus: 'healthy',
-      lastUpdated: new Date()
-    };
+    const health = await unifiedAnalyticsService.getSystemHealth();
     
     reply.send({
       success: true,

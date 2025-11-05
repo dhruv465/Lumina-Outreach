@@ -39,6 +39,10 @@ const UserSchema = new mongoose.Schema(
       enum: ['admin', 'manager', 'agent'],
       default: 'agent',
     },
+    jwtVersion: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );
@@ -57,6 +61,12 @@ UserSchema.pre('save', async function (next) {
 // Compare password method
 UserSchema.methods.comparePassword = async function (candidatePassword: string) {
   return await bcrypt.compare(candidatePassword, this.password);
+};
+
+// Increment JWT version
+UserSchema.methods.incrementJwtVersion = async function () {
+  this.jwtVersion += 1;
+  await this.save();
 };
 
 const User = mongoose.model<IUser>('User', UserSchema);

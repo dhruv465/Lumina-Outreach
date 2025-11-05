@@ -11,7 +11,6 @@ import mongoose from "mongoose";
 import path from "path";
 import { Server as SocketIOServer } from "socket.io";
 import aiOrchestrationRoutes from "./routes/aiOrchestrationRoutes";
-import aiRoutes from "./routes/aiRoutes";
 import analyticsRoutes from "./routes/analyticsRoutes";
 import callRoutes from "./routes/callRoutes";
 import campaignRoutes from "./routes/campaignRoutes";
@@ -29,7 +28,6 @@ import ttsProviderRoutes from "./routes/ttsProviderRoutes";
 import enhancedRealTimeRoutes from "./routes/enhancedRealTimeRoutes";
 import rootWebhookRoutes from "./routes/rootWebhookRoutes";
 import streamRoutes from "./routes/streamRoutes";
-import telephonyRoutes from "./routes/telephonyRoutes";
 import transcriptionRoutes from "./routes/transcriptionRoutes";
 import userRoutes from "./routes/userRoutes";
 import voiceAIRoutes from "./routes/voiceAIRoutes";
@@ -240,13 +238,11 @@ app.register(async (apiRouter) => {
   
   // AI and voice routes
   apiRouter.register(voiceAIRoutes, { prefix: "/lumina-outreach" });
-  apiRouter.register(aiRoutes, { prefix: "/ai" });
   apiRouter.register(aiOrchestrationRoutes, { prefix: "/ai-orchestration" });
   apiRouter.register(knowledgeRoutes, { prefix: "/knowledge" });
   apiRouter.register(ragRoutes, { prefix: "/rag" });
   
   // Telephony and communication routes
-  apiRouter.register(telephonyRoutes, { prefix: "/telephony" });
   apiRouter.register(transcriptionRoutes, { prefix: "/transcription" });
   apiRouter.register(sttRoutes, { prefix: "/stt" });
   

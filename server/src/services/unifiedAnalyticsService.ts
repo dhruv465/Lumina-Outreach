@@ -433,6 +433,30 @@ class UnifiedAnalyticsService {
       throw error;
     }
   }
+  async getSystemHealth() {
+    try {
+      const callsInLastHour = await Call.countDocuments({
+        createdAt: { $gte: new Date(Date.now() - 60 * 60 * 1000) },
+      });
+
+      const activeConversations = await Call.countDocuments({ status: "in-progress" });
+
+      const queuedCalls = await Call.countDocuments({ status: "queued" });
+
+      return {
+        cpuUsage: process.cpuUsage().user / 1000000,
+        memoryUsage: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        callsInLastHour,
+        activeConversations,
+        queuedCalls,
+        systemStatus: "healthy",
+        lastUpdated: new Date(),
+      };
+    } catch (error) {
+      logger.error("Error getting system health:", error);
+      throw error;
+    }
+  }
 }
 
 export const unifiedAnalyticsService = new UnifiedAnalyticsService();

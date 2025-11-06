@@ -207,29 +207,25 @@ export async function processAudioForTwiML(
     // First validate the audio format
     const { buffer: validatedBuffer, format, needsConversion } = await validateAudioFormat(audioBuffer);
     
-    // If format needs conversion, log a warning
-    if (needsConversion) {
-      logger.warn('Audio format may not be optimal for Twilio playback');
-    }
-    
     // Use the validated buffer
     audioBuffer = validatedBuffer;
     
     // Get size of the audio buffer
     const audioSize = audioBuffer.length;
     const audioSizeKB = Math.round(audioSize / 1024 * 100) / 100;
-    logger.info(`Processing audio for TwiML, size: ${audioSize} bytes (${audioSizeKB}KB), format: ${format}`);
     
     // Calculate the approximate base64 size
     const base64Size = Math.ceil(audioSize * 1.37); // Base64 encoding increases size by ~37%
     const base64SizeKB = Math.round(base64Size / 1024 * 100) / 100;
     
-    if (base64Size > 60000) { // Close to 64KB limit for TwiML
-      logger.warn(`⚠️ Audio would be ${base64SizeKB}KB when base64 encoded - too large for TwiML (limit: 64KB). Using alternative approach.`);
-    }
-    
-    // Detailed logging for better debugging
-    logger.info(`Audio stats - Size: ${audioSizeKB}KB | Approx. Base64 size: ${base64SizeKB}KB | Text length: ${fallbackText.length} chars`);
+    // Log audio processing details
+    logger.info(`Processing audio for TwiML: ${audioSizeKB}KB ${format} (${fallbackText.length} chars text)`, {
+      audioSize,
+      format,
+      base64Size: base64SizeKB,
+      textLength: fallbackText.length,
+      needsConversion
+    });
     
     // Safety check - if the audio size is suspiciously small (might be corrupt)
     if (audioSize < 1000) { // Less than 1KB is suspiciously small
@@ -242,14 +238,16 @@ export async function processAudioForTwiML(
       };
     }
     
-    // Always try to split large audio files into smaller chunks
-    if (audioSize > 30 * 1024) { // If audio is larger than 30KB, split it
-      logger.info(`Audio file size (${audioSizeKB}KB) is large, splitting into chunks for better reliability`);
+    // Always try to upload large audio files to Cloudinary
+    if (audioSize > 30 * 1024) { // If audio is larger than 30KB
+      logger.info(`Large audio file (${audioSizeKB}KB) detected, uploading to Cloudinary`);
       
       try {
         // First try uploading to Cloudinary even for large files
         // This gives us the best audio quality while avoiding TwiML size limits
         if (cloudinaryService.isCloudinaryConfigured()) {
+          const uploadStartTime = Date.now();
+          
           // Create a temporary file to upload to Cloudinary
           tempFilePath = require('path').join(
             require('os').tmpdir(), 
@@ -259,11 +257,14 @@ export async function processAudioForTwiML(
           // Write buffer to temp file
           require('fs').writeFileSync(tempFilePath, audioBuffer);
           
+          logger.info(`Uploading large ${audioSizeKB}KB audio to Cloudinary`);
+          
           // Upload to Cloudinary with auto-cleanup
           const cloudinaryUrl = await cloudinaryService.uploadAudioFile(tempFilePath, 'voice-recordings', true);
           tempFilePath = null; // Set to null since the file has been cleaned up by the upload function
           
-          logger.info(`Successfully uploaded large audio (${audioSizeKB}KB) to Cloudinary, URL: ${cloudinaryUrl}`);
+          const uploadTime = Date.now() - uploadStartTime;
+          logger.info(`Large audio Cloudinary upload successful in ${uploadTime}ms: ${cloudinaryUrl}`);
           
           // Format URL for Twilio
           const formattedUrl = prepareUrlForTwilioPlay(cloudinaryUrl);
@@ -275,7 +276,7 @@ export async function processAudioForTwiML(
           };
         }
       } catch (cloudinaryError) {
-        logger.error(`Failed to upload large audio to Cloudinary: ${getErrorMessage(cloudinaryError)}, falling back to chunked TTS`);
+        logger.error(`Large audio Cloudinary upload failed: ${getErrorMessage(cloudinaryError)}, using chunked TTS fallback`);
         
         // Add a special error prefix to the message to help with debugging
         return {
@@ -297,6 +298,8 @@ export async function processAudioForTwiML(
     // For smaller files, use Cloudinary as usual
     if (cloudinaryService.isCloudinaryConfigured()) {
       try {
+        const uploadStartTime = Date.now();
+        
         // Create a temporary file to upload to Cloudinary
         tempFilePath = require('path').join(
           require('os').tmpdir(), 
@@ -306,11 +309,14 @@ export async function processAudioForTwiML(
         // Write buffer to temp file
         require('fs').writeFileSync(tempFilePath, audioBuffer);
         
+        logger.info(`Uploading ${audioSizeKB}KB audio to Cloudinary with content type: audio/mpeg`);
+        
         // Upload to Cloudinary with auto-cleanup
         const cloudinaryUrl = await cloudinaryService.uploadAudioFile(tempFilePath, 'voice-recordings', true);
         tempFilePath = null; // Set to null since the file has been cleaned up by the upload function
         
-        logger.info(`Successfully uploaded audio to Cloudinary, URL: ${cloudinaryUrl}`);
+        const uploadTime = Date.now() - uploadStartTime;
+        logger.info(`Cloudinary upload successful in ${uploadTime}ms: ${cloudinaryUrl}`);
         
         // Format URL for Twilio
         const formattedUrl = prepareUrlForTwilioPlay(cloudinaryUrl);
@@ -321,10 +327,10 @@ export async function processAudioForTwiML(
           size: audioSize
         };
       } catch (cloudinaryError) {
-        logger.error(`Failed to upload to Cloudinary: ${getErrorMessage(cloudinaryError)}`);
+        logger.error(`Cloudinary upload failed: ${getErrorMessage(cloudinaryError)}`);
         
         // Always use TTS fallback if Cloudinary fails - never use base64
-        logger.warn(`Using TTS fallback instead of base64 encoding to avoid empty audio issues`);
+        logger.warn(`Falling back to TTS for audio playback`);
         return {
           method: 'tts',
           url: fallbackText, // Return the text to be used with TTS
@@ -333,7 +339,7 @@ export async function processAudioForTwiML(
       }
     } else {
       // Cloudinary not configured - this should not happen if environment is set up properly
-      logger.error('CRITICAL: Cloudinary not configured for audio processing - check environment variables');
+      logger.error('CRITICAL: Cloudinary not configured - check CLOUDINARY_* environment variables');
       
       // Always use TTS fallback if Cloudinary is not configured - never use base64
       return {
@@ -366,7 +372,7 @@ export async function processAudioForTwiML(
 
 /**
  * Validate and potentially convert audio format to ensure compatibility with Twilio
- * @param audioBuffer The raw audio buffer from ElevenLabs
+ * @param audioBuffer The raw audio buffer from TTS providers
  * @returns Validated/converted buffer and information about the format
  */
 async function validateAudioFormat(audioBuffer: Buffer): Promise<{buffer: Buffer, format: string, needsConversion: boolean}> {
@@ -376,24 +382,50 @@ async function validateAudioFormat(audioBuffer: Buffer): Promise<{buffer: Buffer
     return { buffer: audioBuffer, format: 'unknown', needsConversion: false };
   }
   
-  // Simple check for MP3 format (check for MP3 header magic bytes)
-  // Most MP3 files start with ID3 tag (0x49 0x44 0x33) or directly with MP3 frame sync (0xFF 0xFB)
-  const isMP3 = (
-    // Check for ID3 header
-    (audioBuffer[0] === 0x49 && audioBuffer[1] === 0x44 && audioBuffer[2] === 0x33) ||
-    // Or check for MP3 frame sync
-    (audioBuffer[0] === 0xFF && (audioBuffer[1] === 0xFB || audioBuffer[1] === 0xFA))
-  );
+  // Check for various MP3 format signatures
+  // MP3 files can have different headers:
+  // 1. ID3v2 tag: 0x49 0x44 0x33 ("ID3")
+  // 2. MP3 frame sync: 0xFF 0xFB (MPEG-1 Layer 3)
+  // 3. MP3 frame sync: 0xFF 0xFA (MPEG-1 Layer 3, no CRC)
+  // 4. MP3 frame sync: 0xFF 0xF3 (MPEG-2 Layer 3)
+  // 5. MP3 frame sync: 0xFF 0xF2 (MPEG-2 Layer 3, no CRC)
+  // 6. Some MP3s may have other valid frame sync patterns (0xFF 0xEx where x >= 0xE0)
   
-  if (isMP3) {
-    logger.info('Audio format validated as MP3');
+  const byte0 = audioBuffer[0];
+  const byte1 = audioBuffer[1];
+  const byte2 = audioBuffer[2];
+  
+  // Check for ID3 tag
+  const hasID3Tag = (byte0 === 0x49 && byte1 === 0x44 && byte2 === 0x33);
+  
+  // Check for MP3 frame sync (more comprehensive)
+  // Frame sync is 11 bits set to 1 (0xFF 0xEx where x >= 0xE0)
+  const hasMP3FrameSync = (byte0 === 0xFF && (byte1 & 0xE0) === 0xE0);
+  
+  if (hasID3Tag || hasMP3FrameSync) {
+    logger.debug('Audio format validated as MP3', {
+      hasID3Tag,
+      hasMP3FrameSync,
+      firstBytes: `0x${byte0.toString(16)} 0x${byte1.toString(16)} 0x${byte2.toString(16)}`
+    });
     return { buffer: audioBuffer, format: 'mp3', needsConversion: false };
-  } else {
-    // Not an MP3 - this is unlikely as ElevenLabs should return MP3 when requested
-    logger.warn('Audio from ElevenLabs is not in MP3 format, this may cause issues with Twilio playback');
-    // We'd ideally convert here, but to keep it simple, we'll just return with a warning
-    return { buffer: audioBuffer, format: 'unknown', needsConversion: true };
   }
+  
+  // Check for other common audio formats that Twilio supports
+  // WAV: "RIFF" header (0x52 0x49 0x46 0x46)
+  const isWAV = (byte0 === 0x52 && byte1 === 0x49 && byte2 === 0x46 && audioBuffer[3] === 0x46);
+  if (isWAV) {
+    logger.debug('Audio format detected as WAV');
+    return { buffer: audioBuffer, format: 'wav', needsConversion: false };
+  }
+  
+  // If we can't identify the format but the buffer looks valid, assume it's MP3
+  // This is a safe assumption since we're requesting MP3 from TTS providers
+  logger.debug('Audio format could not be definitively identified, assuming MP3', {
+    size: audioBuffer.length,
+    firstBytes: `0x${byte0.toString(16)} 0x${byte1.toString(16)} 0x${byte2.toString(16)}`
+  });
+  return { buffer: audioBuffer, format: 'mp3', needsConversion: false };
 }
 
 /**

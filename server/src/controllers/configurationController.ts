@@ -39,29 +39,29 @@ const handleError = (error: unknown): string => {
 const updateServicesWithNewConfig = async (configuration: any): Promise<void> => {
   try {
     const { initializeSpeechService } = require('../services/realSpeechService');
-    
+
     // Get the selected TTS provider
     const selectedTTSProvider = configuration.ttsConfig?.provider || 'elevenlabs';
     logger.info(`Updating services for selected TTS provider: ${selectedTTSProvider}`);
-    
+
     // Get API keys from configuration
     let elevenLabsKey = '';
     let openAIKey = '';
     let anthropicKey = '';
-    
+
     // Only initialize ElevenLabs services if it's the selected TTS provider
     if (selectedTTSProvider === 'elevenlabs' && configuration.elevenLabsConfig?.apiKey) {
       elevenLabsKey = configuration.elevenLabsConfig.apiKey;
       // Reinitialize speech service with new key
       initializeSpeechService(
-        elevenLabsKey, 
+        elevenLabsKey,
         require('path').join(__dirname, '../../uploads/audio')
       );
       logger.info('ElevenLabs speech service updated with new API key');
     } else if (selectedTTSProvider !== 'elevenlabs') {
       logger.info(`Skipping ElevenLabs service initialization - selected TTS provider is ${selectedTTSProvider}`);
     }
-    
+
     // Initialize TTS Provider Service with the selected provider
     try {
       const { initializeTTSProviderService } = await import('../services/ttsProviderService');
@@ -70,33 +70,33 @@ const updateServicesWithNewConfig = async (configuration: any): Promise<void> =>
     } catch (error) {
       logger.warn(`Failed to initialize TTS Provider Service: ${getErrorMessage(error)}`);
     }
-    
+
     // Get LLM provider keys
     if (configuration.llmConfig?.providers) {
       const openAIProvider = configuration.llmConfig.providers.find((p: any) => p.name === 'openai');
       if (openAIProvider?.apiKey) {
         openAIKey = openAIProvider.apiKey;
       }
-      
+
       const anthropicProvider = configuration.llmConfig.providers.find((p: any) => p.name === 'anthropic');
       if (anthropicProvider?.apiKey) {
         anthropicKey = anthropicProvider.apiKey;
       }
     }
-    
+
     // Update global services - only pass ElevenLabs key if it's the selected provider
     const effectiveElevenLabsKey = selectedTTSProvider === 'elevenlabs' ? elevenLabsKey : '';
-    
+
     if (global.conversationEngine && typeof global.conversationEngine.updateApiKeys === 'function') {
       global.conversationEngine.updateApiKeys(effectiveElevenLabsKey, openAIKey, anthropicKey);
       logger.info('Conversation engine updated with new API keys');
     }
-    
+
     if (global.campaignService && typeof global.campaignService.updateApiKeys === 'function') {
       global.campaignService.updateApiKeys(effectiveElevenLabsKey, openAIKey, anthropicKey);
       logger.info('Campaign service updated with new API keys');
     }
-    
+
     logger.info(`All services updated with new configuration for TTS provider: ${selectedTTSProvider}`);
   } catch (error) {
     logger.error(`Error updating services with new config: ${getErrorMessage(error)}`);
@@ -109,10 +109,10 @@ const updateServicesWithNewConfig = async (configuration: any): Promise<void> =>
 export const getSystemConfiguration = async (_req: FastifyRequest, res: FastifyReply) => {
   try {
     logger.info('Fetching system configuration');
-    
+
     // Get or create configuration
     let configuration = await Configuration.findOne();
-    
+
     if (!configuration) {
       // Create default configuration if none exists
       configuration = await Configuration.create({
@@ -245,10 +245,10 @@ export const getSystemConfiguration = async (_req: FastifyRequest, res: FastifyR
 
     // Remove sensitive information before sending to client
     const configToSend = configuration.toObject();
-    
+
     // Note: We no longer mask API keys in responses since the frontend uses password inputs for security
     // The UI handles masking through password input components
-    
+
     // Log what we're sending back to the client (sanitized)
     logger.info('Sending system configuration to client with fields:', {
       elevenLabsConfig: {
@@ -301,38 +301,38 @@ const enhancedIsMaskedApiKey = (value: string | undefined): boolean => {
     logger.debug('Empty or undefined value passed to isMaskedApiKey - returning false');
     return false;
   }
-  
+
   if (value === '') {
     logger.debug('Empty string explicitly passed to isMaskedApiKey - returning false');
     logger.info('Empty API key detected - this will clear the key from database');
     return false;
   }
-  
+
   const isMasked = value.includes('••••••••');
   if (isMasked) {
     logger.debug('Detected masked API key pattern');
   }
-  
+
   return isMasked;
 };
 
 // Update an API key if changed and valid
 const updateApiKeyIfChanged = (newKey: string | undefined, existingKey: string): string => {
   if (typeof newKey === 'undefined') return existingKey;
-  
+
   // If masked (has '••••••••'), keep existing key
   if (enhancedIsMaskedApiKey(newKey)) {
     logger.debug('Received masked API key, keeping existing value');
     return existingKey;
   }
-  
+
   // If empty string is provided, it's an intentional clear
   if (newKey === '') {
     logger.info('API key explicitly cleared by user');
     logger.debug('Empty string detected - API key will be cleared in database');
     return ''; // Return empty string to clear the key in the database
   }
-  
+
   logger.info('New API key provided, updating');
   return newKey;
 };
@@ -343,15 +343,15 @@ const handleFieldUpdate = <T>(newValue: T | undefined, existingValue: T): T => {
 
 
 const validateProviderUpdate = (
-  updated: UpdateLLMProvider | undefined, 
+  updated: UpdateLLMProvider | undefined,
   existing: BaseLLMProvider
 ): BaseLLMProvider => {
   if (!updated) {
     return existing;
   }
-  
+
   const finalApiKey = updateApiKeyIfChanged(updated.apiKey, existing.apiKey);
-  
+
   let finalStatus = existing.status;
   let finalLastVerified = existing.lastVerified;
 
@@ -364,13 +364,13 @@ const validateProviderUpdate = (
   if (apiKeyEffectivelyChanged) {
     logger.info(`Provider ${existing.name}: API key changed - resetting status to unverified and clearing lastVerified date`);
     finalStatus = 'unverified';
-    finalLastVerified = null; 
+    finalLastVerified = null;
   } else {
     // API key not changed
     if (typeof updated.status !== 'undefined') {
       // Client sent a status update
       logger.info(`Provider ${existing.name}: Client sent status update: ${updated.status} (current: ${existing.status})`);
-      
+
       // Special handling for 'verified' status
       if (updated.status === 'verified' && existing.status !== 'verified') {
         // Only allow verified status if there's a verification date
@@ -385,7 +385,7 @@ const validateProviderUpdate = (
         // For other status changes (failed/unverified), accept client value
         finalStatus = updated.status;
       }
-      
+
       // Handle lastVerified date
       if (typeof updated.lastVerified !== 'undefined') {
         finalLastVerified = updated.lastVerified;
@@ -404,7 +404,7 @@ const validateProviderUpdate = (
       }
     }
   }
-  
+
   // Final status consistency check
   if (finalStatus === 'verified' && !finalLastVerified) {
     logger.warn(`Provider ${existing.name}: Status is 'verified' but has no lastVerified date - this is inconsistent`);
@@ -413,11 +413,11 @@ const validateProviderUpdate = (
       logger.info(`Provider ${existing.name}: Restored lastVerified date from existing provider`);
     }
   }
-  
+
   logger.info(`Provider ${existing.name}: Final status: ${finalStatus}, Has final verification date: ${finalLastVerified ? 'Yes' : 'No'}`);
-  
+
   return {
-    ...existing, 
+    ...existing,
     name: updated.name || existing.name,
     apiKey: finalApiKey,
     availableModels: updated.availableModels ?? existing.availableModels,
@@ -432,75 +432,75 @@ const validateProviderUpdate = (
 // @access  Private
 export const updateSystemConfiguration = async (req: FastifyRequest, res: FastifyReply) => {
   const updatedConfig: UpdatedConfig = req.body as any;
-  
+
   try {
     const config = await Configuration.findOne();
-    
+
     if (!config) {
       logger.warn('Configuration not found');
-      res.status(404).send({ 
+      res.status(404).send({
         message: 'Configuration not found',
         success: false
       });
       return;
     }
-    
+
     const existingConfig = config.toObject();
-    
+
     // Validate and update Twilio config
     if (updatedConfig.twilioConfig) {
       logger.info('Updating Twilio configuration...');
-      
+
       if (updatedConfig.twilioConfig.authToken) {
         const keyUpdate = handleApiKeyUpdate(updatedConfig.twilioConfig.authToken, existingConfig.twilioConfig.authToken);
         if (keyUpdate.error) {
-          return res.status(400).send({ 
+          return res.status(400).send({
             message: 'Invalid Twilio auth token',
-            error: keyUpdate.error 
+            error: keyUpdate.error
           });
         }
         updatedConfig.twilioConfig.authToken = keyUpdate.key;
-        
+
         // If auth token changed, reset status to unverified
         if (keyUpdate.updated) {
           logger.info('Twilio auth token changed, resetting status to unverified');
           updatedConfig.twilioConfig.status = 'unverified';
         }
       }
-      
+
       config.twilioConfig = handleObjectUpdate(updatedConfig.twilioConfig, existingConfig.twilioConfig);
     }
-    
+
     // Validate and update ElevenLabs config
     if (updatedConfig.elevenLabsConfig) {
       logger.info('Updating ElevenLabs configuration...');
-      
+
       // Validate API key if provided
       if (updatedConfig.elevenLabsConfig.apiKey) {
         const validation = validateElevenLabsKey(updatedConfig.elevenLabsConfig.apiKey);
         if (!validation.isValid) {
-          return res.status(400).send({ 
+          return res.status(400).send({
             message: 'Invalid ElevenLabs API key',
-            error: validation.error 
+            error: validation.error
           });
         }
-        
+
         // If API key changed, reset status to unverified
         const apiKeyUpdate = handleApiKeyUpdate(updatedConfig.elevenLabsConfig.apiKey, existingConfig.elevenLabsConfig.apiKey);
         if (apiKeyUpdate.updated) {
           logger.info('ElevenLabs API key changed, resetting status to unverified');
           updatedConfig.elevenLabsConfig.status = 'unverified';
-          
+
           // Verify the new API key immediately to catch potential issues
           try {
             const verificationResult = await verifyAndUpdateElevenLabsApiStatus(apiKeyUpdate.key);
-            
+
             // Only update if verification completed (don't override status set above)
             if (verificationResult.success) {
               logger.info(`ElevenLabs API key verified successfully: ${verificationResult.message}`);
             } else {
               logger.warn(`ElevenLabs API key verification failed: ${verificationResult.error}`);
-              
+
               // Only show warning in response if there's an unusual activity error
               if (verificationResult.isUnusualActivity) {
                 // req.flash is not available, use a different method to display warnings
@@ -512,21 +512,21 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           }
         }
       }
-      
+
       // Validate voice parameters if provided
       const voiceValidation = validateVoiceParameters({
         voiceSpeed: updatedConfig.elevenLabsConfig.voiceSpeed,
         voiceStability: updatedConfig.elevenLabsConfig.voiceStability,
         voiceClarity: updatedConfig.elevenLabsConfig.voiceClarity
       });
-      
+
       if (!voiceValidation.isValid) {
-        return res.status(400).send({ 
+        return res.status(400).send({
           message: 'Invalid voice parameters',
-          error: voiceValidation.error 
+          error: voiceValidation.error
         });
       }
-      
+
       config.elevenLabsConfig = {
         ...existingConfig.elevenLabsConfig,
         apiKey: updateApiKeyIfChanged(updatedConfig.elevenLabsConfig.apiKey, existingConfig.elevenLabsConfig.apiKey),
@@ -538,26 +538,26 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
         voiceClarity: handleFieldUpdate(updatedConfig.elevenLabsConfig.voiceClarity, existingConfig.elevenLabsConfig.voiceClarity)
       };
     }
-    
+
     // Update LLM config if provided
     if (updatedConfig.llmConfig) {
       logger.info('Updating LLM configuration...');
-      
+
       // Handle providers
       if (updatedConfig.llmConfig.providers) {
         logger.info('Updating LLM providers...');
-        
+
         // Check for duplicate providers in the incoming update
         const providerNames = new Set();
         const uniqueProviders = [];
         const emptyKeyProviders = [];
-        
+
         // Filter out duplicate providers from the update and track empty API keys
         for (const provider of updatedConfig.llmConfig.providers) {
           if (!providerNames.has(provider.name)) {
             providerNames.add(provider.name);
             uniqueProviders.push(provider);
-            
+
             // Track providers with empty API keys
             if (provider.apiKey === '') {
               emptyKeyProviders.push(provider.name);
@@ -567,18 +567,18 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
             logger.warn(`Duplicate provider ${provider.name} found in update, ignoring duplicates`);
           }
         }
-        
+
         // Replace updatedConfig.llmConfig.providers with the unique providers
         updatedConfig.llmConfig.providers = uniqueProviders;
-        
+
         // Process each provider and create a new array to assign
         const updatedProviders = [];
-        
+
         // Process each existing provider and update it if there's a matching update
         for (const existingProvider of existingConfig.llmConfig.providers) {
           const updatedProvider = updatedConfig.llmConfig.providers.find(p => p.name === existingProvider.name);
           const processedProvider = validateProviderUpdate(updatedProvider, existingProvider);
-          
+
           // Log the provider update, especially for API key changes
           if (updatedProvider && typeof updatedProvider.apiKey !== 'undefined') {
             if (updatedProvider.apiKey === '') {
@@ -586,7 +586,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
               logger.debug(`Provider ${existingProvider.name}: API key value will be set to empty string in database`);
             } else if (enhancedIsMaskedApiKey(updatedProvider.apiKey)) {
               logger.info(`Provider ${existingProvider.name}: Received masked API key, keeping existing`);
-              
+
               // Important: When using the same masked API key, preserve the verification status
               if (existingProvider.status === 'verified' && processedProvider.status === 'unverified') {
                 logger.info(`Provider ${existingProvider.name}: Preserving verified status since API key not changed`);
@@ -604,15 +604,15 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
               processedProvider.lastVerified = existingProvider.lastVerified;
             }
           }
-          
+
           updatedProviders.push(processedProvider);
         }          // Check for new providers that don't exist in the current configuration
         for (const newProvider of updatedConfig.llmConfig.providers) {
           const exists = existingConfig.llmConfig.providers.some(p => p.name === newProvider.name);
-          
+
           if (!exists && newProvider.apiKey && newProvider.apiKey !== '') {
             logger.info(`Adding new provider: ${newProvider.name}`);
-            
+
             // Create a new provider object
             updatedProviders.push({
               name: newProvider.name,
@@ -624,26 +624,26 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
             });
           }
         }
-        
+
         // Clear the existing array and add the updated providers
         // This ensures Mongoose properly detects the changes
         config.llmConfig.providers = [];
         config.markModified('llmConfig.providers');
-        
+
         // Now add each provider back one by one
         // Skip providers with empty API keys to remove them completely
         for (const provider of updatedProviders) {
           if (provider.apiKey !== '') {
             // Important: Add status tracking logs
             logger.debug(`Adding provider ${provider.name} with API key to configuration (status: ${provider.status})`);
-            
+
             // Final verification status check - ensure we're not accidentally resetting a verified provider
             if (provider.status === 'unverified') {
               // Check if there was a verified provider with this name in the existing config
               const existingVerifiedProvider = existingConfig.llmConfig.providers.find(
                 p => p.name === provider.name && p.status === 'verified' && p.apiKey === provider.apiKey
               );
-              
+
               if (existingVerifiedProvider) {
                 // If the API key hasn't changed and it was verified before, maintain the verified status
                 logger.info(`Preserving verified status for ${provider.name} since API key is unchanged from a verified key`);
@@ -651,14 +651,14 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
                 provider.lastVerified = existingVerifiedProvider.lastVerified;
               }
             }
-            
+
             // Add the provider to the configuration
             logger.info(`Adding provider ${provider.name} to configuration with status ${provider.status}`);
 
             // Add additional debug info about the provider status
             if (provider.status === 'verified') {
               logger.info(`Provider ${provider.name} is verified with lastVerified date: ${provider.lastVerified}`);
-              
+
               // Make absolutely sure a verified provider has a lastVerified date
               if (!provider.lastVerified) {
                 logger.warn(`Provider ${provider.name} has verified status but no lastVerified date - adding current date`);
@@ -672,17 +672,17 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
             logger.info(`Provider ${provider.name} has empty API key - removing from configuration`);
           }
         }
-        
+
         logger.info(`Updated to ${config.llmConfig.providers.length} LLM providers after cleanup`);
       }
-      
+
       // Validate and update LLM settings
       if (updatedConfig.llmConfig.temperature || updatedConfig.llmConfig.maxTokens) {
         const llmValidation = validateLLMParameters({
           temperature: updatedConfig.llmConfig.temperature,
           maxTokens: updatedConfig.llmConfig.maxTokens
         });
-        
+
         if (!llmValidation.isValid) {
           return res.status(400).send({
             message: 'Invalid LLM parameters',
@@ -690,50 +690,50 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           });
         }
       }
-      
+
       // Update other properties
       config.llmConfig.defaultProvider = handleFieldUpdate(
-        updatedConfig.llmConfig.defaultProvider, 
+        updatedConfig.llmConfig.defaultProvider,
         existingConfig.llmConfig.defaultProvider
       );
-      
+
       config.llmConfig.defaultModel = handleFieldUpdate(
-        updatedConfig.llmConfig.defaultModel, 
+        updatedConfig.llmConfig.defaultModel,
         existingConfig.llmConfig.defaultModel
       );
-      
+
       config.llmConfig.temperature = handleFieldUpdate(
-        updatedConfig.llmConfig.temperature, 
+        updatedConfig.llmConfig.temperature,
         existingConfig.llmConfig.temperature
       );
-      
+
       config.llmConfig.maxTokens = handleFieldUpdate(
-        updatedConfig.llmConfig.maxTokens, 
+        updatedConfig.llmConfig.maxTokens,
         existingConfig.llmConfig.maxTokens
       );
-      
+
       // Mark the entire llmConfig as modified to ensure Mongoose saves all changes
       config.markModified('llmConfig');
     }
-    
+
     // Validate and update general settings
     if (updatedConfig.generalSettings) {
       logger.info('Updating general settings...');
-      
+
       const generalValidation = validateGeneralSettings({
         maxCallDuration: updatedConfig.generalSettings.maxCallDuration,
         callRetryAttempts: updatedConfig.generalSettings.callRetryAttempts,
         callRetryDelay: updatedConfig.generalSettings.callRetryDelay,
         maxConcurrentCalls: updatedConfig.generalSettings.maxConcurrentCalls
       });
-      
+
       if (!generalValidation.isValid) {
         return res.status(400).send({
           message: 'Invalid general settings',
           error: generalValidation.error
         });
       }
-      
+
       config.generalSettings = {
         ...existingConfig.generalSettings,
         defaultLanguage: handleFieldUpdate(updatedConfig.generalSettings.defaultLanguage, existingConfig.generalSettings.defaultLanguage),
@@ -750,7 +750,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
         }
       };
     }
-    
+
     // Update webhook config if provided (only secret, URL is environment-only)
     if (updatedConfig.webhookConfig) {
       logger.info('Updating webhook configuration...');
@@ -764,7 +764,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
     // Update voiceAI config if provided
     if (updatedConfig.voiceAIConfig) {
       logger.info('Updating Voice AI configuration...');
-      
+
       // Ensure voiceAIConfig exists in the config
       if (!config.voiceAIConfig) {
         config.voiceAIConfig = {
@@ -796,7 +796,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           }
         };
       }
-      
+
       // Update other voiceAI configuration sections if provided
       if (updatedConfig.voiceAIConfig.bilingualSupport) {
         config.voiceAIConfig.bilingualSupport = {
@@ -804,24 +804,24 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           ...updatedConfig.voiceAIConfig.bilingualSupport
         };
       }
-      
+
       if (updatedConfig.voiceAIConfig.conversationFlow) {
         config.voiceAIConfig.conversationFlow = {
           ...existingConfig.voiceAIConfig?.conversationFlow,
           ...updatedConfig.voiceAIConfig.conversationFlow
         };
       }
-      
+
       if (updatedConfig.voiceAIConfig.conversationalAI) {
         config.voiceAIConfig.conversationalAI = {
           ...existingConfig.voiceAIConfig?.conversationalAI,
           ...updatedConfig.voiceAIConfig.conversationalAI
         };
       }
-      
+
       // Mark voiceAIConfig as modified
       config.markModified('voiceAIConfig');
-      
+
       logger.info('Voice AI configuration updated:', {
         bilingualSupport: config.voiceAIConfig.bilingualSupport?.enabled,
         conversationalAI: config.voiceAIConfig.conversationalAI?.enabled
@@ -831,7 +831,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
     // Update Deepgram config if provided
     if (updatedConfig.deepgramConfig) {
       logger.info('Updating Deepgram configuration...');
-      
+
       // Initialize deepgramConfig if it doesn't exist
       if (!config.deepgramConfig) {
         config.deepgramConfig = {
@@ -846,7 +846,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           status: 'unverified'
         };
       }
-      
+
       // Validate Deepgram API key if provided and not empty
       if (updatedConfig.deepgramConfig.apiKey && updatedConfig.deepgramConfig.apiKey.trim() !== '') {
         // Check if it's not a masked key first
@@ -856,9 +856,9 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           // Validate the API key format
           const validation = validateDeepgramKey(updatedConfig.deepgramConfig.apiKey);
           if (!validation.isValid) {
-            return res.status(400).send({ 
+            return res.status(400).send({
               message: 'Invalid Deepgram API key format',
-              error: validation.error 
+              error: validation.error
             });
           }
 
@@ -866,49 +866,49 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           try {
             const { initializeModelCompatibilityService } = await import('../services/modelCompatibilityService');
             const compatibilityService = initializeModelCompatibilityService(updatedConfig.deepgramConfig.apiKey);
-            
+
             // Test basic API access with a simple model validation
             const testModel = updatedConfig.deepgramConfig.primaryModel || 'base';
             const modelValidation = await compatibilityService.validateModelAccess(
-              updatedConfig.deepgramConfig.apiKey, 
+              updatedConfig.deepgramConfig.apiKey,
               testModel
             );
-            
+
             if (!modelValidation.isValid) {
               logger.warn(`Primary model ${testModel} validation failed: ${modelValidation.error}`);
-              
+
               // Try to find a compatible model automatically
               const compatibleModels = await compatibilityService.getCompatibleModels(updatedConfig.deepgramConfig.apiKey);
-              
+
               if (compatibleModels.length === 0) {
                 return res.status(400).send({
                   message: 'Deepgram API key is valid but no compatible models found',
                   error: 'No accessible models for this account'
                 });
               }
-              
+
               // Auto-suggest the best available model
               logger.info(`Auto-selecting compatible model: ${compatibleModels[0]}`);
               updatedConfig.deepgramConfig.primaryModel = compatibleModels[0];
               updatedConfig.deepgramConfig.fallbackModels = compatibleModels.slice(1, 4); // Up to 3 fallbacks
             }
-            
+
             // Get account capabilities for enhanced configuration
             const capabilities = await compatibilityService.getAccountCapabilities(updatedConfig.deepgramConfig.apiKey);
             updatedConfig.deepgramConfig.tier = capabilities.tier;
             updatedConfig.deepgramConfig.availableModels = capabilities.availableModels;
-            
+
             logger.info(`Deepgram account validated: ${capabilities.tier} tier with ${capabilities.availableModels.length} models`);
-            
+
           } catch (validationError) {
             logger.warn(`Enhanced Deepgram validation failed: ${getErrorMessage(validationError)}`);
             // Continue with basic validation - don't block configuration update
           }
-          
+
           logger.info('Deepgram API key provided and validated, will update configuration');
         }
       }
-      
+
       config.deepgramConfig = {
         ...existingConfig.deepgramConfig,
         apiKey: updateApiKeyIfChanged(updatedConfig.deepgramConfig.apiKey, existingConfig.deepgramConfig?.apiKey || ''),
@@ -920,19 +920,19 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
         availableModels: handleFieldUpdate(updatedConfig.deepgramConfig.availableModels, existingConfig.deepgramConfig?.availableModels || []),
         retryAttempts: handleFieldUpdate(updatedConfig.deepgramConfig.retryAttempts, existingConfig.deepgramConfig?.retryAttempts || 3),
         timeoutMs: handleFieldUpdate(updatedConfig.deepgramConfig.timeoutMs, existingConfig.deepgramConfig?.timeoutMs || 30000),
-        status: updatedConfig.deepgramConfig.apiKey && updatedConfig.deepgramConfig.apiKey.trim() !== '' 
+        status: updatedConfig.deepgramConfig.apiKey && updatedConfig.deepgramConfig.apiKey.trim() !== ''
           && !enhancedIsMaskedApiKey(updatedConfig.deepgramConfig.apiKey)
           ? 'verified'  // Set to verified if API key is provided and validated
           : existingConfig.deepgramConfig?.status || 'unverified',
-        lastModelValidation: updatedConfig.deepgramConfig.apiKey && updatedConfig.deepgramConfig.apiKey.trim() !== '' 
+        lastModelValidation: updatedConfig.deepgramConfig.apiKey && updatedConfig.deepgramConfig.apiKey.trim() !== ''
           && !enhancedIsMaskedApiKey(updatedConfig.deepgramConfig.apiKey)
           ? new Date()
           : existingConfig.deepgramConfig?.lastModelValidation
       };
-      
+
       // Mark deepgramConfig as modified
       config.markModified('deepgramConfig');
-      
+
       logger.info('Deepgram configuration updated:', {
         isEnabled: config.deepgramConfig.isEnabled,
         hasApiKey: !!config.deepgramConfig.apiKey,
@@ -948,7 +948,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
     // Update TTS config if provided
     if (updatedConfig.ttsConfig) {
       logger.info('Updating TTS configuration...');
-      
+
       // Initialize ttsConfig if it doesn't exist
       if (!config.ttsConfig) {
         config.ttsConfig = {
@@ -969,7 +969,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           }
         };
       }
-      
+
       // Update TTS provider settings
       config.ttsConfig = {
         ...existingConfig.ttsConfig,
@@ -978,7 +978,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
         fallbackProviders: handleFieldUpdate(updatedConfig.ttsConfig.fallbackProviders, existingConfig.ttsConfig?.fallbackProviders || ['deepgram']),
         autoFallback: handleFieldUpdate(updatedConfig.ttsConfig.autoFallback, existingConfig.ttsConfig?.autoFallback !== undefined ? existingConfig.ttsConfig.autoFallback : true)
       };
-      
+
       // Update Deepgram TTS specific settings if provided
       if (updatedConfig.ttsConfig.deepgramTTS) {
         if (!config.ttsConfig.deepgramTTS) {
@@ -994,7 +994,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
             status: 'unverified'
           };
         }
-        
+
         config.ttsConfig.deepgramTTS = {
           ...existingConfig.ttsConfig?.deepgramTTS,
           apiKey: updateApiKeyIfChanged(updatedConfig.ttsConfig.deepgramTTS.apiKey, existingConfig.ttsConfig?.deepgramTTS?.apiKey || ''),
@@ -1004,10 +1004,10 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           status: handleFieldUpdate(updatedConfig.ttsConfig.deepgramTTS.status, existingConfig.ttsConfig?.deepgramTTS?.status || 'unverified')
         };
       }
-      
+
       // Mark ttsConfig as modified
       config.markModified('ttsConfig');
-      
+
       logger.info('TTS configuration updated:', {
         provider: config.ttsConfig.provider,
         primaryProvider: config.ttsConfig.primaryProvider,
@@ -1027,7 +1027,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
       // Process API keys - log what will be saved to the database
       let emptyKeyProviders = [];
       let providersToRemove = [];
-      
+
       if (config.llmConfig && config.llmConfig.providers) {
         for (const provider of config.llmConfig.providers) {
           if (!provider.apiKey || provider.apiKey === '') {
@@ -1036,7 +1036,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
             logger.info(`Provider ${provider.name} has an empty API key and will be removed`);
           }
         }
-        
+
         // Remove providers with empty API keys
         if (providersToRemove.length > 0) {
           logger.info(`Removing ${providersToRemove.length} providers with empty API keys before saving`);
@@ -1044,7 +1044,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           config.markModified('llmConfig.providers');
         }
       }
-      
+
       // Add detailed logging before save
       logger.info('Saving configuration with the following LLM providers:', {
         providers: config.llmConfig.providers.map(p => ({
@@ -1056,7 +1056,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           modelsCount: p.availableModels ? p.availableModels.length : 0
         }))
       });
-      
+
       // Force Mongoose to detect changes to nested subdocuments
       config.markModified('llmConfig');
       config.markModified('llmConfig.providers');
@@ -1064,7 +1064,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
       config.markModified('twilioConfig');
       config.markModified('voiceAIConfig');
       config.markModified('ttsConfig');
-      
+
       // Also mark each provider individually to ensure status changes are detected
       if (config.llmConfig && config.llmConfig.providers) {
         config.llmConfig.providers.forEach((provider, index) => {
@@ -1072,16 +1072,16 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           config.markModified(`llmConfig.providers.${index}.lastVerified`);
         });
       }
-      
+
       // Save with a retry mechanism in case of Mongoose optimistic concurrency issues
       let saveAttempt = 0;
       const maxSaveAttempts = 3;
-      
+
       while (saveAttempt < maxSaveAttempts) {
         try {
           await config.save();
           logger.info(`Configuration saved successfully on attempt ${saveAttempt + 1}`);
-          
+
           // Verify the save was successful by immediately querying the database
           const verifiedConfig = await Configuration.findById(config._id);
           if (verifiedConfig) {
@@ -1096,22 +1096,22 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
                 logger.info(`✅ Verified provider ${providerName} with empty API key was properly removed`);
               }
             }
-            
+
             // Verify that the status for all verified providers was correctly saved
             if (verifiedConfig.llmConfig?.providers) {
               const verifiedProviders = verifiedConfig.llmConfig.providers.filter(p => p.status === 'verified');
-              const expectedVerifiedCount = updatedConfig.llmConfig?.providers.filter(p => 
+              const expectedVerifiedCount = updatedConfig.llmConfig?.providers.filter(p =>
                 p.status === 'verified' && p.apiKey && p.apiKey.length > 0
               ).length || 0;
-              
+
               logger.info(`✅ Verified provider count matches expected count: ${verifiedProviders.length}`);
-              
+
               // Log the status of each provider
               for (const provider of verifiedConfig.llmConfig.providers) {
                 logger.debug(`Provider ${provider.name} status: ${provider.status || 'unset'}, lastVerified: ${provider.lastVerified || 'none'}`);
               }
             }
-            
+
             // Also verify that the provider count matches expected count
             const expectedProviderCount = config.llmConfig.providers.length;
             if (verifiedConfig.llmConfig.providers.length !== expectedProviderCount) {
@@ -1120,7 +1120,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
             } else {
               logger.info(`✅ Verified provider count matches expected count: ${expectedProviderCount}`);
             }
-            
+
             // Verify status preservation for verified providers
             for (const provider of config.llmConfig.providers) {
               if (provider.status === 'verified') {
@@ -1133,14 +1133,14 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
                 }
               }
             }
-            
+
             if (verificationSuccessful) {
               logger.info('All empty API keys were properly removed from the database and status preserved');
             } else {
               logger.warn('Some empty API keys were not properly removed or status was not preserved - may reappear after page refresh');
             }
           }
-          
+
           break;
         } catch (saveErr) {
           saveAttempt++;
@@ -1151,13 +1151,13 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           await new Promise(resolve => setTimeout(resolve, 200)); // Small delay before retry
         }
       }
-      
+
       // Update services with new API keys
       await updateServicesWithNewConfig(config);
-      
+
       // Prepare masked response
       const response = maskSensitiveValues(config.toObject());
-      
+
       // Log configuration update (with masked sensitive data)
       logger.info('Configuration updated:', {
         twilioConfig: {
@@ -1192,7 +1192,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           hasSecret: !!response.webhookConfig.secret
         }
       });
-      
+
       // After saving, check for final saved state
       const savedConfig = await Configuration.findOne();
       if (savedConfig) {
@@ -1207,18 +1207,18 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
           logger.info(`Default provider ${defaultProvider.name} final status: ${defaultProvider.status}, Last Verified: ${defaultProvider.lastVerified || 'None'}`);
         }
       }
-      
+
       res.status(200).send({
         message: 'Configuration updated successfully',
         success: true,
         configuration: response
       });
-      
+
     } catch (saveError) {
       logger.error('Error saving configuration:', saveError);
       throw saveError;
     }
-    
+
   } catch (error: unknown) {
     logger.error('Error in updateSystemConfiguration:', {
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -1307,21 +1307,21 @@ export const getLLMOptions = async (_req: FastifyRequest, res: FastifyReply) => 
 export const getVoiceOptions = async (_req: FastifyRequest, res: FastifyReply) => {
   try {
     const configuration = await Configuration.findOne();
-    
+
     if (!configuration || !configuration.elevenLabsConfig.apiKey) {
-      return res.status(400).send({ 
+      return res.status(400).send({
         message: 'ElevenLabs API key not configured',
-        voices: [] 
+        voices: []
       });
     }
 
     // Get voices from configuration instead of hardcoded values
     const availableVoices = configuration.elevenLabsConfig.availableVoices || [];
-    
+
     if (availableVoices.length === 0) {
-      return res.status(200).send({ 
+      return res.status(200).send({
         message: 'No voices configured. Please set up voices in ElevenLabs configuration.',
-        voices: [] 
+        voices: []
       });
     }
 
@@ -1354,7 +1354,7 @@ export const testLLMConnection = async (req: FastifyRequest, res: FastifyReply) 
     };
 
     if (!provider || !apiKey || !model) {
-      return res.status(400).send({ 
+      return res.status(400).send({
         message: 'Provider, API key, and model are required',
         success: false
       });
@@ -1381,7 +1381,7 @@ export const testLLMConnection = async (req: FastifyRequest, res: FastifyReply) 
               }
             }
           );
-          
+
           isSuccessful = true;
           response = openaiResponse.data;
         } catch (error: unknown) {
@@ -1393,7 +1393,7 @@ export const testLLMConnection = async (req: FastifyRequest, res: FastifyReply) 
           }
         }
         break;
-        
+
       case 'anthropic':
         try {
           const anthropicResponse = await axios.post(
@@ -1411,7 +1411,7 @@ export const testLLMConnection = async (req: FastifyRequest, res: FastifyReply) 
               }
             }
           );
-          
+
           isSuccessful = true;
           response = anthropicResponse.data;
         } catch (error: unknown) {
@@ -1423,7 +1423,7 @@ export const testLLMConnection = async (req: FastifyRequest, res: FastifyReply) 
           }
         }
         break;
-        
+
       case 'google':
         try {
           const googleResponse = await axios.post(
@@ -1436,7 +1436,7 @@ export const testLLMConnection = async (req: FastifyRequest, res: FastifyReply) 
               headers: { 'Content-Type': 'application/json' }
             }
           );
-          
+
           isSuccessful = true;
           response = googleResponse.data;
         } catch (error: unknown) {
@@ -1448,9 +1448,9 @@ export const testLLMConnection = async (req: FastifyRequest, res: FastifyReply) 
           }
         }
         break;
-        
+
       default:
-        return res.status(400).send({ 
+        return res.status(400).send({
           message: 'Unsupported LLM provider',
           success: false
         });
@@ -1465,17 +1465,17 @@ export const testLLMConnection = async (req: FastifyRequest, res: FastifyReply) 
         const providerIndex = configuration.llmConfig.providers.findIndex(
           p => p.name === provider
         );
-        
+
         if (providerIndex >= 0) {
           configuration.llmConfig.providers[providerIndex].lastVerified = new Date();
           configuration.llmConfig.providers[providerIndex].status = 'verified';
-          
+
           // Make sure MongoDB detects these changes
           configuration.markModified('llmConfig');
           configuration.markModified('llmConfig.providers');
           configuration.markModified(`llmConfig.providers.${providerIndex}.status`);
           configuration.markModified(`llmConfig.providers.${providerIndex}.lastVerified`);
-          
+
           await configuration.save();
           logger.info(`${provider} LLM provider status updated to verified`);
         }
@@ -1488,15 +1488,15 @@ export const testLLMConnection = async (req: FastifyRequest, res: FastifyReply) 
         const providerIndex = configuration.llmConfig.providers.findIndex(
           p => p.name === provider
         );
-        
+
         if (providerIndex >= 0) {
           configuration.llmConfig.providers[providerIndex].status = 'failed';
-          
+
           // Make sure MongoDB detects these changes
           configuration.markModified('llmConfig');
           configuration.markModified('llmConfig.providers');
           configuration.markModified(`llmConfig.providers.${providerIndex}.status`);
-          
+
           await configuration.save();
           logger.info(`${provider} LLM provider status updated to failed`);
         }
@@ -1535,17 +1535,17 @@ export const testTwilioConnection = async (req: FastifyRequest, res: FastifyRepl
     try {
       // Initialize Twilio client
       const client = twilio(accountSid, authToken);
-      
+
       // Test by fetching account info
       const account = await client.api.accounts(accountSid).fetch();
-      
+
       // If phoneNumber is provided, verify it's valid
       if (phoneNumber) {
         // Check if phone number exists in account
         const numbers = await client.incomingPhoneNumbers.list({
           phoneNumber
         });
-        
+
         if (numbers.length === 0) {
           return res.status(400).send({
             success: false,
@@ -1554,14 +1554,14 @@ export const testTwilioConnection = async (req: FastifyRequest, res: FastifyRepl
           });
         }
       }
-      
+
       isSuccessful = true;
       response = {
         accountStatus: account.status,
         accountType: account.type,
         accountName: account.friendlyName
       };
-      
+
       // Update status in database
       const configuration = await Configuration.findOne();
       if (configuration) {
@@ -1573,7 +1573,7 @@ export const testTwilioConnection = async (req: FastifyRequest, res: FastifyRepl
     } catch (error) {
       logger.error('Twilio test connection failed:', error);
       response = handleError(error);
-      
+
       // Update status in database
       const configuration = await Configuration.findOne();
       if (configuration) {
@@ -1615,10 +1615,10 @@ export const testDeepgramTTSConnection = async (req: FastifyRequest, res: Fastif
       // Test Deepgram TTS connection by creating a service instance and testing availability
       const { DeepgramTTSService } = await import('../services/deepgramTTSService');
       const tempService = new DeepgramTTSService(apiKey);
-      
+
       // Test if the API key is valid
       const isAvailable = await tempService.isAvailable();
-      
+
       if (isAvailable) {
         isSuccessful = true;
         const models = tempService.getAvailableModels();
@@ -1629,7 +1629,7 @@ export const testDeepgramTTSConnection = async (req: FastifyRequest, res: Fastif
             previewUrl: undefined // Deepgram doesn't have preview URLs
           }))
         };
-        
+
         // Update status in database
         const configuration = await Configuration.findOne();
         if (configuration) {
@@ -1677,7 +1677,7 @@ export const testDeepgramTTSConnection = async (req: FastifyRequest, res: Fastif
       }
     } catch (error: unknown) {
       logger.error('Deepgram TTS test connection failed:', error);
-      
+
       // Update status to failed in database
       const configuration = await Configuration.findOne();
       if (configuration && configuration.ttsConfig?.deepgramTTS) {
@@ -1685,7 +1685,7 @@ export const testDeepgramTTSConnection = async (req: FastifyRequest, res: Fastif
         configuration.ttsConfig.deepgramTTS.lastError = error instanceof Error ? error.message : 'Unknown error';
         await configuration.save();
       }
-      
+
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       return res.status(400).send({
         success: false,
@@ -1733,7 +1733,7 @@ export const testElevenLabsConnection = async (req: FastifyRequest, res: Fastify
           }
         }
       );
-      
+
       isSuccessful = true;
       response = {
         availableVoices: elevenLabsResponse.data.voices.map((voice: any) => ({
@@ -1742,7 +1742,7 @@ export const testElevenLabsConnection = async (req: FastifyRequest, res: Fastify
           previewUrl: voice.preview_url
         }))
       };
-      
+
       // Update status in database
       const configuration = await Configuration.findOne();
       if (configuration) {
@@ -1758,7 +1758,7 @@ export const testElevenLabsConnection = async (req: FastifyRequest, res: Fastify
       } else {
         response = handleError(error);
       }
-      
+
       // Update status in database
       const configuration = await Configuration.findOne();
       if (configuration) {
@@ -1789,7 +1789,7 @@ export const testVoiceSynthesis = async (req: FastifyRequest, res: FastifyReply)
   try {
     const { voiceId, text, apiKey, campaignId, useConfigSettings = true } = req.body as any;
     logger.info(`Voice synthesis test request received with voiceId: ${voiceId}`);
-    
+
     if (!voiceId || !text) {
       logger.warn('Voice synthesis test missing required fields', { voiceId: !!voiceId, text: !!text });
       return res.status(400).send({ message: 'Voice ID and text are required' });
@@ -1807,7 +1807,7 @@ export const testVoiceSynthesis = async (req: FastifyRequest, res: FastifyReply)
       }
       elevenLabsApiKey = configuration.elevenLabsConfig.apiKey;
     }
-    
+
     // Validate API key format (ElevenLabs keys are typically 32+ characters)
     if (!elevenLabsApiKey || elevenLabsApiKey.length < 32 || elevenLabsApiKey.includes('••••••••')) {
       logger.warn('Invalid ElevenLabs API key format');
@@ -1829,7 +1829,7 @@ export const testVoiceSynthesis = async (req: FastifyRequest, res: FastifyReply)
         // Import EnhancedVoiceAIService to get combined settings
         const { EnhancedVoiceAIService } = await import('../services/enhancedVoiceAIService');
         const combinedSettings = await EnhancedVoiceAIService.getCombinedVoiceSettings(campaignId);
-        
+
         voiceSettings = {
           stability: combinedSettings.stability,
           similarity_boost: combinedSettings.similarityBoost,
@@ -1894,7 +1894,7 @@ export const testVoiceSynthesis = async (req: FastifyRequest, res: FastifyReply)
         const axiosError = error as any;
         if (axiosError.response?.status === 401) {
           errorMessage = 'Invalid ElevenLabs API key';
-          
+
           // Update ElevenLabs status to failed in database
           const configuration = await Configuration.findOne();
           if (configuration) {
@@ -1907,7 +1907,7 @@ export const testVoiceSynthesis = async (req: FastifyRequest, res: FastifyReply)
         } else if (axiosError.response?.status === 404) {
           errorMessage = 'Voice ID not found';
         }
-        
+
         // Log response for debugging
         if (axiosError.response?.data) {
           try {
@@ -1923,7 +1923,7 @@ export const testVoiceSynthesis = async (req: FastifyRequest, res: FastifyReply)
             logger.error('Error parsing ElevenLabs error response:', parseError);
           }
         }
-        
+
         statusCode = axiosError.response?.status || 400;
       }
 
@@ -1949,19 +1949,19 @@ export const testVoiceSynthesis = async (req: FastifyRequest, res: FastifyReply)
 export const deleteApiKey = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const { provider, name } = req.params as any;
-    
+
     logger.info(`Received request to delete API key for provider: ${provider}${name ? `, name: ${name}` : ''}`);
-    
+
     // Get existing configuration
     let configuration = await Configuration.findOne();
-    
+
     if (!configuration) {
       return res.status(404).send({ message: 'Configuration not found' });
     }
-    
+
     let success = false;
     let message = '';
-    
+
     // Delete the appropriate API key based on provider
     switch (provider) {
       case 'elevenlabs':
@@ -1977,7 +1977,7 @@ export const deleteApiKey = async (req: FastifyRequest, res: FastifyReply) => {
           logger.warn('No ElevenLabs API key found to delete');
         }
         break;
-        
+
       case 'twilio':
         if (configuration.twilioConfig) {
           configuration.twilioConfig.authToken = '';
@@ -1991,35 +1991,35 @@ export const deleteApiKey = async (req: FastifyRequest, res: FastifyReply) => {
           logger.warn('No Twilio auth token found to delete');
         }
         break;
-        
+
       case 'llm':
         if (!name) {
           return res.status(400).send({ message: 'LLM provider name is required' });
         }
-        
+
         if (configuration.llmConfig && configuration.llmConfig.providers) {
           const providerIndex = configuration.llmConfig.providers.findIndex(
             (p: any) => p.name === name
           );
-          
+
           if (providerIndex >= 0) {
             // Remove the provider completely from the array
             logger.info(`Removing provider ${name} completely from the configuration`);
             configuration.llmConfig.providers.splice(providerIndex, 1);
-            
+
             // Force Mongoose to detect the change
             configuration.markModified('llmConfig.providers');
-            
+
             success = true;
             message = `${name} provider deleted successfully`;
             logger.info(`${name} provider deleted completely`);
-            
+
             // If this was the default provider, update to another provider if available
             if (configuration.llmConfig.defaultProvider === name) {
               const availableProvider = configuration.llmConfig.providers.find(
                 (p: any) => p.name !== name && p.apiKey
               );
-              
+
               if (availableProvider) {
                 configuration.llmConfig.defaultProvider = availableProvider.name;
                 logger.info(`Updated default LLM provider to ${availableProvider.name}`);
@@ -2034,7 +2034,7 @@ export const deleteApiKey = async (req: FastifyRequest, res: FastifyReply) => {
           logger.warn('LLM configuration not found');
         }
         break;
-        
+
       case 'webhook':
         if (configuration.webhookConfig) {
           configuration.webhookConfig.secret = '';
@@ -2046,17 +2046,17 @@ export const deleteApiKey = async (req: FastifyRequest, res: FastifyReply) => {
           logger.warn('No webhook secret found to delete');
         }
         break;
-        
+
       default:
         return res.status(400).send({ message: 'Invalid provider specified' });
     }
-    
+
     // Save the updated configuration
     if (success) {
       try {          // Force Mongoose to detect changes to the entire array
         configuration.markModified('llmConfig');
         configuration.markModified('llmConfig.providers');
-        
+
         // Log state before saving
         logger.info('Saving configuration with the following LLM providers state:', {
           providers: configuration.llmConfig.providers.map((p: any) => ({
@@ -2067,16 +2067,16 @@ export const deleteApiKey = async (req: FastifyRequest, res: FastifyReply) => {
             apiKeyLength: p.apiKey ? p.apiKey.length : 0
           }))
         });
-        
+
         // Save with retry mechanism for optimistic concurrency issues
         let saveAttempt = 0;
         const maxSaveAttempts = 3;
-        
+
         while (saveAttempt < maxSaveAttempts) {
           try {
             await configuration.save();
             logger.info(`Configuration saved successfully after API key deletion (attempt ${saveAttempt + 1})`);
-            
+
             // Verify the removal persisted
             const verifiedConfig = await Configuration.findById(configuration._id);
             if (verifiedConfig && provider === 'llm' && name) {
@@ -2087,7 +2087,7 @@ export const deleteApiKey = async (req: FastifyRequest, res: FastifyReply) => {
                 logger.info(`✅ Verified provider ${name} was successfully removed from database`);
               }
             }
-            
+
             break;
           } catch (saveErr) {
             saveAttempt++;
@@ -2098,7 +2098,7 @@ export const deleteApiKey = async (req: FastifyRequest, res: FastifyReply) => {
             await new Promise(resolve => setTimeout(resolve, 200)); // Small delay before retry
           }
         }
-        
+
         // Update services with new configuration (removed API keys)
         await updateServicesWithNewConfig(configuration);
       } catch (error) {
@@ -2109,7 +2109,7 @@ export const deleteApiKey = async (req: FastifyRequest, res: FastifyReply) => {
         });
       }
     }
-    
+
     return res.status(200).send({
       success,
       message
@@ -2136,7 +2136,7 @@ export const verifyElevenLabsApiKey = async (req: FastifyRequest, res: FastifyRe
 
     // Check if API key exists
     if (!config.elevenLabsConfig?.apiKey) {
-      return res.status(400).send({ 
+      return res.status(400).send({
         message: 'ElevenLabs API key is not set',
         status: 'failed'
       });
@@ -2148,7 +2148,7 @@ export const verifyElevenLabsApiKey = async (req: FastifyRequest, res: FastifyRe
 
     // Get the updated configuration after verification
     const updatedConfig = await Configuration.findOne();
-    
+
     // Return the verification result with the latest configuration status
     return res.status(200).send({
       success: verificationResult.success,
@@ -2182,7 +2182,7 @@ export const verifyDeepgramTTSApiKey = async (req: FastifyRequest, res: FastifyR
 
     // Check if API key exists
     if (!config.ttsConfig?.deepgramTTS?.apiKey) {
-      return res.status(400).send({ 
+      return res.status(400).send({
         message: 'Deepgram TTS API key is not set',
         status: 'failed'
       });
@@ -2194,7 +2194,7 @@ export const verifyDeepgramTTSApiKey = async (req: FastifyRequest, res: FastifyR
 
     // Get the updated configuration after verification
     const updatedConfig = await Configuration.findOne();
-    
+
     // Return the verification result with the latest configuration status
     return res.status(200).send({
       success: verificationResult.success,
@@ -2220,10 +2220,10 @@ export const verifyDeepgramTTSApiKey = async (req: FastifyRequest, res: FastifyR
 export const makeTestCall = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const { accountSid, authToken, fromNumber, toNumber, message } = req.body as any;
-    
-    logger.info('Testing Twilio call with:', { 
-      fromNumber, 
-      toNumber, 
+
+    logger.info('Testing Twilio call with:', {
+      fromNumber,
+      toNumber,
       hasMessage: !!message,
       accountSidPrefix: accountSid ? accountSid.substring(0, 5) + '...' : 'NOT PROVIDED',
       hasAuthToken: !!authToken
@@ -2250,7 +2250,7 @@ export const makeTestCall = async (req: FastifyRequest, res: FastifyReply) => {
 
     // Default message if not provided
     const callMessage = message || 'This is a test call from Project Call. Your system is working correctly.';
-    
+
     // Create TwiML for the call
     const twiml = `
       <Response>
@@ -2259,27 +2259,27 @@ export const makeTestCall = async (req: FastifyRequest, res: FastifyReply) => {
         <Say voice="alice" language="en-US">Test call complete. Goodbye.</Say>
       </Response>
     `;
-    
+
     // Make the test call
     const call = await twilioClient.calls.create({
       twiml: twiml,
       to: toNumber,
       from: fromNumber
     });
-    
+
     logger.info('Test call initiated successfully:', { callSid: call.sid });
-    
+
     // Update status in configuration if this is using saved credentials
     try {
       const config = await Configuration.findOne();
-      if (config && 
-          config.twilioConfig && 
-          config.twilioConfig.accountSid === accountSid) {
-        
+      if (config &&
+        config.twilioConfig &&
+        config.twilioConfig.accountSid === accountSid) {
+
         config.twilioConfig.status = 'verified';
         config.twilioConfig.lastVerified = new Date();
         config.twilioConfig.isEnabled = true;
-        
+
         await config.save();
         logger.info('Updated Twilio configuration status to verified');
       }
@@ -2287,20 +2287,20 @@ export const makeTestCall = async (req: FastifyRequest, res: FastifyReply) => {
       logger.error('Error updating configuration after successful test call:', configError);
       // Don't fail the request if just the config update fails
     }
-    
+
     return res.status(200).send({
       success: true,
       message: 'Test call initiated successfully',
       callSid: call.sid,
       status: call.status
     });
-    
+
   } catch (error) {
     logger.error('Error making test call with Twilio:', error);
-    
+
     let errorMessage = 'Failed to make test call';
     let errorDetails = null;
-    
+
     if (error.code) {
       switch (error.code) {
         case 20404:
@@ -2326,14 +2326,14 @@ export const makeTestCall = async (req: FastifyRequest, res: FastifyReply) => {
         default:
           errorMessage = `Twilio error: ${error.message || 'Unknown error'}`;
       }
-      
+
       errorDetails = {
         code: error.code,
         moreInfo: error.moreInfo,
         status: error.status
       };
     }
-    
+
     return res.status(400).send({
       success: false,
       message: errorMessage,
@@ -2347,16 +2347,16 @@ export const makeTestCall = async (req: FastifyRequest, res: FastifyReply) => {
 export const autoConfigureDeepgramModel = async (_req: FastifyRequest, res: FastifyReply) => {
   try {
     logger.info('Starting Deepgram auto-configuration...');
-    
+
     const { getDeepgramAutoConfigService } = await import('../services/deepgramAutoConfigService');
     const autoConfigService = getDeepgramAutoConfigService();
-    
+
     // Perform auto-configuration
     const result = await autoConfigService.autoConfigureOptimalModel();
-    
+
     if (result.success) {
       logger.info(`Deepgram auto-configuration successful: ${result.model}`);
-      
+
       res.status(200).send({
         success: true,
         message: 'Deepgram model auto-configured successfully',
@@ -2371,7 +2371,7 @@ export const autoConfigureDeepgramModel = async (_req: FastifyRequest, res: Fast
       });
     } else {
       logger.error(`Deepgram auto-configuration failed: ${result.error}`);
-      
+
       res.status(400).send({
         success: false,
         message: 'Deepgram auto-configuration failed',
@@ -2379,11 +2379,11 @@ export const autoConfigureDeepgramModel = async (_req: FastifyRequest, res: Fast
         warnings: result.warnings
       });
     }
-    
+
   } catch (error) {
     const errorMessage = handleError(error);
     logger.error(`Deepgram auto-configuration error: ${errorMessage}`);
-    
+
     res.status(500).send({
       success: false,
       message: 'Internal server error during auto-configuration',
@@ -2398,16 +2398,16 @@ export const autoConfigureDeepgramModel = async (_req: FastifyRequest, res: Fast
 export const validateDeepgramConfiguration = async (_req: FastifyRequest, res: FastifyReply) => {
   try {
     logger.info('Validating Deepgram configuration...');
-    
+
     const { getDeepgramAutoConfigService } = await import('../services/deepgramAutoConfigService');
     const autoConfigService = getDeepgramAutoConfigService();
-    
+
     // Force immediate validation
     const result = await autoConfigService.forceValidation();
-    
+
     if (result.isValid) {
       logger.info(`Deepgram validation successful for model: ${result.model}`);
-      
+
       res.status(200).send({
         success: true,
         message: 'Deepgram configuration is valid',
@@ -2419,7 +2419,7 @@ export const validateDeepgramConfiguration = async (_req: FastifyRequest, res: F
       });
     } else {
       logger.warn(`Deepgram validation failed for model ${result.model}: ${result.error}`);
-      
+
       res.status(400).send({
         success: false,
         message: 'Deepgram configuration validation failed',
@@ -2432,11 +2432,11 @@ export const validateDeepgramConfiguration = async (_req: FastifyRequest, res: F
         }
       });
     }
-    
+
   } catch (error) {
     const errorMessage = handleError(error);
     logger.error(`Deepgram validation error: ${errorMessage}`);
-    
+
     res.status(500).send({
       success: false,
       message: 'Internal server error during validation',
@@ -2452,20 +2452,20 @@ export const getDeepgramValidationStatus = async (_req: FastifyRequest, res: Fas
   try {
     const { getDeepgramAutoConfigService } = await import('../services/deepgramAutoConfigService');
     const autoConfigService = getDeepgramAutoConfigService();
-    
+
     // Get current validation status
     const status = await autoConfigService.getValidationStatus();
-    
+
     res.status(200).send({
       success: true,
       message: 'Deepgram validation status retrieved',
       data: status
     });
-    
+
   } catch (error) {
     const errorMessage = handleError(error);
     logger.error(`Error getting Deepgram validation status: ${errorMessage}`);
-    
+
     res.status(500).send({
       success: false,
       message: 'Internal server error getting validation status',
@@ -2480,16 +2480,16 @@ export const getDeepgramValidationStatus = async (_req: FastifyRequest, res: Fas
 export const testDeepgramModelCompatibility = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const { model } = req.body as any;
-    
+
     if (!model) {
       return res.status(400).send({
         success: false,
         message: 'Model name is required'
       });
     }
-    
+
     logger.info(`Testing Deepgram model compatibility: ${model}`);
-    
+
     // Get current configuration
     const config = await Configuration.findOne();
     if (!config || !config.deepgramConfig?.apiKey) {
@@ -2498,23 +2498,23 @@ export const testDeepgramModelCompatibility = async (req: FastifyRequest, res: F
         message: 'Deepgram API key not configured'
       });
     }
-    
+
     const { getModelCompatibilityService } = await import('../services/modelCompatibilityService');
     const compatibilityService = getModelCompatibilityService();
-    
+
     if (!compatibilityService) {
       return res.status(500).send({
         success: false,
         message: 'Model compatibility service not initialized'
       });
     }
-    
+
     // Test model compatibility
     const result = await compatibilityService.validateModelAccess(config.deepgramConfig.apiKey, model);
-    
+
     if (result.isValid) {
       logger.info(`Model ${model} is compatible`);
-      
+
       res.status(200).send({
         success: true,
         message: `Model ${model} is compatible`,
@@ -2526,7 +2526,7 @@ export const testDeepgramModelCompatibility = async (req: FastifyRequest, res: F
       });
     } else {
       logger.warn(`Model ${model} is not compatible: ${result.error}`);
-      
+
       res.status(400).send({
         success: false,
         message: `Model ${model} is not compatible`,
@@ -2539,11 +2539,11 @@ export const testDeepgramModelCompatibility = async (req: FastifyRequest, res: F
         }
       });
     }
-    
+
   } catch (error) {
     const errorMessage = handleError(error);
     logger.error(`Error testing model compatibility: ${errorMessage}`);
-    
+
     res.status(500).send({
       success: false,
       message: 'Internal server error during model compatibility test',
@@ -2558,7 +2558,7 @@ export const testDeepgramModelCompatibility = async (req: FastifyRequest, res: F
 export const getSuggestedDeepgramModels = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     logger.info('Getting suggested Deepgram models...');
-    
+
     // Get current configuration
     const config = await Configuration.findOne();
     if (!config || !config.deepgramConfig?.apiKey) {
@@ -2567,13 +2567,13 @@ export const getSuggestedDeepgramModels = async (req: FastifyRequest, res: Fasti
         message: 'Deepgram API key not configured'
       });
     }
-    
+
     const { getDeepgramConfigValidator } = await import('../services/deepgramConfigValidator');
     const configValidator = getDeepgramConfigValidator();
-    
+
     // Get query parameters for preferences
     const { useCase = 'general', language = 'en', prioritizeAccuracy = false, prioritizeSpeed = false, prioritizeCost = false } = req.query as any;
-    
+
     // Get optimal configuration suggestions
     const optimalConfig = await configValidator.suggestOptimalConfiguration(
       config.deepgramConfig.apiKey,
@@ -2585,9 +2585,9 @@ export const getSuggestedDeepgramModels = async (req: FastifyRequest, res: Fasti
         prioritizeCost
       }
     );
-    
+
     logger.info(`Generated optimal configuration suggestions for ${useCase} use case`);
-    
+
     res.status(200).send({
       success: true,
       message: 'Suggested models retrieved successfully',
@@ -2608,11 +2608,11 @@ export const getSuggestedDeepgramModels = async (req: FastifyRequest, res: Fasti
         }
       }
     });
-    
+
   } catch (error) {
     const errorMessage = handleError(error);
     logger.error(`Error getting suggested models: ${errorMessage}`);
-    
+
     res.status(500).send({
       success: false,
       message: 'Internal server error getting suggested models',
@@ -2627,7 +2627,7 @@ export const getSuggestedDeepgramModels = async (req: FastifyRequest, res: Fasti
 export const validateCompleteDeepgramConfiguration = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     logger.info('Validating complete Deepgram configuration...');
-    
+
     // Get current configuration
     const config = await Configuration.findOne();
     if (!config || !config.deepgramConfig?.apiKey) {
@@ -2636,10 +2636,10 @@ export const validateCompleteDeepgramConfiguration = async (req: FastifyRequest,
         message: 'Deepgram API key not configured'
       });
     }
-    
+
     const { getDeepgramConfigValidator } = await import('../services/deepgramConfigValidator');
     const configValidator = getDeepgramConfigValidator();
-    
+
     // Prepare configuration for validation
     const configForValidation = {
       apiKey: config.deepgramConfig.apiKey,
@@ -2654,16 +2654,16 @@ export const validateCompleteDeepgramConfiguration = async (req: FastifyRequest,
       lastError: config.deepgramConfig.lastError,
       ...(req.body as any) // Allow override of specific settings for validation
     };
-    
+
     // Validate the configuration
     const validationResult = await configValidator.validateConfiguration(configForValidation);
-    
+
     logger.info(`Configuration validation completed: ${validationResult.isValid ? 'PASSED' : 'FAILED'}`);
-    
+
     res.status(validationResult.isValid ? 200 : 400).send({
       success: validationResult.isValid,
-      message: validationResult.isValid 
-        ? 'Deepgram configuration is valid' 
+      message: validationResult.isValid
+        ? 'Deepgram configuration is valid'
         : 'Deepgram configuration has issues',
       data: {
         isValid: validationResult.isValid,
@@ -2672,11 +2672,11 @@ export const validateCompleteDeepgramConfiguration = async (req: FastifyRequest,
         accountInfo: validationResult.accountInfo
       }
     });
-    
+
   } catch (error) {
     const errorMessage = handleError(error);
     logger.error(`Error validating complete configuration: ${errorMessage}`);
-    
+
     res.status(500).send({
       success: false,
       message: 'Internal server error during configuration validation',
@@ -2691,23 +2691,23 @@ export const validateCompleteDeepgramConfiguration = async (req: FastifyRequest,
 export const batchTestDeepgramModels = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const { models } = req.body as any;
-    
+
     if (!models || !Array.isArray(models) || models.length === 0) {
       return res.status(400).send({
         success: false,
         message: 'Models array is required and must not be empty'
       });
     }
-    
+
     if (models.length > 10) {
       return res.status(400).send({
         success: false,
         message: 'Maximum 10 models can be tested at once'
       });
     }
-    
+
     logger.info(`Batch testing ${models.length} Deepgram models: ${models.join(', ')}`);
-    
+
     // Get current configuration
     const config = await Configuration.findOne();
     if (!config || !config.deepgramConfig?.apiKey) {
@@ -2716,28 +2716,28 @@ export const batchTestDeepgramModels = async (req: FastifyRequest, res: FastifyR
         message: 'Deepgram API key not configured'
       });
     }
-    
+
     const { getDeepgramConfigValidator } = await import('../services/deepgramConfigValidator');
     const configValidator = getDeepgramConfigValidator();
-    
+
     // Batch test models
     const testResults = await configValidator.batchTestModels(config.deepgramConfig.apiKey, models);
-    
+
     // Convert Map to object for JSON response
     const resultsObject: { [key: string]: any } = {};
     testResults.forEach((result, model) => {
       resultsObject[model] = result;
     });
-    
+
     // Calculate summary statistics
     const totalModels = models.length;
     const accessibleModels = Array.from(testResults.values()).filter(result => result.isAccessible).length;
     const averageResponseTime = Array.from(testResults.values())
       .filter(result => result.responseTime)
       .reduce((sum, result) => sum + (result.responseTime || 0), 0) / totalModels;
-    
+
     logger.info(`Batch testing completed: ${accessibleModels}/${totalModels} models accessible`);
-    
+
     res.status(200).send({
       success: true,
       message: `Batch testing completed for ${totalModels} models`,
@@ -2752,11 +2752,11 @@ export const batchTestDeepgramModels = async (req: FastifyRequest, res: FastifyR
         }
       }
     });
-    
+
   } catch (error) {
     const errorMessage = handleError(error);
     logger.error(`Error in batch model testing: ${errorMessage}`);
-    
+
     res.status(500).send({
       success: false,
       message: 'Internal server error during batch model testing',
@@ -2794,11 +2794,11 @@ export const getDynamicProviderModels = async (req: FastifyRequest, res: Fastify
               'Authorization': `Bearer ${apiKey}`
             }
           });
-          
+
           // Filter for chat models only
           models = openaiResponse.data.data
-            .filter((model: any) => 
-              model.id.includes('gpt') && 
+            .filter((model: any) =>
+              model.id.includes('gpt') &&
               !model.id.includes('instruct') &&
               !model.id.includes('vision')
             )
@@ -2823,7 +2823,7 @@ export const getDynamicProviderModels = async (req: FastifyRequest, res: Fastify
           { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet', description: 'Balanced performance' },
           { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', description: 'Fast and compact' }
         ];
-        
+
         // Verify API key by making a test request
         try {
           await axios.post('https://api.anthropic.com/v1/messages', {
@@ -2851,20 +2851,20 @@ export const getDynamicProviderModels = async (req: FastifyRequest, res: Fastify
           const listModelsResponse = await axios.get(
             `https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`
           );
-          
+
           // Filter for models that support generateContent
           const availableModels = listModelsResponse.data.models
-            .filter((model: any) => 
+            .filter((model: any) =>
               model.supportedGenerationMethods?.includes('generateContent')
             )
             .map((model: any) => {
               // Extract model name from full path (e.g., "models/gemini-1.5-flash" -> "gemini-1.5-flash")
               const modelId = model.name.replace('models/', '');
-              
+
               // Create friendly names
               let friendlyName = modelId;
               let description = model.description || '';
-              
+
               if (modelId.includes('gemini-2.5')) {
                 friendlyName = modelId.includes('pro') ? 'Gemini 2.5 Pro' : 'Gemini 2.5 Flash';
                 description = modelId.includes('pro') ? 'Latest, most capable model' : 'Latest, fast and efficient';
@@ -2878,7 +2878,7 @@ export const getDynamicProviderModels = async (req: FastifyRequest, res: Fastify
                 friendlyName = 'Gemini 1.0 Pro';
                 description = 'Stable production model';
               }
-              
+
               return {
                 id: modelId,
                 name: friendlyName,
@@ -2887,13 +2887,13 @@ export const getDynamicProviderModels = async (req: FastifyRequest, res: Fastify
             })
             // Sort by version (newest first)
             .sort((a: any, b: any) => b.id.localeCompare(a.id));
-          
+
           models = availableModels;
-          
+
           if (models.length === 0) {
             throw new Error('No models available for this API key');
           }
-          
+
           logger.info(`Found ${models.length} available Google models`);
         } catch (error: any) {
           if (error.response?.status === 400 && error.response?.data?.error?.message?.includes('API key')) {
@@ -2922,7 +2922,7 @@ export const getDynamicProviderModels = async (req: FastifyRequest, res: Fastify
   } catch (error) {
     const errorMessage = handleError(error);
     logger.error(`Error fetching dynamic models: ${errorMessage}`);
-    
+
     return res.status(500).send({
       success: false,
       message: errorMessage
@@ -3006,7 +3006,7 @@ export const testLLMChat = async (req: FastifyRequest, res: FastifyReply) => {
         try {
           // Use provided model or fetch the first available model
           let modelToUse = model;
-          
+
           if (!modelToUse) {
             // Fetch available models to get a default
             const listModelsResponse = await axios.get(
@@ -3015,10 +3015,10 @@ export const testLLMChat = async (req: FastifyRequest, res: FastifyReply) => {
             const availableModels = listModelsResponse.data.models
               .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
               .map((m: any) => m.name.replace('models/', ''));
-            
+
             modelToUse = availableModels[0] || 'gemini-1.5-flash';
           }
-          
+
           const googleResponse = await axios.post(
             `https://generativelanguage.googleapis.com/v1/models/${modelToUse}:generateContent?key=${apiKey}`,
             {
@@ -3058,7 +3058,7 @@ export const testLLMChat = async (req: FastifyRequest, res: FastifyReply) => {
   } catch (error) {
     const errorMessage = handleError(error);
     logger.error(`LLM chat test error: ${errorMessage}`);
-    
+
     return res.status(500).send({
       success: false,
       message: errorMessage

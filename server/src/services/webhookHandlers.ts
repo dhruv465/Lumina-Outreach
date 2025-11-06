@@ -225,13 +225,7 @@ export async function handleTwilioVoiceWebhook(req: FastifyRequest, reply: Fasti
                   return;
             }
 
-            // Create the TwiML response
-            // NOTE: Greeting is now handled by Deepgram Agent directly (configured in deepgramService.ts)
-            // The agent receives the campaign's openingMessage in its configuration and speaks it automatically
-            // No separate TTS synthesis or audio file playback needed
             const twiml = new twilio.twiml.VoiceResponse();
-            
-            logger.info(`Skipping separate greeting synthesis for call ${callId} - Deepgram Agent will handle greeting`);
 
             const deepgramEnabled = configuration?.deepgramConfig?.isEnabled;
             const flashModelEnabled = configuration?.elevenLabsConfig?.useFlashModel;
@@ -324,7 +318,6 @@ export async function handleTwilioVoiceWebhook(req: FastifyRequest, reply: Fasti
             }
 
             logger.info(`Voice webhook TwiML generated for call ${callId}`, {
-                  useElevenLabs,
                   conversationId,
                   twimlLength,
                   twimlSizeKB,
@@ -332,7 +325,8 @@ export async function handleTwilioVoiceWebhook(req: FastifyRequest, reply: Fasti
                   hasConfig: !!configuration,
                   elevenLabsEnabled: configuration?.elevenLabsConfig?.isEnabled,
                   elevenLabsStatus: configuration?.elevenLabsConfig?.status,
-                  unusualActivityDetected: configuration?.elevenLabsConfig?.unusualActivityDetected || false
+                  unusualActivityDetected: configuration?.elevenLabsConfig?.unusualActivityDetected || false,
+                  useAdvancedStreaming
             });
 
             reply.type('text/xml');

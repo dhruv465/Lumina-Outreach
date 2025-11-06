@@ -63,9 +63,9 @@ export function decodeTwilioAudio(muLawBuffer: Buffer): Buffer {
 }
 
 /**
- * (This function is no longer needed but kept for reference if you have logic for sending audio back to Twilio)
- * Convert 16-bit PCM audio to μ-law format.
- * Downsamples from 24kHz to 8kHz (Deepgram output → Twilio input)
+ * Convert 16-bit PCM audio to μ-law format with proper resampling.
+ * Downsamples from 24kHz to 8kHz (Deepgram output → Twilio input) using linear interpolation
+ * to avoid harsh audio artifacts.
  */
 export function convertPCMToMuLaw(
   pcmBuffer: Buffer,
@@ -75,17 +75,53 @@ export function convertPCMToMuLaw(
   let pcm8kHzBuffer = pcmBuffer;
 
   if (inputSampleRate === 24000) {
-    // Downsample 24kHz → 8kHz (take every 3rd sample)
-    const numSamples = Math.floor(pcmBuffer.length / 2);
-    const downSampledLength = Math.floor(numSamples / 3);
-    pcm8kHzBuffer = Buffer.alloc(downSampledLength * 2);
+    // Downsample 24kHz → 8kHz using linear interpolation for better quality
+    const numInputSamples = Math.floor(pcmBuffer.length / 2);
+    const ratio = 24000 / 8000; // 3.0
+    const numOutputSamples = Math.floor(numInputSamples / ratio);
+    pcm8kHzBuffer = Buffer.alloc(numOutputSamples * 2);
 
-    for (let i = 0; i < downSampledLength; i++) {
-      const sample = pcmBuffer.readInt16LE(i * 3 * 2);
-      pcm8kHzBuffer.writeInt16LE(sample, i * 2);
+    for (let i = 0; i < numOutputSamples; i++) {
+      // Calculate the position in the input buffer
+      const srcPos = i * ratio;
+      const srcIndex = Math.floor(srcPos);
+      const fraction = srcPos - srcIndex;
+
+      // Get the two samples to interpolate between
+      const sample1 = srcIndex < numInputSamples ? pcmBuffer.readInt16LE(srcIndex * 2) : 0;
+      const sample2 = (srcIndex + 1) < numInputSamples ? pcmBuffer.readInt16LE((srcIndex + 1) * 2) : sample1;
+
+      // Linear interpolation
+      const interpolatedSample = Math.round(sample1 * (1 - fraction) + sample2 * fraction);
+
+      // Clamp to 16-bit range
+      const clampedSample = Math.max(-32768, Math.min(32767, interpolatedSample));
+
+      pcm8kHzBuffer.writeInt16LE(clampedSample, i * 2);
+    }
+  } else if (inputSampleRate === 16000) {
+    // Downsample 16kHz → 8kHz using linear interpolation
+    const numInputSamples = Math.floor(pcmBuffer.length / 2);
+    const ratio = 16000 / 8000; // 2.0
+    const numOutputSamples = Math.floor(numInputSamples / ratio);
+    pcm8kHzBuffer = Buffer.alloc(numOutputSamples * 2);
+
+    for (let i = 0; i < numOutputSamples; i++) {
+      // For 2:1 ratio, we can use simple averaging
+      const idx1 = i * 2;
+      const idx2 = i * 2 + 1;
+
+      const sample1 = idx1 < numInputSamples ? pcmBuffer.readInt16LE(idx1 * 2) : 0;
+      const sample2 = idx2 < numInputSamples ? pcmBuffer.readInt16LE(idx2 * 2) : sample1;
+
+      // Average the two samples
+      const avgSample = Math.round((sample1 + sample2) / 2);
+
+      pcm8kHzBuffer.writeInt16LE(avgSample, i * 2);
     }
   }
 
+  // Convert PCM to μ-law
   const muLawBuffer = Buffer.alloc(Math.floor(pcm8kHzBuffer.length / 2));
   for (let i = 0; i < pcm8kHzBuffer.length; i += 2) {
     const pcmSample = pcm8kHzBuffer.readInt16LE(i);

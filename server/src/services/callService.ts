@@ -70,6 +70,8 @@ class CallService {
       record: configuration.complianceSettings.recordCalls,
       recordingStatusCallback: `${baseUrl}/api/calls/recording-webhook?callId=${newCall._id}`,
       recordingStatusCallbackEvent: ['completed'],
+      recordingChannels: 'dual', // Record both channels separately for better quality
+      recordingTrack: 'both', // Record both inbound and outbound audio
       timeout: configuration.generalSettings.maxCallDuration,
       machineDetection: 'DetectMessageEnd',
     });

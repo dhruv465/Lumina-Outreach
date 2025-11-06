@@ -231,6 +231,13 @@ api.interceptors.response.use(
       // Store this 401 timestamp
       localStorage.setItem('last401Time', currentTime.toString());
       
+      // For recording endpoints, provide a more helpful error message
+      if (requestUrl.includes('/recording')) {
+        authDebug.error('Authentication failed for recording endpoint - token may be expired');
+        // Add a custom error message for the UI
+        error.message = 'Your session has expired. Please refresh the page and try again.';
+      }
+      
       // Only logout if token is genuinely invalid (not a recent login)
       if (!recentLogin) {
         authDebug.error('401 error detected, token appears invalid, logging out user');

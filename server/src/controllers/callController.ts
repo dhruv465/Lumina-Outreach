@@ -37,12 +37,101 @@ export const getCallById = async (req: FastifyRequest, res: FastifyReply): Promi
 
 export const getCallRecording = async (req: FastifyRequest, res: FastifyReply): Promise<any> => {
   try {
-    const recordingUrl = await callService.getCallRecording((req.params as any).id);
+    const callId = (req.params as any).id;
+    const { stream } = req.query as any;
+    
+    console.log(`[Recording] Request for call ${callId}, stream=${stream}, user=${(req as any).user?.email || 'unknown'}`);
+    
+    const recordingUrl = await callService.getCallRecording(callId);
+    
     if (!recordingUrl) {
+      console.log(`[Recording] No recording URL found for call ${callId}`);
       return res.status(404).send({ message: 'No recording available for this call' });
     }
+    
+    console.log(`[Recording] Found recording URL for call ${callId}: ${recordingUrl.substring(0, 50)}...`);
+    
+    // If stream=true, fetch and stream the audio from Twilio
+    if (stream === 'true') {
+      try {
+        console.log(`[Recording] Streaming audio from Twilio for call ${callId}`);
+        
+        // Get Twilio credentials from configuration
+        const Configuration = require('../models/Configuration').default;
+        const config = await Configuration.findOne();
+        
+        if (!config || !config.twilioConfig || !config.twilioConfig.accountSid || !config.twilioConfig.authToken) {
+          console.error(`[Recording] Twilio credentials not configured`);
+          return res.status(500).send({ 
+            message: 'Twilio credentials not configured' 
+          });
+        }
+        
+        const { accountSid, authToken } = config.twilioConfig;
+        
+        // Create Basic Auth header for Twilio
+        const authString = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+        
+        // Import fetch if not available globally
+        const fetch = globalThis.fetch || (await import('node-fetch')).default;
+        
+        // Modify the URL to request MP3 format instead of WAV
+        // Twilio allows format conversion by appending .mp3 to the URL
+        let fetchUrl = recordingUrl;
+        if (!recordingUrl.endsWith('.mp3') && !recordingUrl.includes('.mp3?')) {
+          // Add .mp3 extension to get MP3 format from Twilio
+          fetchUrl = recordingUrl.replace(/(\?|$)/, '.mp3$1');
+        }
+        
+        // Fetch the recording from Twilio with authentication
+        console.log(`[Recording] Fetching from Twilio with authentication (format: MP3)`);
+        const response = await fetch(fetchUrl, {
+          headers: {
+            'Authorization': `Basic ${authString}`
+          }
+        });
+        
+        if (!response.ok) {
+          console.error(`[Recording] Twilio returned ${response.status} for call ${callId}`);
+          return res.status(response.status).send({ 
+            message: 'Failed to fetch recording from Twilio',
+            status: response.status,
+            statusText: response.statusText
+          });
+        }
+        
+        // Get the content type from Twilio's response
+        const contentType = response.headers.get('content-type') || 'audio/mpeg';
+        console.log(`[Recording] Twilio content-type: ${contentType}, streaming to client`);
+        
+        // Stream the audio back to the client with proper headers for WaveSurfer
+        res.header('Content-Type', 'audio/mpeg'); // Force MP3 content type for better compatibility
+        res.header('Accept-Ranges', 'bytes');
+        res.header('Cache-Control', 'public, max-age=3600');
+        res.header('Access-Control-Allow-Origin', '*');
+        res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        
+        // Convert the response to a buffer and send it
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        
+        console.log(`[Recording] Sending ${buffer.length} bytes to client for call ${callId}`);
+        return res.send(buffer);
+      } catch (streamError) {
+        console.error(`[Recording] Error streaming for call ${callId}:`, streamError);
+        return res.status(500).send({ 
+          message: 'Failed to stream recording', 
+          error: (streamError as Error).message 
+        });
+      }
+    }
+    
+    // Default behavior: return JSON with recording URL
+    console.log(`[Recording] Returning JSON response with URL for call ${callId}`);
     return res.status(200).send({ recordingUrl });
   } catch (error) {
+    console.error(`[Recording] Server error:`, error);
     return res.status(500).send({ message: 'Server error', error: (error as Error).message });
   }
 };

@@ -384,6 +384,12 @@ const AudioPlayer = ({
           responsive: true,
           normalize: true, // Normalize the waveform
           pixelRatio: window.devicePixelRatio || 1,
+          backend: 'MediaElement', // Use MediaElement backend for better compatibility
+          mediaControls: false,
+          interact: true,
+          hideScrollbar: true,
+          autoCenter: true,
+          fillParent: true,
         });
 
         wavesurfer.on("ready", () => {
@@ -542,7 +548,15 @@ const AudioPlayer = ({
           testAudio.remove();
         }, 5000);
       } catch (error) {
+        console.group("🔴 WaveSurfer Initialization Error");
         console.error("Error initializing WaveSurfer:", error);
+        console.error("Error type:", error instanceof Error ? error.constructor.name : typeof error);
+        console.error("Error message:", error instanceof Error ? error.message : String(error));
+        console.error("Error stack:", error instanceof Error ? error.stack : 'No stack trace');
+        console.error("Audio URL:", audioUrl);
+        console.error("Call ID:", callId);
+        console.groupEnd();
+        
         console.log("Falling back to simple HTML5 audio player");
         setLoading(false);
         setUseSimplePlayer(true);

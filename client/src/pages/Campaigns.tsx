@@ -149,6 +149,29 @@ const Campaigns = () => {
     }
   };
 
+  const handleDeleteCampaign = async (campaignId: string) => {
+    if (!window.confirm('Are you sure you want to delete this campaign? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      await api.delete(`/campaigns/${campaignId}`);
+      console.log(`Campaign ${campaignId} deleted successfully`);
+      
+      // Close detail sheet if it's open for this campaign
+      if (selectedCampaign && selectedCampaign._id === campaignId) {
+        setIsSheetOpen(false);
+        setSelectedCampaign(null);
+      }
+      
+      // Refresh campaigns data
+      refetch();
+    } catch (error) {
+      console.error('Error deleting campaign:', error);
+      alert('Failed to delete campaign. Please try again.');
+    }
+  };
+
   const handleCampaignFormClose = () => {
     setShowCampaignForm(false);
     setEditingCampaignId(undefined);
@@ -542,7 +565,7 @@ const Campaigns = () => {
                     </DropdownMenuItem>
                     <DropdownMenuItem 
                       className="text-destructive"
-                      onClick={() => console.log(`TODO: Delete campaign ${campaign._id}`)}
+                      onClick={() => handleDeleteCampaign(campaign._id)}
                     >
                       <Trash2 size={16} className="mr-2" />
                       Delete

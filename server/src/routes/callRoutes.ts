@@ -18,7 +18,6 @@ import {
   handleTwilioGatherWebhook,
   handleTwilioStreamWebhook
 } from '../services/webhookHandlers';
-import { handleRecordingWebhook } from '../controllers/telephonyController';
 
 const callRoutes = async (fastify, opts: Record<string, any>) => {
   // Webhook routes - MUST BE FIRST and not authenticated (for Twilio callbacks)
@@ -27,7 +26,7 @@ const callRoutes = async (fastify, opts: Record<string, any>) => {
   fastify.post('/status-webhook', handleTwilioStatusWebhook);
   fastify.post('/gather', handleTwilioGatherWebhook);
   fastify.post('/stream', handleTwilioStreamWebhook);
-  fastify.post('/recording-webhook', handleRecordingWebhook); // Use proper recording webhook handler
+  fastify.post('/recording-webhook', handleTwilioStatusWebhook); // Reuse status webhook for recording
 
   // Call management routes (protected)
   fastify.post('/initiate', { onRequest: [fastify.authenticate] }, initiateCall);

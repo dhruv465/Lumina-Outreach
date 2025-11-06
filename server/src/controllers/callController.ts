@@ -1,5 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { callService } from '../services/callService';
+import callService from '../services/callService';
 import { handleError } from '../utils/errorHandling';
 
 

@@ -247,4 +247,25 @@ class LeadService {
           exportData
             .map((row: any) =>
               Object.values(row)
-                .map(value => `"${String(value).replace(/
+                .map(value => `"${String(value).replace(/"/g, '""')}"`)
+                .join(','))
+            .join('\n')
+        : '';
+
+      return { format, data: csv };
+    } else {
+      throw new Error('Unsupported format');
+    }
+  }
+
+  async getLeadsForCalling(limit: number, language: string, excludeIds: string[]): Promise<any[]> {
+    // Placeholder implementation
+    return [];
+  }
+
+  async updateLeadAfterCall(leadId: string, status: string, notes: string, callbackDate?: Date): Promise<void> {
+    // Placeholder implementation
+  }
+}
+
+export default new LeadService();

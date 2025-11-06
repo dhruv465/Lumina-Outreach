@@ -1,40 +1,41 @@
-import fastify from "fastify";
 import fastifyCors from "@fastify/cors";
 import fastifyHelmet from "@fastify/helmet";
 import fastifyRateLimit from "@fastify/rate-limit";
+import fastify from "fastify";
 
 import fastifyWebsocket from "@fastify/websocket";
-import http from "http";
 import dotenv from "dotenv";
+import http from "http";
 import mongoose from "mongoose";
 
 import path from "path";
 import { Server as SocketIOServer } from "socket.io";
+import { validateStartupConfig } from "./config/database-validation";
+import { connectToDatabase } from "./database/connection";
 import aiOrchestrationRoutes from "./routes/aiOrchestrationRoutes";
 import analyticsRoutes from "./routes/analyticsRoutes";
+import audioStreamingRoutes from "./routes/audioStreamingRoutes";
 import callRoutes from "./routes/callRoutes";
 import campaignRoutes from "./routes/campaignRoutes";
 import configurationRoutes from "./routes/configurationRoutes";
+import connectionPreWarmingRoutes from "./routes/connectionPreWarmingRoutes";
 import dashboardRoutes from "./routes/dashboardRoutes";
 import debugRoutes from "./routes/debugRoutes";
 import deepgramTTSRoutes from "./routes/deepgramTTSRoutes";
-import streamingTTSRoutes from "./routes/streamingTTSRoutes";
-import connectionPreWarmingRoutes from "./routes/connectionPreWarmingRoutes";
-import sttRoutes from "./routes/sttRoutes";
+import enhancedRealTimeRoutes from "./routes/enhancedRealTimeRoutes";
+import healthRoutes from "./routes/healthRoutes";
 import knowledgeRoutes from "./routes/knowledgeRoutes";
 import leadRoutes from "./routes/leadRoutes";
+import performanceRoutes from "./routes/performanceRoutes";
 import ragRoutes from "./routes/ragRoutes";
-import ttsProviderRoutes from "./routes/ttsProviderRoutes";
-import enhancedRealTimeRoutes from "./routes/enhancedRealTimeRoutes";
 import rootWebhookRoutes from "./routes/rootWebhookRoutes";
+import streamingTTSRoutes from "./routes/streamingTTSRoutes";
 import streamRoutes from "./routes/streamRoutes";
+import sttRoutes from "./routes/sttRoutes";
 import transcriptionRoutes from "./routes/transcriptionRoutes";
+import ttsProviderRoutes from "./routes/ttsProviderRoutes";
 import userRoutes from "./routes/userRoutes";
 import voiceAIRoutes from "./routes/voiceAIRoutes";
-import healthRoutes from "./routes/healthRoutes";
-import audioStreamingRoutes from "./routes/audioStreamingRoutes";
-import performanceRoutes from "./routes/performanceRoutes";
-import { TwilioStreamHandler } from "./services/twilioStreamHandler";
 import { getAIOrchestrationService } from "./services/aiOrchestrationService";
 import { AudioStreamingService } from "./services/audioStreamingService";
 import CampaignService from "./services/campaignService";
@@ -43,11 +44,8 @@ import { EnhancedVoiceAIService } from "./services/enhancedVoiceAIService";
 import leadService from "./services/leadService";
 import { LLMService } from "./services/llm/service";
 import { getRAGSystem } from "./services/rag/ragSystem";
-import { initializeSpeechService } from "./services/realSpeechService";
 import SpeechAnalysisService from "./services/speechAnalysisService";
-import { validateStartupConfig } from "./config/database-validation";
-import { connectToDatabase } from "./database/connection";
-import { healthCheckHandler, readinessCheckHandler } from "./health/service";
+import { TwilioStreamHandler } from "./services/twilioStreamHandler";
 import { initCloudinary } from "./utils/cloudinaryService";
 
 import { authenticate } from "./middleware/auth";
@@ -72,6 +70,14 @@ const app = fastify({
     const server = http.createServer(handler);
     return server;
   },
+});
+
+app.addHook('onRequest', (req, reply, done) => {
+  if (req.raw.url.startsWith('/socket.io')) {
+    reply.hijack();
+    return;
+  }
+  done();
 });
 
 app.decorate("authenticate", authenticate);
@@ -235,34 +241,34 @@ app.register(async (apiRouter) => {
   apiRouter.register(dashboardRoutes, { prefix: "/dashboard" });
   apiRouter.register(configurationRoutes, { prefix: "/configuration" });
   apiRouter.register(analyticsRoutes, { prefix: "/analytics" });
-  
+
   // AI and voice routes
   apiRouter.register(voiceAIRoutes, { prefix: "/lumina-outreach" });
   apiRouter.register(aiOrchestrationRoutes, { prefix: "/ai-orchestration" });
   apiRouter.register(knowledgeRoutes, { prefix: "/knowledge" });
   apiRouter.register(ragRoutes, { prefix: "/rag" });
-  
+
   // Telephony and communication routes
   apiRouter.register(transcriptionRoutes, { prefix: "/transcription" });
   apiRouter.register(sttRoutes, { prefix: "/stt" });
-  
+
   // TTS and audio routes
   // deepgramTestRoutes removed (file deleted)
   apiRouter.register(deepgramTTSRoutes, { prefix: "/deepgram-tts" });
   apiRouter.register(streamingTTSRoutes, { prefix: "/streaming-tts" });
   apiRouter.register(ttsProviderRoutes, { prefix: "/tts-provider" });
   apiRouter.register(connectionPreWarmingRoutes, { prefix: "/connection-pre-warming" });
-  
+
   // Real-time and streaming routes
   apiRouter.register(enhancedRealTimeRoutes, { prefix: "/realtime" });
   apiRouter.register(audioStreamingRoutes, { prefix: '/audio-streaming', audioStreamingService });
-  
+
   // Health and monitoring routes
   apiRouter.register(healthRoutes, { prefix: "/" });
-  
+
   // Performance monitoring routes
   apiRouter.register(performanceRoutes, { prefix: "/performance" });
-  
+
   // Temporarily disabled metrics endpoint
   apiRouter.get("/deepgram-metrics", (req, res) => {
     res.status(503).send({ error: "Deepgram metrics service temporarily unavailable" });
@@ -278,37 +284,37 @@ app.register(async (apiRouter) => {
 
 // Enhanced global error handler
 app.setErrorHandler((error, request, reply) => {
-    const errorId = Math.random().toString(36).substring(7);
+  const errorId = Math.random().toString(36).substring(7);
 
-    logger.error("Unhandled error:", {
-      errorId,
-      message: error.message,
+  logger.error("Unhandled error:", {
+    errorId,
+    message: error.message,
+    stack: error.stack,
+    url: request.url,
+    method: request.method,
+    ip: request.ip,
+    userAgent: request.headers["user-agent"],
+    timestamp: new Date().toISOString(),
+  });
+
+  // Don't leak error details in production
+  const isDevelopment = process.env.NODE_ENV === "development";
+
+  const errorResponse = {
+    error: true,
+    message: isDevelopment
+      ? error.message
+      : "An internal server error occurred",
+    errorId,
+    timestamp: new Date().toISOString(),
+    ...(isDevelopment && {
       stack: error.stack,
-      url: request.url,
-      method: request.method,
-      ip: request.ip,
-      userAgent: request.headers["user-agent"],
-      timestamp: new Date().toISOString(),
-    });
+      details: error,
+    }),
+  };
 
-    // Don't leak error details in production
-    const isDevelopment = process.env.NODE_ENV === "development";
-
-    const errorResponse = {
-      error: true,
-      message: isDevelopment
-        ? error.message
-        : "An internal server error occurred",
-      errorId,
-      timestamp: new Date().toISOString(),
-      ...(isDevelopment && {
-        stack: error.stack,
-        details: error,
-      }),
-    };
-
-    const statusCode = error.statusCode || 500;
-    reply.status(statusCode).send(errorResponse);
+  const statusCode = error.statusCode || 500;
+  reply.status(statusCode).send(errorResponse);
 });
 
 // 404 handler
@@ -395,8 +401,8 @@ const initializeServices = async () => {
       deepgramApiKey = config.deepgramConfig?.apiKey || "";
       logger.info(
         "Deepgram API key " +
-          (deepgramApiKey ? "found" : "not found") +
-          " in database configuration"
+        (deepgramApiKey ? "found" : "not found") +
+        " in database configuration"
       );
 
       // Initialize and validate Deepgram auto-configuration with graceful startup
@@ -522,10 +528,10 @@ const initializeServices = async () => {
     }
 
     // Speech synthesis service
-    const speechService = initializeSpeechService(
-      elevenLabsApiKey,
-      path.join(__dirname, "../uploads/audio")
-    );
+    // const speechService = initializeSpeechService(
+    //   elevenLabsApiKey,
+    //   path.join(__dirname, "../uploads/audio")
+    // );
 
     // Get the selected TTS provider from configuration
     const selectedTTSProvider = config?.ttsConfig?.provider || "elevenlabs";
@@ -581,26 +587,26 @@ const initializeServices = async () => {
         );
         initializeDeepgramTTS(deepgramApiKey);
         logger.info("Deepgram TTS service initialized as primary TTS provider");
-        
+
         // Initialize streaming TTS service
         const { initializeStreamingTTS } = await import(
           "./services/streamingTTSService"
         );
         initializeStreamingTTS(deepgramApiKey);
         logger.info("Streaming TTS service initialized successfully");
-        
+
         // Initialize connection pre-warming service
         const { initializeConnectionPreWarming } = await import(
           "./services/connectionPreWarmingService"
         );
         const preWarmingService = initializeConnectionPreWarming();
-        
+
         // Initialize WebSocket connection pool
         const { initializeWebSocketConnectionPool } = await import(
           "./services/websocketConnectionPool"
         );
         initializeWebSocketConnectionPool();
-        
+
         // Start pre-warming connections in the background
         preWarmingService.preWarmConnections().catch(error => {
           logger.warn(`Connection pre-warming failed: ${getErrorMessage(error)}`);
@@ -619,26 +625,26 @@ const initializeServices = async () => {
         logger.info(
           "Deepgram TTS service initialized as fallback for voice synthesis"
         );
-        
+
         // Initialize streaming TTS service
         const { initializeStreamingTTS } = await import(
           "./services/streamingTTSService"
         );
         initializeStreamingTTS(deepgramApiKey);
         logger.info("Streaming TTS service initialized as fallback");
-        
+
         // Initialize connection pre-warming service
         const { initializeConnectionPreWarming } = await import(
           "./services/connectionPreWarmingService"
         );
         const preWarmingService = initializeConnectionPreWarming();
-        
+
         // Initialize WebSocket connection pool
         const { initializeWebSocketConnectionPool } = await import(
           "./services/websocketConnectionPool"
         );
         initializeWebSocketConnectionPool();
-        
+
         // Start pre-warming connections in the background
         preWarmingService.preWarmConnections().catch(error => {
           logger.warn(`Connection pre-warming failed: ${getErrorMessage(error)}`);
@@ -773,12 +779,11 @@ const initializeServices = async () => {
     }
 
     // Export services
-    global.speechService = speechService;
+    // global.speechService = speechService;
     global.conversationEngine = conversationEngine;
     global.campaignService = campaignService;
 
     return {
-      speechService,
       conversationEngine,
       campaignService,
     };
@@ -941,8 +946,7 @@ const startServer = async () => {
     cloudinaryService.then((service) => {
       service.testCloudinaryConnection().then((cloudinaryWorks) => {
         runtimeLogger.info(
-          `Cloudinary connection test result: ${
-            cloudinaryWorks ? "SUCCESS" : "FAILED"
+          `Cloudinary connection test result: ${cloudinaryWorks ? "SUCCESS" : "FAILED"
           }`
         );
       });
@@ -1033,11 +1037,9 @@ const startServer = async () => {
         case "EACCES":
           logger.error(`${bind} requires elevated privileges`);
           process.exit(1);
-          break;
         case "EADDRINUSE":
           logger.error(`${bind} is already in use`);
           process.exit(1);
-          break;
         default:
           throw error;
       }
@@ -1177,7 +1179,6 @@ function getErrorMessage(error: unknown): string {
 
 // Define global namespace for TypeScript
 declare global {
-  var speechService: any;
   var modelRegistry: any;
   var conversationEngine: any;
   var campaignService: any;

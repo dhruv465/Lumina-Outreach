@@ -5,11 +5,6 @@ import {
   handleTwilioGatherWebhook,
   handleTwilioStreamWebhook
 } from '../services/webhookHandlers';
-import {
-  handleVoiceWebhook,
-  handleStatusWebhook,
-  handleRecordingWebhook
-} from '../controllers/telephonyController';
 
 const rootWebhookRoutes = async (fastify, opts: Record<string, any>) => {
   // Root webhook handler - will process incoming Twilio webhooks at the root path
@@ -97,12 +92,6 @@ const rootWebhookRoutes = async (fastify, opts: Record<string, any>) => {
       
       case 'recording':
         return handleTwilioStatusWebhook(request, reply);
-      case 'telephony-voice':
-        return handleVoiceWebhook(request, reply);
-      case 'telephony-status':
-        return handleStatusWebhook(request, reply);
-      case 'telephony-recording':
-        return handleRecordingWebhook(request, reply);
       default:
         // If no webhook type is specified, try to determine from body
         if ((request.body as any).CallSid) {

@@ -1,10 +1,3 @@
-/**
- * AI Orchestration Controller
- * 
- * Handles all API endpoints related to AI orchestration, including LLM interactions,
- * voice synthesis, and RAG operations.
- */
-
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { aiService } from '../services/aiService';
 
@@ -44,6 +37,13 @@ export const generateChatResponse = async (req: FastifyRequest, reply: FastifyRe
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
+};
+
+// @desc    Stream chat response
+// @route   POST /api/ai-orchestration/stream-chat
+// @access  Private
+export const streamChatResponse = async (req: FastifyRequest, reply: FastifyReply) => {
+  reply.status(501).send({ message: 'Not implemented' });
 };
 
 // @desc    Synthesize voice

@@ -18,6 +18,11 @@ export interface ICall extends mongoose.Document {
   maxRetries: number;
   retryCount: number;
   callbackUrl?: string; // Make this optional since it's not required in schema
+  callback?: {
+    scheduled: boolean;
+    dateTime: Date;
+    notes: string;
+  };
   createdAt: Date;
   updatedAt: Date;
   recordCall: boolean;
@@ -173,6 +178,11 @@ const CallSchema = new mongoose.Schema({
   maxRetries: { type: Number, default: 3 },
   retryCount: { type: Number, default: 0 },
   callbackUrl: String,
+  callback: {
+    scheduled: Boolean,
+    dateTime: Date,
+    notes: String
+  },
   recordCall: { type: Boolean, default: false },
   complianceScriptId: String,
   callReasons: [String],

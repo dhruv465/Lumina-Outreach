@@ -2,7 +2,7 @@ import http from 'http';
 import { RawData } from 'ws';
 import SocketStream from '@fastify/websocket';
 import { getDeepgramService, DeepgramEvent, TranscriptResult } from './deepgramService';
-import { convertMuLawToPCM, convertPCMToMuLaw } from '../utils/audioUtils';
+import { decodeTwilioAudio, convertPCMToMuLaw } from '../utils/audioUtils';
 
 const logger = {
   info: (msg: string, meta?: any) => console.log(`info: ${msg}`, meta ?? ""),
@@ -29,8 +29,6 @@ export class TwilioStreamHandler {
 
     if (this.deepgramService) {
       this.deepgramService.on(DeepgramEvent.AGENT_AUDIO_RECEIVED, this.handleAgentAudio.bind(this));
-      this.deepgramService.on(DeepgramEvent.USER_STARTED_SPEAKING, this.handleUserStartedSpeaking.bind(this));
-      this.deepgramService.on(DeepgramEvent.USER_ENDED_SPEAKING, this.handleUserEndedSpeaking.bind(this));
     }
   }
 
@@ -50,20 +48,6 @@ export class TwilioStreamHandler {
             },
         };
         this.connection.send(JSON.stringify(mediaMessage));
-    }
-  }
-
-  private handleUserStartedSpeaking(data: { connectionId: string, callId: string }): void {
-    if (data.connectionId === this.deepgramConnectionId) {
-      logger.info('User started speaking, interrupting agent.');
-      this.isUserSpeaking = true;
-    }
-  }
-
-  private handleUserEndedSpeaking(data: { connectionId: string, callId: string }): void {
-    if (data.connectionId === this.deepgramConnectionId) {
-      logger.info('User stopped speaking.');
-      this.isUserSpeaking = false;
     }
   }
 
@@ -101,27 +85,19 @@ export class TwilioStreamHandler {
                 });
                 this.audioQueue = [];
               } else {
-                              if (this.deepgramService.isStreamOpen(this.deepgramConnectionId)) {
-                                logger.info('Deepgram stream was already open. Sending buffered audio.');
-                                this.isDeepgramReady = true;
-                                this.audioQueue.forEach(chunk => {
-                                    this.deepgramService.sendAudioToStream(this.deepgramConnectionId, chunk);
-                                });
-                                this.audioQueue = [];
-                              }
-                
-              this.deepgramService.on(DeepgramEvent.AGENT_READY, (status) => {
-                  if (status.connectionId === this.deepgramConnectionId) {
-                      if (!this.isDeepgramReady) {
-                        logger.info('Deepgram agent is ready. Sending buffered audio.');
-                        this.isDeepgramReady = true;
-                        this.audioQueue.forEach(chunk => {
-                            this.deepgramService.sendAudioToStream(this.deepgramConnectionId, chunk);
-                        });
-                        this.audioQueue = [];
-                      }
-                  }
-              });              }
+                this.deepgramService.on(DeepgramEvent.AGENT_READY, (status) => {
+                    if (status.connectionId === this.deepgramConnectionId) {
+                        if (!this.isDeepgramReady) {
+                          logger.info('Deepgram agent is ready. Sending buffered audio.');
+                          this.isDeepgramReady = true;
+                          this.audioQueue.forEach(chunk => {
+                              this.deepgramService.sendAudioToStream(this.deepgramConnectionId, chunk);
+                          });
+                          this.audioQueue = [];
+                        }
+                    }
+                });
+              }
 
               this.deepgramService.on(DeepgramEvent.TRANSCRIPT_RECEIVED, (transcript: TranscriptResult) => {
                 if (transcript.callId === this.callId && transcript.text.trim().length > 0) {
@@ -142,7 +118,7 @@ export class TwilioStreamHandler {
           }
           if (this.deepgramService && this.deepgramConnectionId) {
             const audioBuffer = Buffer.from(message.media.payload, 'base64');
-            const pcmBuffer = convertMuLawToPCM(audioBuffer);
+            const pcmBuffer = decodeTwilioAudio(audioBuffer);
 
             if (this.isDeepgramReady) {
                 this.deepgramService.sendAudioToStream(this.deepgramConnectionId, pcmBuffer);
@@ -182,3 +158,4 @@ export class TwilioStreamHandler {
     this.handleClose();
   }
 }
+

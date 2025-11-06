@@ -2,10 +2,8 @@ import Call from '../models/Call';
 import Lead from '../models/Lead';
 import Campaign from '../models/Campaign';
 import Configuration from '../models/Configuration';
-import { logger } from '../index';
 import mongoose from 'mongoose';
 import twilio from 'twilio';
-import { getPreferredVoiceId } from '../utils/voiceUtils';
 import { unifiedAnalyticsService } from './unifiedAnalyticsService';
 
 class CallService {
@@ -187,7 +185,30 @@ class CallService {
       const header = Object.keys(exportData[0] || {}).join(',') + '\n';
       const csv = exportData.length
         ? header +
-          exportData
-            .map((row: any) =>
-              Object.values(row)
-                .map(value => `"${String(value).replace(/
+        exportData
+          .map((row: any) =>
+            Object.values(row)
+              .map(value => `"${String(value).replace(/"/g, '""')}"`)
+              .join(','))
+          .join('\n')
+        : '';
+
+      return { format, data: csv };
+        } else {
+          throw new Error('Unsupported format');
+        }
+      }
+    
+      async syncTwilioRecordings(days: number): Promise<any> {
+        // Placeholder implementation
+        return { success: true, message: 'Sync started' };
+      }
+    
+      async getCallRecordingDetails(id: string): Promise<any> {
+        // Placeholder implementation
+        return null;
+      }
+    }
+    
+    export default new CallService();
+    

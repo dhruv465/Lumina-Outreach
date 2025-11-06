@@ -4,7 +4,7 @@ import { createClient } from '@deepgram/sdk';
 import { getErrorMessage } from '../utils/logger';
 import { ModelCompatibilityService, ModelValidationResult, ModelPreferences } from './modelCompatibilityService';
 import { deepgramErrorHandler, ErrorClassificationResult } from './deepgramErrorHandler';
-import { convertMuLawToPCM, detectVoiceActivity } from '../utils/audioUtils';
+import { decodeTwilioAudio, detectVoiceActivity } from '../utils/audioUtils';
 import { DeepgramErrorType } from '../types/deepgram';
 
 export interface SpeechAnalysis {
@@ -283,7 +283,7 @@ export class SpeechAnalysisService {
 
       logger.info(`🔧 Using Deepgram model: ${selectedModel} for transcription (fallback: ${fallbackUsed})`);
       
-      const processedAudioBuffer = convertMuLawToPCM(audioBuffer);
+      const processedAudioBuffer = decodeTwilioAudio(audioBuffer);
       
       logger.info(`🎵 Audio Conversion: μ-law ${audioBuffer.length} bytes → WAV ${processedAudioBuffer.length} bytes`);
       
@@ -759,7 +759,7 @@ export class SpeechAnalysisService {
       }
 
       // Convert audio to PCM if needed
-      const pcmBuffer = convertMuLawToPCM(audioBuffer);
+      const pcmBuffer = decodeTwilioAudio(audioBuffer);
       
       // Use Deepgram for transcription
       if (this.deepgramClient) {

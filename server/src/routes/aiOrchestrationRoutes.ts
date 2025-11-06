@@ -27,84 +27,84 @@ export default async function (fastify: FastifyInstance, options: Record<string,
   fastify.route({
     method: 'GET',
     url: '/status',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: getServiceStatus,
   });
 
   fastify.route({
     method: 'POST',
     url: '/chat',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: generateChatResponse,
   });
 
   fastify.route({
     method: 'POST',
     url: '/stream-chat',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: streamChatResponse,
   });
 
   fastify.route({
     method: 'POST',
     url: '/voice',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: synthesizeVoice,
   });
 
   fastify.route({
     method: 'POST',
     url: '/context',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: retrieveContext,
   });
 
   fastify.route({
     method: 'POST',
     url: '/speech',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: processSpeech,
   });
 
   fastify.route({
     method: 'POST',
     url: '/emotion',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: detectEmotion,
   });
 
   fastify.route({
     method: 'POST',
     url: '/intent',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: detectIntent,
   });
 
   fastify.route({
     method: 'POST',
     url: '/objection',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: detectObjection,
   });
 
   fastify.route({
     method: 'POST',
     url: '/quality',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: scoreConversation,
   });
 
   fastify.route({
     method: 'GET',
     url: '/metrics',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: getMetrics,
   });
 
   fastify.route({
     method: 'POST',
     url: '/cache/clear',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: clearCache,
   });
 
@@ -112,7 +112,7 @@ export default async function (fastify: FastifyInstance, options: Record<string,
   fastify.route({
     method: 'PUT',
     url: '/config',
-    preHandler: [fastify.authenticate],
+    preHandler: [(fastify as any).authenticate],
     handler: updateConfiguration,
   });
 }

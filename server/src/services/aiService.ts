@@ -1,6 +1,6 @@
 import { getAIOrchestrationService } from './aiOrchestrationAdapter';
 import { getRAGSystem } from './rag/ragSystem';
-import { logger } from '../utils/logger';
+import logger from '../utils/logger';
 
 class AIService {
   private aiOrchestrationService = getAIOrchestrationService();

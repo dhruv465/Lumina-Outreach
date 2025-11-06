@@ -6,9 +6,11 @@ export interface IUser extends mongoose.Document {
   email: string;
   password: string;
   role: string;
+  jwtVersion: number;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
+  incrementJwtVersion(): Promise<void>;
 }
 
 const UserSchema = new mongoose.Schema(

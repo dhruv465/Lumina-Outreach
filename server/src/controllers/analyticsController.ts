@@ -1,4 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
+import Campaign from '../models/Campaign';
+import mongoose from 'mongoose';
+import Call from '../models/Call';
 // callAnalyticsService removed - using unifiedAnalyticsService instead
 import { unifiedAnalyticsService } from '../services/unifiedAnalyticsService';
 import logger from '../utils/logger';

@@ -1,5 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { leadService } from '../services/leadService';
+import leadService from '../services/leadService';
 import { handleError } from '../utils/errorHandling';
 
 

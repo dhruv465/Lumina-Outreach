@@ -18,14 +18,21 @@ export const getVoicePersonalities = async (req: FastifyRequest, res: FastifyRep
   }
 };
 
+// @desc    Train a new voice personality
+// @route   POST /api/lumina-outreach/train-personality
+// @access  Private
+export const trainVoicePersonality = async (req: FastifyRequest, res: FastifyReply) => {
+  res.status(501).send({ message: 'Not implemented' });
+};
+
 // @desc    Synthesize adaptive voice response
 // @route   POST /api/lumina-outreach/synthesize
 // @access  Private
 export const synthesizeVoice = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { 
-      text, 
-      personalityId, 
+    const {
+      text,
+      personalityId,
       language = 'en'
     } = req.body as any;
 
@@ -57,7 +64,7 @@ export const synthesizeVoice = async (req: FastifyRequest, res: FastifyReply) =>
 // @access  Private
 export const adaptConversation = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { 
+    const {
       conversationId,
       conversationHistory,
       currentScript,
@@ -94,6 +101,7 @@ export const adaptConversation = async (req: FastifyRequest, res: FastifyReply) 
 // @access  Private
 export const testVoiceAI = async (req: FastifyRequest, res: FastifyReply) => {
   try {
+    const { personalityId } = req.body as any;
     if (!personalityId) {
       return res.status(400).send({ message: 'Personality ID is required' });
     }
@@ -253,4 +261,11 @@ export const interruptConversationalAI = async (req: FastifyRequest, res: Fastif
       error: handleError(error)
     });
   }
+};
+
+const handleError = (error: any) => {
+  if (error.response) {
+    return error.response.data;
+  }
+  return error.message;
 };

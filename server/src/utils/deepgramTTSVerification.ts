@@ -18,6 +18,10 @@ interface DeepgramTTSVerificationResult {
   availableModels?: string[];
 }
 
+// Cache for verification results to prevent duplicate requests
+const verificationCache = new Map<string, { result: DeepgramTTSVerificationResult; timestamp: number }>();
+const CACHE_DURATION = 30000; // 30 seconds
+
 /**
  * Verify Deepgram TTS API key by attempting a short synthesis
  * @param apiKey Deepgram API key to verify
@@ -31,6 +35,14 @@ export async function verifyDeepgramTTSApi(apiKey: string): Promise<DeepgramTTSV
       error: 'API key is empty',
       message: 'Please provide a valid Deepgram API key'
     };
+  }
+
+  // Check cache first
+  const cacheKey = apiKey.substring(0, 20); // Use first 20 chars as cache key
+  const cached = verificationCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+    logger.debug('Returning cached Deepgram TTS verification result');
+    return cached.result;
   }
 
   const startTime = Date.now();
@@ -113,13 +125,18 @@ export async function verifyDeepgramTTSApi(apiKey: string): Promise<DeepgramTTSV
       'aura-zeus-en'
     ];
 
-    return {
+    const result = {
       success: true,
-      status: 'verified',
+      status: 'verified' as const,
       message: `Deepgram TTS API verified successfully. Latency: ${latency}ms, Audio size: ${audioBuffer.length} bytes`,
       latency,
       availableModels
     };
+
+    // Cache the successful result
+    verificationCache.set(cacheKey, { result, timestamp: Date.now() });
+
+    return result;
 
   } catch (error: any) {
     // Extract error information
@@ -161,14 +178,19 @@ export async function verifyDeepgramTTSApi(apiKey: string): Promise<DeepgramTTSV
       errorDetails: error
     });
 
-    return {
+    const result = {
       success: false,
-      status: 'failed',
+      status: 'failed' as const,
       error: errorMessage,
       errorCode,
       latency,
       message: `Failed to verify Deepgram TTS API: ${errorMessage}`
     };
+
+    // Cache the failed result for a shorter duration
+    verificationCache.set(cacheKey, { result, timestamp: Date.now() });
+
+    return result;
   }
 }
 

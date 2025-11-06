@@ -97,7 +97,8 @@ api.interceptors.response.use(
          error.config?.url?.includes('/leads') || 
          error.config?.url?.includes('/analytics') ||
          error.config?.url?.includes('/calls/analytics') ||
-         error.config?.url?.includes('/dashboard'))) {
+         error.config?.url?.includes('/dashboard') ||
+         error.config?.url?.includes('/knowledge'))) {
       
       // Handle different endpoint formats
       if (error.config?.url?.includes('/campaigns')) {
@@ -144,6 +145,20 @@ api.interceptors.response.use(
         return Promise.resolve({ 
           data: { calls: [], pagination: { page: 1, pages: 0, total: 0, limit: 10 } }
         });
+      } else if (error.config?.url?.includes('/knowledge/documents')) {
+        return Promise.resolve({ 
+          data: { documents: [], pagination: { page: 1, pages: 0, total: 0, limit: 10 } }
+        });
+      } else if (error.config?.url?.includes('/knowledge/categories')) {
+        return Promise.resolve({ 
+          data: { categories: [] }
+        });
+      } else if (error.config?.url?.includes('/knowledge/tags')) {
+        return Promise.resolve({ 
+          data: { tags: [] }
+        });
+      } else if (error.config?.url?.includes('/knowledge')) {
+        return Promise.resolve({ data: [] });
       } else {
         return Promise.resolve({ data: [] });
       }
@@ -180,23 +195,49 @@ api.interceptors.response.use(
         return Promise.reject(error);
       }
       
+      // Check if we're already on the login page
+      const isLoginPage = window.location.pathname === '/login';
+      if (isLoginPage) {
+        authDebug.log('Already on login page, ignoring 401');
+        return Promise.reject(error);
+      }
+      
+      // Check if user data exists in localStorage
+      const userData = localStorage.getItem('user');
+      if (!userData) {
+        authDebug.log('No user data in localStorage, redirecting to login');
+        window.location.href = '/login';
+        return Promise.reject(error);
+      }
+      
       // Check if we just logged in (grace period)
       const lastLoginTime = localStorage.getItem('lastLoginTime');
       const currentTime = Date.now();
       const loginTimeDiff = lastLoginTime ? (currentTime - parseInt(lastLoginTime)) : Infinity;
-      const recentLogin = loginTimeDiff < 15000; // 15 seconds grace period
+      const recentLogin = loginTimeDiff < 30000; // 30 seconds grace period (increased)
       
       authDebug.log(`Time since login: ${loginTimeDiff}ms, recentLogin: ${recentLogin}`);
       
-      // Check if we're already on the login page
-      const isLoginPage = window.location.pathname === '/login';
+      // Track 401 errors to prevent logout loops
+      const last401Time = localStorage.getItem('last401Time');
+      const last401Diff = last401Time ? (currentTime - parseInt(last401Time)) : Infinity;
+      const recent401 = last401Diff < 5000; // 5 seconds
       
-      // Only logout if we're not in a safe condition and it's not a recent login
-      if (!recentLogin && !isLoginPage) {
-        authDebug.error('401 error detected, logging out user');
+      if (recent401) {
+        authDebug.warn('Multiple 401 errors in short time, preventing logout loop');
+        return Promise.reject(error);
+      }
+      
+      // Store this 401 timestamp
+      localStorage.setItem('last401Time', currentTime.toString());
+      
+      // Only logout if token is genuinely invalid (not a recent login)
+      if (!recentLogin) {
+        authDebug.error('401 error detected, token appears invalid, logging out user');
         // Remove user from local storage
         localStorage.removeItem('user');
         localStorage.removeItem('lastLoginTime');
+        localStorage.removeItem('last401Time');
         sessionStorage.removeItem('sessionInitialized');
         
         // Redirect to login page
@@ -204,7 +245,7 @@ api.interceptors.response.use(
           window.location.href = '/login';
         }, 100);
       } else {
-        authDebug.log('Ignoring 401 due to safety conditions', {
+        authDebug.log('Ignoring 401 due to recent login', {
           isAuthEndpoint,
           recentLogin,
           isLoginPage

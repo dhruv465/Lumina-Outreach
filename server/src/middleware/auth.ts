@@ -20,15 +20,15 @@ export const authenticate = async (
     const authHeader = request.headers.authorization;
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      logger.warn(`No auth header for ${request.raw.method} ${request.raw.url}`, { authHeader });
+      logger.warn(`No auth header for ${request.raw.method} ${request.raw.url}`);
       return reply.status(401).send({ message: 'No token, authorization denied' });
     }
     
     const token = authHeader.split(' ')[1];
     
     // Check if token is empty or malformed
-    if (!token || token === 'undefined' || token === 'null') {
-      logger.warn(`Invalid token for ${request.raw.method} ${request.raw.url}`, { token: token?.substring(0, 10) + '...' });
+    if (!token || token === 'undefined' || token === 'null' || token.trim() === '') {
+      logger.warn(`Invalid token for ${request.raw.method} ${request.raw.url}`);
       return reply.status(401).send({ message: 'Token is invalid or malformed' });
     }
     
@@ -46,21 +46,37 @@ export const authenticate = async (
     const User = require('../models/User').default;
     const user = await User.findById(decoded.id);
 
-    if (!user || user.jwtVersion !== decoded.jwtVersion) {
-      return reply.status(401).send({ message: 'Token is not valid' });
+    if (!user) {
+      logger.warn(`User not found for token: ${decoded.id}`);
+      return reply.status(401).send({ message: 'User not found' });
+    }
+
+    if (user.jwtVersion !== decoded.jwtVersion) {
+      logger.warn(`JWT version mismatch for user ${user.email}: expected ${user.jwtVersion}, got ${decoded.jwtVersion}`);
+      return reply.status(401).send({ message: 'Token version mismatch' });
     }
     
     // Cache the user object for future requests
-    tokenCache.set(token, user.toObject());
+    const userObj = user.toObject();
+    tokenCache.set(token, userObj);
     
     // Add user from payload
-    request.user = user.toObject();
-  } catch (error) {
-    logger.error(`Authentication error for ${request.raw.method} ${request.raw.url}:`, {
-      error: error.message,
-      tokenStart: request.headers.authorization?.substring(0, 20) + '...'
-    });
-    return reply.status(401).send({ message: 'Token is not valid' });
+    request.user = userObj;
+  } catch (error: any) {
+    // Provide more specific error messages
+    if (error.name === 'TokenExpiredError') {
+      logger.warn(`Token expired for ${request.raw.method} ${request.raw.url}`);
+      return reply.status(401).send({ message: 'Token has expired' });
+    } else if (error.name === 'JsonWebTokenError') {
+      logger.warn(`Invalid JWT for ${request.raw.method} ${request.raw.url}: ${error.message}`);
+      return reply.status(401).send({ message: 'Invalid token format' });
+    } else {
+      logger.error(`Authentication error for ${request.raw.method} ${request.raw.url}:`, {
+        error: error.message,
+        name: error.name
+      });
+      return reply.status(401).send({ message: 'Authentication failed' });
+    }
   }
 };
 

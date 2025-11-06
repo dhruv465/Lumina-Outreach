@@ -36,6 +36,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import CampaignForm from '@/components/campaigns/CampaignForm';
+import DeleteCampaignDialog from '@/components/campaigns/DeleteCampaignDialog';
 import { Skeleton } from "@/components/ui/skeleton";
 
 // Types
@@ -108,6 +109,10 @@ const Campaigns = () => {
   const [showCampaignForm, setShowCampaignForm] = useState(false);
   const [editingCampaignId, setEditingCampaignId] = useState<string | undefined>();
   
+  // Delete dialog state
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [campaignToDelete, setCampaignToDelete] = useState<{ id: string; name: string } | null>(null);
+  
   // Event handlers
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value);
@@ -149,27 +154,20 @@ const Campaigns = () => {
     }
   };
 
-  const handleDeleteCampaign = async (campaignId: string) => {
-    if (!window.confirm('Are you sure you want to delete this campaign? This action cannot be undone.')) {
-      return;
-    }
+  const handleDeleteCampaign = (campaignId: string, campaignName: string) => {
+    setCampaignToDelete({ id: campaignId, name: campaignName });
+    setIsDeleteDialogOpen(true);
+  };
 
-    try {
-      await api.delete(`/campaigns/${campaignId}`);
-      console.log(`Campaign ${campaignId} deleted successfully`);
-      
-      // Close detail sheet if it's open for this campaign
-      if (selectedCampaign && selectedCampaign._id === campaignId) {
-        setIsSheetOpen(false);
-        setSelectedCampaign(null);
-      }
-      
-      // Refresh campaigns data
-      refetch();
-    } catch (error) {
-      console.error('Error deleting campaign:', error);
-      alert('Failed to delete campaign. Please try again.');
+  const handleDeleteSuccess = () => {
+    // Close detail sheet if it's open for this campaign
+    if (selectedCampaign && campaignToDelete && selectedCampaign._id === campaignToDelete.id) {
+      setIsSheetOpen(false);
+      setSelectedCampaign(null);
     }
+    
+    // Refresh campaigns data
+    refetch();
   };
 
   const handleCampaignFormClose = () => {
@@ -565,7 +563,7 @@ const Campaigns = () => {
                     </DropdownMenuItem>
                     <DropdownMenuItem 
                       className="text-destructive"
-                      onClick={() => handleDeleteCampaign(campaign._id)}
+                      onClick={() => handleDeleteCampaign(campaign._id, campaign.name)}
                     >
                       <Trash2 size={16} className="mr-2" />
                       Delete
@@ -871,6 +869,17 @@ const Campaigns = () => {
           />
         )}
       </Sheet>
+
+      {/* Delete Campaign Dialog */}
+      {campaignToDelete && (
+        <DeleteCampaignDialog
+          open={isDeleteDialogOpen}
+          onOpenChange={setIsDeleteDialogOpen}
+          campaignId={campaignToDelete.id}
+          campaignName={campaignToDelete.name}
+          onSuccess={handleDeleteSuccess}
+        />
+      )}
     </div>
   );
 };

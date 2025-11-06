@@ -333,10 +333,7 @@ const Dashboard = () => {
     }
   }, [error, toast]);
 
-  // Log socket connection status
-  useEffect(() => {
-    console.log('Socket connection status:', isConnected);
-  }, [isConnected]);
+
 
   if (isLoading) {
     return (
@@ -426,14 +423,6 @@ const Dashboard = () => {
           </Button>
         </div>
       </div>
-
-      {/* Socket connection status indicator */}
-      {isConnected && (
-        <div className="flex items-center text-sm text-green-600 dark:text-green-400 mb-2">
-          <div className="w-2 h-2 bg-green-600 dark:bg-green-400 rounded-full mr-2"></div>
-          <span>Real-time data connected</span>
-        </div>
-      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

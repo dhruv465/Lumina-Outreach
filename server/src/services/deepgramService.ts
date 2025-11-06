@@ -870,6 +870,13 @@ export class DeepgramService extends EventEmitter {
                 };
               }
 
+              // Add greeting message from campaign - let the agent handle it
+              const greetingMessage = campaign.openingMessage?.trim() || campaign.initialPrompt?.trim();
+              if (greetingMessage) {
+                agentConfig.greeting = greetingMessage;
+                logger.info(`Configured agent greeting: "${greetingMessage.substring(0, 50)}${greetingMessage.length > 50 ? '...' : ''}"`);
+              }
+
               logger.info(
                 `Configured LLM: ${selectedProvider.name} with model ${providerConfig.model} and campaign personality`
               );

@@ -32,15 +32,129 @@ export class TwilioStreamHandler {
     }
   }
 
+  private async handleAgentResponse(text: string): Promise<void> {
+    try {
+      logger.info(`Agent response text: ${text.substring(0, 100)}...`);
+      
+      // Generate high-quality TTS audio
+      const { synthesizeSpeechWithProvider } = await import('../utils/ttsServiceFactory');
+      const Configuration = (await import('../models/Configuration')).default;
+      const config = await Configuration.findOne();
+      
+      if (!config) {
+        logger.error('No configuration found for TTS');
+        return;
+      }
+      
+      // Get voice ID from configuration
+      const voiceId = config.ttsConfig?.selectedVoicesByProvider?.[config.ttsConfig?.provider || 'elevenlabs'] ||
+                     config.elevenLabsConfig?.selectedVoiceId ||
+                     'aura-asteria-en';
+      
+      // Synthesize speech with high quality
+      const speechResponse = await synthesizeSpeechWithProvider(
+        config,
+        text,
+        voiceId,
+        'en',
+        { encoding: 'mp3' }
+      );
+      
+      if (!speechResponse.audioContent) {
+        logger.error('Failed to generate TTS audio');
+        return;
+      }
+      
+      // Upload to Cloudinary for playback
+      const cloudinaryService = (await import('../utils/cloudinaryService')).default;
+      const fs = await import('fs');
+      const path = await import('path');
+      const os = await import('os');
+      
+      const tempFilePath = path.join(os.tmpdir(), `agent-response-${Date.now()}.mp3`);
+      fs.writeFileSync(tempFilePath, speechResponse.audioContent);
+      
+      const audioUrl = await cloudinaryService.uploadAudioFile(tempFilePath, 'agent-responses', true);
+      logger.info(`Agent audio uploaded to Cloudinary: ${audioUrl}`);
+      
+      // Use Twilio REST API to play the audio on the active call
+      await this.playAudioOnCall(audioUrl);
+      
+    } catch (error) {
+      logger.error('Error handling agent response:', error);
+    }
+  }
+  
+  private async playAudioOnCall(audioUrl: string): Promise<void> {
+    try {
+      const twilio = require('twilio');
+      const Configuration = (await import('../models/Configuration')).default;
+      const config = await Configuration.findOne();
+      
+      if (!config || !config.twilioConfig) {
+        logger.error('Twilio configuration not found');
+        return;
+      }
+      
+      const client = twilio(
+        config.twilioConfig.accountSid,
+        config.twilioConfig.authToken
+      );
+      
+      // Get the call SID from the stream
+      const Call = (await import('../models/Call')).default;
+      const call = await Call.findById(this.callId);
+      
+      if (!call || !call.twilioSid) {
+        logger.error('Call not found or no Twilio SID');
+        return;
+      }
+      
+      // Update the call to play the audio
+      // We'll use TwiML to play the audio and then reconnect to the stream
+      const baseUrl = process.env.WEBHOOK_BASE_URL;
+      const twiml = new twilio.twiml.VoiceResponse();
+      
+      // Play the high-quality audio
+      twiml.play(audioUrl);
+      
+      // Reconnect to the WebSocket stream after playing
+      const connect = twiml.connect();
+      connect.stream({
+        url: `${baseUrl.replace(/^http/, 'ws')}/voice/stream/${this.callId}/${this.deepgramConnectionId}`,
+        name: 'project-call-stream'
+      });
+      
+      // Update the call with new TwiML
+      await client.calls(call.twilioSid).update({
+        twiml: twiml.toString()
+      });
+      
+      logger.info(`Playing high-quality audio on call ${call.twilioSid}`);
+      
+    } catch (error) {
+      logger.error('Error playing audio on call:', error);
+    }
+  }
+
+  private async processUserInputAndRespond(userText: string): Promise<void> {
+    // When using Deepgram Agent API, the agent handles responses internally
+    // We just need to capture the agent's transcript and play it with high-quality TTS
+    // This is handled by listening to Agent Transcript events
+    logger.info(`User input received: ${userText} - Agent will respond via Deepgram Agent API`);
+  }
+
   private handleAgentAudio(data: { connectionId: string, callId: string, audio: Buffer }): void {
     if (data.connectionId === this.deepgramConnectionId) {
         if (this.isUserSpeaking) {
           // Do not send audio to Twilio if the user is speaking
           return;
         }
-        // Deepgram Agent outputs at 16kHz (configured for better quality), downsample to 8kHz for Twilio
-        // Using 16kHz->8kHz (2:1 ratio) produces cleaner audio than 24kHz->8kHz (3:1 ratio)
-        const muLawBuffer = convertPCMToMuLaw(data.audio, 16000);
+        
+        // Deepgram Agent outputs at 24kHz, we need to send it to Twilio
+        // The audio quality issue is inherent to Twilio's 8kHz μ-law limitation
+        // Best we can do is proper downsampling
+        const muLawBuffer = convertPCMToMuLaw(data.audio, 24000);
         const mediaMessage = {
             event: 'media',
             streamSid: this.streamSid,
@@ -100,9 +214,15 @@ export class TwilioStreamHandler {
                 });
               }
 
-              this.deepgramService.on(DeepgramEvent.TRANSCRIPT_RECEIVED, (transcript: TranscriptResult) => {
-                if (transcript.callId === this.callId && transcript.text.trim().length > 0) {
-                  logger.info(`TRANSCRIPT: ${transcript.text}`);
+              this.deepgramService.on(DeepgramEvent.TRANSCRIPT_RECEIVED, async (transcript: TranscriptResult) => {
+                if (transcript.callId === this.callId && transcript.text.trim().length > 0 && transcript.isFinal) {
+                  logger.info(`USER SAID: ${transcript.text}`);
+                  
+                  // Set user speaking flag
+                  this.isUserSpeaking = false;
+                  
+                  // Process the user input and get agent response
+                  await this.processUserInputAndRespond(transcript.text);
                 }
               });
             } catch (err) {

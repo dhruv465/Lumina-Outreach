@@ -38,8 +38,9 @@ export class TwilioStreamHandler {
           // Do not send audio to Twilio if the user is speaking
           return;
         }
-        // Deepgram Agent outputs at 24kHz, downsample to 8kHz for Twilio
-        const muLawBuffer = convertPCMToMuLaw(data.audio, 24000);
+        // Deepgram Agent outputs at 16kHz (configured for better quality), downsample to 8kHz for Twilio
+        // Using 16kHz->8kHz (2:1 ratio) produces cleaner audio than 24kHz->8kHz (3:1 ratio)
+        const muLawBuffer = convertPCMToMuLaw(data.audio, 16000);
         const mediaMessage = {
             event: 'media',
             streamSid: this.streamSid,

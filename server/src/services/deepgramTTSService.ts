@@ -36,6 +36,7 @@ export class DeepgramTTSService {
 
     try {
       // Default to linear16 with wav container for compatibility
+      // Use 16kHz instead of 24kHz to reduce downsampling artifacts when converting to 8kHz for Twilio
       const encoding = options.encoding || 'linear16';
       const defaultOptions = {
         model: 'aura-asteria-en',
@@ -43,7 +44,8 @@ export class DeepgramTTSService {
         // Only include container for non-mp3 encodings
         ...(encoding === 'linear16' && { container: 'wav' }),
         // Only include sample_rate for non-mp3 encodings
-        ...(encoding !== 'mp3' && { sample_rate: options.sample_rate || 24000 }),
+        // Use 16kHz for better quality when downsampling to 8kHz (2:1 ratio is cleaner than 3:1)
+        ...(encoding !== 'mp3' && { sample_rate: options.sample_rate || 16000 }),
         ...options
       };
 

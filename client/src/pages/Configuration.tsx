@@ -648,7 +648,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           deepgramApiKey: data.deepgramConfig?.apiKey || "",
           deepgramStatus: data.deepgramConfig?.status || "unverified",
           deepgramEnabled: data.deepgramConfig?.isEnabled !== false, // Default to true if not specified
-          deepgramModel: data.deepgramConfig?.model || "",
+          deepgramModel: data.deepgramConfig?.primaryModel || "",
 
           twilioAccountSid: data.twilioConfig?.accountSid || "",
           twilioAuthToken: data.twilioConfig?.authToken || "",
@@ -782,7 +782,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
         deepgramConfig: {
           apiKey: config.deepgramApiKey,
           isEnabled: config.deepgramEnabled,
-          model: config.deepgramModel || "",
+          primaryModel: config.deepgramModel || "",
           tier: "enhanced",
           status: config.deepgramStatus,
         },
@@ -1369,7 +1369,7 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           ...prevConfig,
           llmProvider: newProvider,
           llmModel: "", // Reset model when provider changes
-          llmStatus: "unverified", // Reset status
+          llmStatus: "unverified" as const, // Reset status
         };
         
         // Fetch models for the new provider if API key exists

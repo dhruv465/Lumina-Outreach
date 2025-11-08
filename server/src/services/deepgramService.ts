@@ -431,7 +431,7 @@ export class DeepgramService extends EventEmitter {
 
       // Determine the model to use
       let modelToUse =
-        options?.model || deepgramConfig.model || this.defaultModel;
+        options?.model || deepgramConfig.primaryModel || deepgramConfig.model || this.defaultModel;
 
       // Ensure we have a valid model
       if (!modelToUse) {

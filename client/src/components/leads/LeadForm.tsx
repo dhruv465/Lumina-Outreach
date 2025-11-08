@@ -135,7 +135,8 @@ const LeadForm = ({
     };
 
     fetchLead();
-  }, [leadId, open, toast, onOpenChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadId, open]);
 
   // Reset form when dialog closes
   useEffect(() => {

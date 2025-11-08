@@ -84,9 +84,14 @@ const AudioPlayer = ({
   };
 
   // Function to fetch authenticated audio and create blob URL
-  const fetchAuthenticatedAudio = async (url: string): Promise<string> => {
+  const fetchAuthenticatedAudio = async (url: string, signal?: AbortSignal): Promise<string> => {
     try {
       console.log("Fetching authenticated audio for URL:", url);
+
+      // Check if already aborted
+      if (signal?.aborted) {
+        throw new Error("Request aborted before starting");
+      }
 
       // Check if it's already a streaming URL
       if (
@@ -111,6 +116,7 @@ const AudioPlayer = ({
             Accept: "audio/mpeg, audio/wav, audio/*",
           },
           timeout: 30000, // 30 second timeout
+          signal: signal,
         });
 
         console.log("Direct streaming API response status:", response.status);
@@ -213,6 +219,7 @@ const AudioPlayer = ({
             headers: {
               Accept: "audio/mpeg, audio/wav, audio/*",
             },
+            signal: signal,
           });
 
           console.log("Streaming API response status:", response.status);
@@ -253,6 +260,7 @@ const AudioPlayer = ({
               headers: {
                 Accept: "audio/mpeg, audio/wav, audio/*",
               },
+              signal: signal,
             });
 
             const blob = new Blob([response.data], {
@@ -281,6 +289,18 @@ const AudioPlayer = ({
         }
       }
     } catch (error) {
+      // Check if this is an abort error
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log("Audio fetch was aborted (component unmounted)");
+        throw new Error("Request aborted");
+      }
+
+      // Check for axios cancel error
+      if ((error as any).code === 'ERR_CANCELED') {
+        console.log("Audio fetch was cancelled");
+        throw new Error("Request cancelled");
+      }
+
       console.error("Error fetching authenticated audio:", error);
 
       // Log detailed error information
@@ -314,6 +334,10 @@ const AudioPlayer = ({
   useEffect(() => {
     if (!waveformRef.current) return;
 
+    // Create an AbortController for this effect
+    const abortController = new AbortController();
+    let isMounted = true;
+
     // Clean up previous blob URL
     if (blobUrl) {
       URL.revokeObjectURL(blobUrl);
@@ -345,9 +369,15 @@ const AudioPlayer = ({
           audioRef.current.pause();
         }
 
+        // Check if component is still mounted before fetching
+        if (!isMounted || abortController.signal.aborted) {
+          console.log("Component unmounted before audio fetch, aborting");
+          return;
+        }
+
         // Fetch authenticated audio and get blob URL
         console.log("🔐 Fetching authenticated audio...");
-        const audioUrlToUse = await fetchAuthenticatedAudio(audioUrl);
+        const audioUrlToUse = await fetchAuthenticatedAudio(audioUrl, abortController.signal);
         console.log(
           "✅ Audio URL processed:",
           audioUrlToUse.substring(0, 100) + "..."
@@ -452,6 +482,12 @@ const AudioPlayer = ({
 
           setLoading(false);
 
+          // Ignore abort errors - these are expected when component unmounts
+          if (err?.message?.includes("aborted") || err?.message?.includes("abort")) {
+            console.log("Audio loading aborted (component unmounted or changed)");
+            return;
+          }
+
           // Provide more specific error messages based on error type
           let errorMessage = "Failed to load audio recording";
           if (err?.message?.includes("CORS")) {
@@ -548,6 +584,12 @@ const AudioPlayer = ({
           testAudio.remove();
         }, 5000);
       } catch (error) {
+        // Ignore abort errors - component was unmounted
+        if (error instanceof Error && (error.message === "Request aborted" || error.message === "Request cancelled")) {
+          console.log("Audio initialization aborted - component unmounted");
+          return;
+        }
+
         console.group("🔴 WaveSurfer Initialization Error");
         console.error("Error initializing WaveSurfer:", error);
         console.error("Error type:", error instanceof Error ? error.constructor.name : typeof error);
@@ -557,17 +599,32 @@ const AudioPlayer = ({
         console.error("Call ID:", callId);
         console.groupEnd();
         
+        // Don't try fallback if component is unmounted
+        if (!isMounted) {
+          console.log("Component unmounted, skipping fallback");
+          return;
+        }
+
         console.log("Falling back to simple HTML5 audio player");
         setLoading(false);
         setUseSimplePlayer(true);
 
         // Try to set up simple audio player
         try {
-          const audioUrlToUse = await fetchAuthenticatedAudio(audioUrl);
-          setBlobUrl(audioUrlToUse);
+          const audioUrlToUse = await fetchAuthenticatedAudio(audioUrl, abortController.signal);
+          if (isMounted) {
+            setBlobUrl(audioUrlToUse);
+          }
         } catch (fallbackError) {
+          // Ignore abort errors in fallback too
+          if (fallbackError instanceof Error && (fallbackError.message === "Request aborted" || fallbackError.message === "Request cancelled")) {
+            console.log("Fallback audio fetch aborted");
+            return;
+          }
           console.error("Fallback audio player also failed:", fallbackError);
-          setError("Failed to load audio recording");
+          if (isMounted) {
+            setError("Failed to load audio recording");
+          }
         }
       }
     };
@@ -576,6 +633,9 @@ const AudioPlayer = ({
 
     // Clean up on unmount
     return () => {
+      isMounted = false;
+      abortController.abort();
+
       // Stop any playing audio before cleanup
       if (wavesurferRef.current) {
         try {

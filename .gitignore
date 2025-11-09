@@ -720,6 +720,8 @@ deployment/backups/
 !training/deployment/models_config.json
 !training/deployment/deployment_config.json
 
+# Generated Training Data
+intent-datasets/
 # Keep package files
 !package.json
 !requirements.txt
@@ -733,3 +735,4 @@ deployment/backups/
 # remove kiros files
 
 .kiro/test_*.js
+\n# Google Cloud Credentials\n/server/lumina-outreach-c4082e500293.json

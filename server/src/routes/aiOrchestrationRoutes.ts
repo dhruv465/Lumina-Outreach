@@ -14,9 +14,7 @@ import {
   retrieveContext,
   updateConfiguration,
   processSpeech,
-  detectEmotion,
-  detectIntent,
-  detectObjection,
+  analyzeText, // New import
   scoreConversation,
   getMetrics,
   clearCache
@@ -68,23 +66,9 @@ export default async function (fastify: FastifyInstance, options: Record<string,
 
   fastify.route({
     method: 'POST',
-    url: '/emotion',
+    url: '/analyze-text',
     preHandler: [(fastify as any).authenticate],
-    handler: detectEmotion,
-  });
-
-  fastify.route({
-    method: 'POST',
-    url: '/intent',
-    preHandler: [(fastify as any).authenticate],
-    handler: detectIntent,
-  });
-
-  fastify.route({
-    method: 'POST',
-    url: '/objection',
-    preHandler: [(fastify as any).authenticate],
-    handler: detectObjection,
+    handler: analyzeText,
   });
 
   fastify.route({

@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "lumina-outreach",
+  "private_key_id": "c4082e500293fa2e7b0bfc0efd3e238ef2e62589",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCNt7bPBnRXDnPg\nG2LPqQh8uIL1B3rQPmSEjpbx9yV0K2UUBEh9Uarz3lVqUEZT6GJe1snZQi4CEXEP\nwrzGXmDN0hcu/Z7JKsZHxvlMg8UekBPr0eTk9LwSWc4BUFm5/3DseiakxeF67rBx\n9obJzT6fOjLXBPQuTuZh4N2hkhkKXnMwVHfBTpH/oOV6DHRoOcwgC0l79LbvHLeh\njOMLbfqz26CqtVnUVqelpQOnoxpFte5Z2cc8CVN+BfOt3ee17Y6kGzYafa9d+Bxu\nr9SX3pCmSE7ouEb2NXw8a1gicIKSJAh/xqrRfzIDtdWxss4gwUMvkAzdA9ekMzMx\nCEJR5FFDAgMBAAECggEAIOwyCuxL8MGJx+F01htFvnu66KOhM2mbPnRFutaYm+FM\n7RaFpJ9pYJghLb6SaAHPgIrTf6ZxO8fDhU7PPiJEyOvquN7wmXlXcOtXlR/zlkMQ\nbbNoQoxceMLmKcX54kzmdfl2qsbRuBZlZURJUe5dgu4pS2x6MZvgx5JOyq8/I/ou\ntllvRc/6bs7bcnX/kMlTKiCb7OKbqycLS/YMRfxwsRg38KZVFsiK5KPKFifdbbHs\nhETdW8V3qG3BTFMb8+uBe6PmHvTr+5Fxuumn2XakibXlwBMb16Vupj+Ol61ZCtar\nPQA/MHXxIold8ByfwcO1tzuPmH+HbikuJAMLn7L8KQKBgQC/YpHzzcdgQHKVSh2M\nD/DCWZ7EBbeJfUFTMKs9vE41uHllyzFi3PDviiKI6CTyGnItxxir3lJyRQ6z9d0K\nsAy9DVQtQ2wSliIMSodugiYuA4KUZmFTnTp5K1W0PFUK1ha1NAdpfSdGn5W3eojz\nOWEe49RsChzWUD8VSvYvUa5U7wKBgQC9kGJ1+Wz+SAdiLGC9sLKRBd5e/7jFb0Fu\ng0D6z1sc8jiqAISGI7WpFs6WFtg9KSx6PDQ1RDW0NkTAVMZCpiVUsFQ6v3GbbV4F\nCabY8T3O1LQ3ircyqHmAiqH57zjDYTEOBqGs5XvKoOa46sy0iyP0bRJCV6rLOWj9\nLLAreFtQ7QKBgBQGMzEoIakvdQ2rsIW8ETu0dskZtAddpJ0YpYITFrfGMmV1Khim\n90qI0G40o9D09WdWwn0RCN1N3mjz24nHu714DIuj10XmkW9pyNvGIEqGMX5na918\nwOZ2o0P1YAx/M+cHp5Lg9mAMSHTnDDculLvPqKUZNcUypjcLHdD7odrfAoGBAKwr\nLfIed0rAGsykp7zBdn1XCi/YLHZNZO09ks/5crRonuRwkezPFBgeGcWhvAZYlgfz\nFCvo5qnlvC2/EU7JXhB8EhRFeqaC/6itqndRLCTldUUY3OjKsYf44cKB7lkttgMa\nLM8+ol9YIhWDVCcKVL6ULchJnVr0qpF/fAYPS0jFAoGALzXjjn9bHeQSyPqjdslI\nWEHMPvHBasfl8+UqyVBZ/+Wuaqm+YkL4hFoVvxuygYzMsgAhYkTuIjWwZ4CiYsHV\nJoyd8cNv7a1+9X3ABbNVp03w9SIzGnn7SJCRLLH8ACG+79izI/DjRnvna57JW2rW\nOG7V3tOeWXGjYLoHxjpyqYo=\n-----END PRIVATE KEY-----\n",
+  "client_email": "dialogflow-client@lumina-outreach.iam.gserviceaccount.com",
+  "client_id": "103143353953469169003",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/dialogflow-client%40lumina-outreach.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

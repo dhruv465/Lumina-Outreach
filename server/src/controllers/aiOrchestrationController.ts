@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { aiService } from '../services/aiService';
+import { v4 as uuidv4 } from 'uuid';
 
 // @desc    Get AI service status
 // @route   GET /api/ai-orchestration/status
@@ -108,42 +109,11 @@ export const processSpeech = async (req: FastifyRequest, res: FastifyReply) => {
 // @desc    Process an emotion detection request
 // @route   POST /api/ai-orchestration/emotion
 // @access  Private
-export const detectEmotion = async (req: FastifyRequest, res: FastifyReply) => {
+export const analyzeText = async (req: FastifyRequest, res: FastifyReply) => {
   try {
-    const { text } = req.body as any;
-    const response = await aiService.detectEmotion(text);
-    return res.send(response);
-  } catch (error) {
-    return res.status(500).send({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-};
-
-// @desc    Process an intent detection request
-// @route   POST /api/ai-orchestration/intent
-// @access  Private
-export const detectIntent = async (req: FastifyRequest, res: FastifyReply) => {
-  try {
-    const { text } = req.body as any;
-    const response = await aiService.detectIntent(text);
-    return res.send(response);
-  } catch (error) {
-    return res.status(500).send({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-};
-
-// @desc    Process an objection detection request
-// @route   POST /api/ai-orchestration/objection
-// @access  Private
-export const detectObjection = async (req: FastifyRequest, res: FastifyReply) => {
-  try {
-    const { text } = req.body as any;
-    const response = await aiService.detectObjection(text);
+    const { text, sessionId } = req.body as { text: string; sessionId?: string };
+    const currentSessionId = sessionId || uuidv4(); // Use provided sessionId or generate a new one
+    const response = await aiService.analyzeText(text, currentSessionId);
     return res.send(response);
   } catch (error) {
     return res.status(500).send({

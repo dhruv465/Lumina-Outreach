@@ -167,14 +167,14 @@ User initiates call → Campaign Service → Twilio API → TwiML webhook
 
 ## Project Status
 
-**Overall Progress: ~22.5%**
+**Overall Progress: ~39%**
 
 This project is being developed in phases. The following table shows the current status of each phase:
 
 | Phase | Description | Weight | Status | Contribution |
 | :--- | :--- | :--- | :--- | :--- |
 | 0 | Code Refactoring | 20% | **Complete** | 20% |
-| 1 | NLU Integration | 25% | **Planned** | ~2.5% |
+| 1 | NLU Integration | 25% | **In Progress** | ~75% |
 | 2 | Dialogue Management | 30% | **Not Started** | 0% |
 | 3 | Self-Learning & Data | 25% | **Not Started** | 0% |
 | | **Total** | **100%** | | **~22.5%** |
@@ -183,9 +183,16 @@ This project is being developed in phases. The following table shows the current
 
 - **Status:** We have completely refactored the server-side code, established a clean service layer, removed redundant controllers, and fixed the initial "patchwork" issues. This was a critical first step that sets us up for success.
 
-### Phase 1: NLU Engine and Integration (10% Complete)
+### Phase 1: NLU Engine and Integration (In Progress - ~75% Complete)
 
-- **Status:** We have a detailed, professional-grade plan to use Google Dialogflow CX. The architectural decision is made, but no implementation has begun. The next step is setting up the Google Cloud project.
+- **Status:** Significant progress has been made. We have successfully integrated Google Dialogflow CX as our primary Natural Language Understanding (NLU) engine.
+- **Key Achievements:**
+    - **Architectural Decision:** Confirmed the use of Google Dialogflow CX for robust intent, entity, and sentiment detection.
+    - **Environment Setup:** Configured Google Cloud project, enabled Dialogflow API, set up service account credentials, and updated environment variables.
+    - **Code Integration:** Refactored `server/src/services/aiService.ts` to use the Dialogflow CX client, replacing placeholder logic. Updated `aiOrchestrationController.ts` and `aiOrchestrationRoutes.ts` to expose a new `/analyze-text` endpoint.
+    - **Initial Intent Creation:** Guided the creation of core sales intents (e.g., `interested`, `not_interested`, `price_inquiry`) in the Dialogflow CX console.
+    - **Training Data Augmentation:** Developed a script (`server/scripts/process-dataset.js`) to download and process a large customer support dataset from Hugging Face, generating CSV files for bulk import of training phrases into Dialogflow intents.
+- **Current Focus:** Augmenting existing Dialogflow intents with training phrases from the processed dataset to enhance NLU accuracy and breadth.
 
 ### Phase 2: Dialogue Management & Response Generation (0% Complete)
 

@@ -8,6 +8,8 @@ import Configuration from '../models/Configuration';
 import { getVoiceAIService } from '.';
 import { conversationEngine } from './index';
 import { RealTelephonyService } from './realTelephonyService';
+import { aiService } from './aiService'; // Import the new aiService
+import { v4 as uuidv4 } from 'uuid'; // Import uuid for session IDs
 import { EnhancedVoiceAIService } from './enhancedVoiceAIService';
 import { synthesizeVoiceResponse, processAudioForTwiML, prepareUrlForTwilioPlay } from '../utils/voiceSynthesis';
 import { getPreferredVoiceId } from '../utils/voiceUtils';
@@ -1324,14 +1326,15 @@ async function detectIntent(conversationLog: Array<{ role: string, content: stri
 
       // No explicit intents available, use voiceAIService for detection
       try {
-            const { voiceAIService } = require('../services');
+            // Use the new aiService.analyzeText for detection
             const userTexts = userEntries.map(entry => entry.content).join(' ');
+            const sessionId = uuidv4(); // Generate a new session ID for this analysis
 
-            const result = await voiceAIService.detectIntent(userTexts);
+            const result = await aiService.analyzeText(userTexts, sessionId);
             return {
-                  primaryIntent: result.primaryIntent || 'general_conversation',
+                  primaryIntent: result.intent || 'general_conversation',
                   confidence: result.confidence || 0.5,
-                  secondaryIntents: result.secondaryIntents || []
+                  secondaryIntents: [] // Dialogflow CX returns a single primary intent, not secondary intents in this structure
             };
       } catch (error) {
             // If import fails, return default intent

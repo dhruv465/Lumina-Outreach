@@ -26,10 +26,13 @@ async def test_get_lead_returns_empty_dict_on_404():
 
 @respx.mock
 async def test_post_outcome_true_on_200():
-    respx.post(f"{BASE}/internal/livekit/calls/c1/outcome").mock(
+    route = respx.post(f"{BASE}/internal/livekit/calls/c1/outcome").mock(
         return_value=httpx.Response(200, json={"success": True})
     )
     assert await API.post_outcome("c1", "interested", "wants demo") is True
+    import json
+    body = json.loads(route.calls[0].request.content)
+    assert body == {"outcome": "interested", "notes": "wants demo"}
 
 
 @respx.mock
@@ -55,7 +58,10 @@ async def test_post_transcript_sends_payload():
 
 @respx.mock
 async def test_schedule_callback_true_on_200():
-    respx.post(f"{BASE}/internal/livekit/calls/c1/callback").mock(
+    route = respx.post(f"{BASE}/internal/livekit/calls/c1/callback").mock(
         return_value=httpx.Response(200)
     )
     assert await API.schedule_callback("c1", "2026-07-10T15:00:00+05:30", "call back") is True
+    import json
+    body = json.loads(route.calls[0].request.content)
+    assert body == {"date_time": "2026-07-10T15:00:00+05:30", "notes": "call back"}

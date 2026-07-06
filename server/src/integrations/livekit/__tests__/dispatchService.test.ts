@@ -7,7 +7,26 @@ jest.mock('livekit-server-sdk', () => ({
   })),
 }));
 
-import { dispatchOutboundCall } from '../dispatchService';
+const mockCallCtor = jest.fn();
+jest.mock('../../../models/Call', () => ({
+  __esModule: true,
+  default: mockCallCtor,
+}));
+
+const mockLeadFindById = jest.fn();
+jest.mock('../../../models/Lead', () => ({
+  __esModule: true,
+  default: { findById: mockLeadFindById },
+}));
+
+const mockCampaignFindById = jest.fn();
+jest.mock('../../../models/Campaign', () => ({
+  __esModule: true,
+  default: { findById: mockCampaignFindById },
+}));
+
+import logger from '../../../utils/logger';
+import { dispatchOutboundCall, initiateLiveKitCall } from '../dispatchService';
 
 describe('room name mapping', () => {
   it('builds and parses round-trip', () => {
@@ -58,5 +77,52 @@ describe('dispatchOutboundCall', () => {
         script: '', opening_message: '', voice_id: '', lead_name: '',
       }),
     ).rejects.toThrow('LIVEKIT_URL');
+  });
+});
+
+describe('initiateLiveKitCall', () => {
+  const leadId = '64b0c0ffee0ddeadbeef0001';
+  const campaignId = '64b0c0ffee0ddeadbeef0002';
+  const mockCallSave = jest.fn();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.LIVEKIT_URL = 'wss://test.livekit.cloud';
+    process.env.LIVEKIT_API_KEY = 'key';
+    process.env.LIVEKIT_API_SECRET = 'secret';
+    process.env.LIVEKIT_AGENT_NAME = 'lumina-outbound';
+
+    mockCallCtor.mockImplementation((doc: any) => ({
+      ...doc,
+      _id: { toString: () => '64b0c0ffee0ddeadbeef9999' },
+      save: mockCallSave,
+    }));
+    mockLeadFindById.mockResolvedValue({
+      phoneNumber: '+911234567890',
+      name: 'Ravi',
+      save: jest.fn(),
+    });
+    mockCampaignFindById.mockResolvedValue({
+      script: { versions: [{ isActive: true, content: 'sell' }] },
+      openingMessage: '',
+      voiceConfiguration: { voiceId: 'v1' },
+    });
+  });
+
+  it('marks the call failed, logs, and rethrows when dispatch fails', async () => {
+    const errorSpy = jest.spyOn(logger, 'error');
+    mockCreateDispatch.mockRejectedValue(new Error('livekit unavailable'));
+
+    await expect(
+      initiateLiveKitCall({ leadId, campaignId }),
+    ).rejects.toThrow('livekit unavailable');
+
+    const call = mockCallCtor.mock.results[0].value;
+    expect(call.status).toBe('failed');
+    // saved once as queued, then again after being marked failed
+    expect(mockCallSave).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('livekit unavailable'),
+    );
   });
 });

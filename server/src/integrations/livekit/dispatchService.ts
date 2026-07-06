@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import Call, { ICall } from '../../models/Call';
 import Lead from '../../models/Lead';
 import Campaign from '../../models/Campaign';
-import logger from '../../utils/logger';
+import logger, { getErrorMessage } from '../../utils/logger';
 import { LiveKitDispatchMetadata, roomNameForCall } from './types';
 
 function requireEnv(name: string): string {
@@ -63,16 +63,26 @@ export async function initiateLiveKitCall(params: {
   }
 
   await newCall.save();
-  const roomName = await dispatchOutboundCall({
-    call_id: newCall._id.toString(),
-    lead_id: leadId,
-    campaign_id: campaignId,
-    phone_number: lead.phoneNumber,
-    script: activeScript.content,
-    opening_message: campaign.openingMessage || '',
-    voice_id: campaign.voiceConfiguration?.voiceId || '',
-    lead_name: lead.name || '',
-  });
+  let roomName: string;
+  try {
+    roomName = await dispatchOutboundCall({
+      call_id: newCall._id.toString(),
+      lead_id: leadId,
+      campaign_id: campaignId,
+      phone_number: lead.phoneNumber,
+      script: activeScript.content,
+      opening_message: campaign.openingMessage || '',
+      voice_id: campaign.voiceConfiguration?.voiceId || '',
+      lead_name: lead.name || '',
+    });
+  } catch (error) {
+    newCall.status = 'failed';
+    await newCall.save();
+    logger.error(
+      `LiveKit dispatch failed for call ${newCall._id.toString()}: ${getErrorMessage(error)}`
+    );
+    throw error;
+  }
 
   newCall.status = 'dialing';
   newCall.startTime = new Date();

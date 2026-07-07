@@ -20,7 +20,7 @@ from livekit.agents import (
     get_job_context,
     inference,
 )
-from livekit.plugins import deepgram, elevenlabs, google
+from livekit.plugins import deepgram, elevenlabs, openai
 
 from tools.lumina_api import LuminaAPI
 
@@ -141,7 +141,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     session = AgentSession(
         stt=deepgram.STT(model="nova-3", language="multi"),
-        llm=google.LLM(model="gemini-2.5-flash"),
+        llm=openai.responses.LLM(model="gpt-4.1"),
         tts=elevenlabs.TTS(
             voice_id=meta.get("voice_id") or DEFAULT_VOICE_ID,
             model="eleven_flash_v2_5",

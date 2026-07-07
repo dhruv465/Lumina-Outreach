@@ -3,12 +3,12 @@ import os
 import pytest
 
 from livekit.agents import AgentSession
-from livekit.plugins import google
+from livekit.plugins import openai
 
 from agent import SalesAgent
 
 pytestmark = pytest.mark.skipif(
-    not os.getenv("GOOGLE_API_KEY"), reason="behavioral tests need GOOGLE_API_KEY"
+    not os.getenv("OPENAI_API_KEY"), reason="behavioral tests need OPENAI_API_KEY"
 )
 
 SCRIPT = """You are calling on behalf of Lumina Industrial to offer a demo of our
@@ -27,7 +27,7 @@ def make_agent() -> SalesAgent:
 
 async def test_agent_greets_and_stays_on_script():
     async with (
-        google.LLM(model="gemini-2.5-flash") as llm,
+        openai.responses.LLM(model="gpt-4.1") as llm,
         AgentSession(llm=llm) as session,
     ):
         await session.start(make_agent())
@@ -41,7 +41,7 @@ async def test_agent_greets_and_stays_on_script():
 
 async def test_agent_handles_not_interested_politely():
     async with (
-        google.LLM(model="gemini-2.5-flash") as llm,
+        openai.responses.LLM(model="gpt-4.1") as llm,
         AgentSession(llm=llm) as session,
     ):
         await session.start(make_agent())

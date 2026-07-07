@@ -10,11 +10,15 @@ from dotenv import load_dotenv
 from livekit import api
 from livekit.agents import (
     Agent,
+    AgentFalseInterruptionEvent,
     AgentServer,
     AgentSession,
+    AgentStateChangedEvent,
+    ErrorEvent,
     JobContext,
     RunContext,
     TurnHandlingOptions,
+    UserStateChangedEvent,
     cli,
     function_tool,
     get_job_context,
@@ -154,27 +158,92 @@ async def entrypoint(ctx: JobContext) -> None:
             turn_detection=inference.TurnDetector(),
             # Explicit barge-in config for telephony, per
             # docs.livekit.io/agents/logic/turns/ (Interruptions) and
-            # docs.livekit.io/agents/logic/turns/tuning/ (recommended starting config).
+            # docs.livekit.io/reference/agents/turn-handling-options/ (InterruptionOptions).
             interruption={
                 # Master switch: user speech pauses agent playout (SDK default, made explicit).
                 "enabled": True,
-                # Force the adaptive barge-in model. Without an explicit mode the SDK
-                # silently disables it outside LiveKit Cloud / dev mode ("adaptive
-                # interruption is disabled by default in production mode") and falls
-                # back to raw VAD; when the model is unavailable it still degrades to
-                # VAD gracefully. See docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/
-                "mode": "adaptive",
+                # Local, deterministic VAD-triggered barge-in: "'vad' triggers on any
+                # detected speech" (turn-handling-options reference). We previously
+                # forced "adaptive" (f2b4081b); in adaptive mode the SDK disables the
+                # local VAD/STT interruption path 1.0s after each agent utterance
+                # starts (backchannel_boundary start cooldown, see
+                # docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/
+                # "Turn boundary cooldown") and delegates the barge-in decision
+                # exclusively to the remote model at agent-gateway.livekit.cloud.
+                # On live call AJ_b4xDtHFbb4jV that model never emitted
+                # bargein_detected during ~15s of overlapping speech and never
+                # errored (no VAD fallback was ever triggered), so no interruption
+                # path remained. Its decision threshold (server default 0.656) and
+                # 0.7s inference timeout are not client-tunable in agents 1.6.4
+                # (AgentActivity constructs AdaptiveInterruptionDetector() with no
+                # arguments), and the same gateway logged "turn detection transport
+                # latency is too high: 523ms" from this region. VAD mode is also the
+                # SDK's own documented fallback wherever the adaptive model is
+                # unavailable ("a session in a region without the model automatically
+                # falls back to VAD-based interruption detection").
+                "mode": "vad",
                 # Speech length that registers as an interruption (docs default 0.5s).
                 "min_duration": 0.5,
                 # Interrupt on audio alone; don't wait for STT words (slow on 8kHz PSTN audio).
                 "min_words": 0,
                 # If an interruption yields no transcript within 2s, treat it as false
-                # and resume speech (docs.livekit.io/agents/logic/turns/ False interruptions).
+                # and resume speech (docs.livekit.io/agents/logic/turns/ False
+                # interruptions). With VAD as the trigger this is also the guard
+                # against line-noise blips killing the pitch.
                 "false_interruption_timeout": 2.0,
                 "resume_false_interruption": True,
             },
         ),
     )
+
+    # ── Barge-in diagnostics ─────────────────────────────────────────────────
+    # The SDK emits no INFO-level line when an interruption fires, and the Krisp
+    # FFI filter is silent on success (it only WARNs on failure: "failed to
+    # initialize the audio filter" / "audio filter cannot be enabled: ensure you
+    # are connecting to LiveKit Cloud"), which made call AJ_b4xDtHFbb4jV
+    # undiagnosable from logs. Log every link of the barge-in chain so the next
+    # live call is diagnostic:
+    #   user speaking while agent_state=speaking  -> VAD sees the overlap
+    #   agent speaking -> listening mid-overlap   -> barge-in actually fired
+    #   agent_false_interruption                  -> paused, then auto-resumed
+    logger.info(
+        "noise cancellation: %s",
+        "BVCTelephony (Krisp telephony voice isolation)"
+        if BVC_ENABLED
+        else "DISABLED via LIVEKIT_BVC_ENABLED",
+    )
+
+    @session.on("user_state_changed")
+    def _on_user_state(ev: UserStateChangedEvent) -> None:
+        logger.info(
+            "user state %s -> %s (agent_state=%s)",
+            ev.old_state,
+            ev.new_state,
+            session.agent_state,
+        )
+
+    @session.on("agent_state_changed")
+    def _on_agent_state(ev: AgentStateChangedEvent) -> None:
+        logger.info("agent state %s -> %s", ev.old_state, ev.new_state)
+
+    @session.on("agent_false_interruption")
+    def _on_false_interruption(ev: AgentFalseInterruptionEvent) -> None:
+        logger.info("false interruption detected (auto-resumed=%s)", ev.resumed)
+
+    @session.on("overlapping_speech")
+    def _on_overlapping_speech(ev: inference.OverlappingSpeechEvent) -> None:
+        # Only fires in adaptive mode; kept so re-enabling "adaptive" stays diagnosable.
+        logger.info(
+            "overlapping speech: is_interruption=%s probability=%.3f detection_delay=%.3fs requests=%d",
+            ev.is_interruption,
+            ev.probability,
+            ev.detection_delay,
+            ev.num_requests,
+        )
+
+    @session.on("error")
+    def _on_session_error(ev: ErrorEvent) -> None:
+        logger.warning("session error from %s: %s", type(ev.source).__name__, ev.error)
 
     async def persist_transcript() -> None:
         if not call_id:

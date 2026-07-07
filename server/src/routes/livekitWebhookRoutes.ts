@@ -17,17 +17,26 @@ export default async function livekitWebhookRoutes(fastify: FastifyInstance) {
     if (!apiKey || !apiSecret) {
       return reply.code(500).send({ error: 'LiveKit credentials not configured' });
     }
+    // Signature verification failure -> 401 (bad caller). Processing failure
+    // -> 500 (our fault) so LiveKit's non-2xx retry redelivers the event.
+    let event: unknown;
     try {
       const receiver = new WebhookReceiver(apiKey, apiSecret);
-      const event = await receiver.receive(
+      event = await receiver.receive(
         request.body as string,
         request.headers.authorization
       );
-      await handleLiveKitEvent(event as any);
-      return reply.code(200).send({ ok: true });
     } catch (error) {
-      logger.error(`LiveKit webhook rejected: ${getErrorMessage(error)}`);
-      return reply.code(401).send({ error: 'invalid webhook' });
+      logger.warn(`LiveKit webhook signature rejected: ${getErrorMessage(error)}`);
+      return reply.code(401).send({ error: 'invalid webhook signature' });
     }
+
+    try {
+      await handleLiveKitEvent(event as any);
+    } catch (error) {
+      logger.error(`LiveKit webhook processing failed: ${getErrorMessage(error)}`);
+      return reply.code(500).send({ error: 'webhook processing failed' });
+    }
+    return reply.code(200).send({ ok: true });
   });
 }

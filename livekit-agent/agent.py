@@ -19,8 +19,9 @@ from livekit.agents import (
     function_tool,
     get_job_context,
     inference,
+    room_io,
 )
-from livekit.plugins import deepgram, elevenlabs, openai
+from livekit.plugins import deepgram, elevenlabs, noise_cancellation, openai
 
 from tools.lumina_api import LuminaAPI
 
@@ -31,6 +32,9 @@ logger.setLevel(logging.INFO)
 AGENT_NAME = "lumina-outbound"
 SIP_OUTBOUND_TRUNK_ID = os.getenv("SIP_OUTBOUND_TRUNK_ID", "")
 DEFAULT_VOICE_ID = os.getenv("ELEVEN_DEFAULT_VOICE_ID", "ODq5zmih8GrVes37Dizd")
+# Krisp BVCTelephony is a LiveKit-Cloud-only model. Set LIVEKIT_BVC_ENABLED=false
+# on self-hosted deploys where the Cloud noise-cancellation models are unavailable.
+BVC_ENABLED = os.getenv("LIVEKIT_BVC_ENABLED", "true").strip().lower() not in ("0", "false", "no")
 
 
 def build_instructions(lead_name: str, script: str, opening_message: str) -> str:
@@ -146,7 +150,30 @@ async def entrypoint(ctx: JobContext) -> None:
             voice_id=meta.get("voice_id") or DEFAULT_VOICE_ID,
             model="eleven_flash_v2_5",
         ),
-        turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector()),
+        turn_handling=TurnHandlingOptions(
+            turn_detection=inference.TurnDetector(),
+            # Explicit barge-in config for telephony, per
+            # docs.livekit.io/agents/logic/turns/ (Interruptions) and
+            # docs.livekit.io/agents/logic/turns/tuning/ (recommended starting config).
+            interruption={
+                # Master switch: user speech pauses agent playout (SDK default, made explicit).
+                "enabled": True,
+                # Force the adaptive barge-in model. Without an explicit mode the SDK
+                # silently disables it outside LiveKit Cloud / dev mode ("adaptive
+                # interruption is disabled by default in production mode") and falls
+                # back to raw VAD; when the model is unavailable it still degrades to
+                # VAD gracefully. See docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/
+                "mode": "adaptive",
+                # Speech length that registers as an interruption (docs default 0.5s).
+                "min_duration": 0.5,
+                # Interrupt on audio alone; don't wait for STT words (slow on 8kHz PSTN audio).
+                "min_words": 0,
+                # If an interruption yields no transcript within 2s, treat it as false
+                # and resume speech (docs.livekit.io/agents/logic/turns/ False interruptions).
+                "false_interruption_timeout": 2.0,
+                "resume_false_interruption": True,
+            },
+        ),
     )
 
     async def persist_transcript() -> None:
@@ -164,7 +191,25 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.add_shutdown_callback(persist_transcript)
 
     # Start the session before dialing so no audio is missed at pickup.
-    session_started = asyncio.create_task(session.start(agent=agent, room=ctx.room))
+    session_started = asyncio.create_task(
+        session.start(
+            agent=agent,
+            room=ctx.room,
+            room_options=room_io.RoomOptions(
+                audio_input=room_io.AudioInputOptions(
+                    # Krisp BVCTelephony: telephony-tuned voice isolation for SIP
+                    # participants. Strips line noise, background voices, and the echo
+                    # of the agent's own TTS from PSTN input BEFORE VAD/STT/barge-in
+                    # detection run, so user speech during agent speech is reliably
+                    # detected as an interruption. See
+                    # docs.livekit.io/agents/logic/turns/tuning/ ("For SIP participants,
+                    # swap voice isolation for the telephony-tuned Krisp model") and
+                    # docs.livekit.io/transport/media/noise-cancellation/ (Voice isolation).
+                    noise_cancellation=noise_cancellation.BVCTelephony() if BVC_ENABLED else None,
+                ),
+            ),
+        )
+    )
 
     if phone_number:
         try:

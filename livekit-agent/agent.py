@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
@@ -28,6 +29,9 @@ from livekit.agents import (
 from livekit.plugins import deepgram, elevenlabs, noise_cancellation, openai
 
 from tools.lumina_api import LuminaAPI
+
+if TYPE_CHECKING:
+    from livekit.agents import AMDPredictionEvent
 
 load_dotenv(".env.local")
 logger = logging.getLogger("lumina-outbound")
@@ -125,6 +129,45 @@ class SalesAgent(Agent):
 
 
 server = AgentServer()
+
+
+async def _resolve_amd_outcome(
+    result: AMDPredictionEvent,
+    *,
+    session: AgentSession,
+    lumina: LuminaAPI,
+    call_id: str,
+    ctx: JobContext,
+) -> bool:
+    """Act on an AMD classification result.
+
+    Returns True if the call is over and `entrypoint` should return without
+    starting the normal conversation (voicemail message left, or mailbox
+    unavailable).
+    """
+    logger.info("AMD result=%s call_id=%s", result.category.value, call_id)
+
+    if result.category in ("human", "uncertain", "machine-ivr"):
+        # Outbound etiquette: let the callee speak first; agent responds after their turn.
+        return False
+    elif result.category == "machine-vm":
+        speech = session.generate_reply(
+            instructions=(
+                "You reached voicemail. Leave a brief, professional message: "
+                "who you are, why you called, and a callback number if provided "
+                "in the script. Under 20 seconds."
+            )
+        )
+        await speech.wait_for_playout()
+        await lumina.post_outcome(call_id, "voicemail", "left voicemail message")
+        ctx.shutdown("voicemail")
+        return True
+    elif result.category == "machine-unavailable":
+        await lumina.post_outcome(call_id, "voicemail", "mailbox unavailable")
+        ctx.shutdown("mailbox unavailable")
+        return True
+
+    return False
 
 
 @server.rtc_session(agent_name=AGENT_NAME)
@@ -304,16 +347,29 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
     if phone_number:
+        from livekit.agents import AMD
+
         try:
-            await ctx.api.sip.create_sip_participant(
-                api.CreateSIPParticipantRequest(
-                    room_name=ctx.room.name,
-                    sip_trunk_id=SIP_OUTBOUND_TRUNK_ID,
-                    sip_call_to=phone_number,
-                    participant_identity=phone_number,
-                    wait_until_answered=True,
+            async with AMD(session, participant_identity=phone_number) as detector:
+                await ctx.api.sip.create_sip_participant(
+                    api.CreateSIPParticipantRequest(
+                        room_name=ctx.room.name,
+                        sip_trunk_id=SIP_OUTBOUND_TRUNK_ID,
+                        sip_call_to=phone_number,
+                        participant_identity=phone_number,
+                        wait_until_answered=True,
+                    )
                 )
-            )
+                await session_started
+                await ctx.wait_for_participant(identity=phone_number)
+                logger.info("callee answered call_id=%s", call_id)
+                # Outbound etiquette: let the callee speak first; agent responds after their turn.
+
+                result = await detector.execute()
+                if await _resolve_amd_outcome(
+                    result, session=session, lumina=lumina, call_id=call_id, ctx=ctx
+                ):
+                    return
         except api.TwirpError as e:
             logger.error(
                 "dial failed: %s SIP %s %s",
@@ -324,11 +380,6 @@ async def entrypoint(ctx: JobContext) -> None:
             await lumina.post_outcome(call_id, "no-answer", f"SIP {e.metadata.get('sip_status_code')}")
             ctx.shutdown()
             return
-
-        await session_started
-        await ctx.wait_for_participant(identity=phone_number)
-        logger.info("callee answered call_id=%s", call_id)
-        # Outbound etiquette: let the callee speak first; agent responds after their turn.
     else:
         await session_started
         await session.generate_reply(instructions="Greet the caller and offer your assistance.")

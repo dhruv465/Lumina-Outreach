@@ -148,7 +148,12 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
     session = AgentSession(
-        stt=deepgram.STT(model="nova-3", language="multi"),
+        # English-only deployment. nova-3 "multi" adds cross-language decoding
+        # overhead and is measurably slower/less accurate on 8kHz PSTN audio,
+        # especially on speech that overlaps the agent's own TTS. A single-language
+        # "en" model emits interim words faster and more reliably during overlap,
+        # which is what the min_words interruption gate below now depends on.
+        stt=deepgram.STT(model="nova-3", language="en"),
         llm=openai.responses.LLM(model="gpt-4.1"),
         tts=elevenlabs.TTS(
             voice_id=meta.get("voice_id") or DEFAULT_VOICE_ID,
@@ -184,12 +189,30 @@ async def entrypoint(ctx: JobContext) -> None:
                 "mode": "vad",
                 # Speech length that registers as an interruption (docs default 0.5s).
                 "min_duration": 0.5,
-                # Interrupt on audio alone; don't wait for STT words (slow on 8kHz PSTN audio).
-                "min_words": 0,
-                # If an interruption yields no transcript within 2s, treat it as false
-                # and resume speech (docs.livekit.io/agents/logic/turns/ False
-                # interruptions). With VAD as the trigger this is also the guard
-                # against line-noise blips killing the pitch.
+                # ROOT-CAUSE FIX (bargein-fix3). Previously 0 = interrupt on raw VAD
+                # energy with no word confirmation. On live call AJ_4QVYL4TZyxtH that
+                # made the agent's own TTS echo / PSTN line noise fire the interrupt
+                # path: agent_activity.on_vad_inference_done -> _interrupt_by_audio_activity
+                # paused playout, on_end_of_speech armed the 2s false-interruption timer,
+                # and because that "speech" carried no words Deepgram emitted no
+                # transcript (not even interim), so it auto-resumed at exactly +2.000s.
+                # The agent flapped speaking<->listening 3x and took 25.7s to deliver
+                # its opening (call-gate-smoke-4.log lines 29-50). Meanwhile a REAL
+                # interruption ("Tell me.") transcribed in ~0.5s and interrupted cleanly
+                # (lines 61-67), proving the pipeline works once words are present.
+                #
+                # min_words=1 gates the interrupt on STT confirmation:
+                # _interrupt_by_audio_activity returns early until current_transcript
+                # (fed by Deepgram interims) has >=1 word (agent_activity.py L1802-1812).
+                # Wordless echo/noise therefore never pauses the agent, while any real
+                # single word ("stop", "wait", "no") still interrupts within ~0.5s.
+                # This is LiveKit's documented remedy for "agent interrupted by
+                # false positives" (docs.livekit.io/agents/logic/turns/tuning/
+                # troubleshooting table: "Raise interruption.min_words (requires STT)").
+                "min_words": 1,
+                # Safety net for the rare case echo transcribes into a stray word and
+                # pauses playout: if no committed user turn follows within 2s, resume
+                # (docs.livekit.io/agents/logic/turns/ False interruptions).
                 "false_interruption_timeout": 2.0,
                 "resume_false_interruption": True,
             },

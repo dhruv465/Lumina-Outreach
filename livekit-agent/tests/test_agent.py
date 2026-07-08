@@ -1,5 +1,5 @@
 import os
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -19,14 +19,17 @@ SCRIPT = """You are calling on behalf of Lumina Industrial to offer a demo of ou
 conversational AI platform. Qualify the lead, then propose a 30-minute demo."""
 
 
-def make_agent() -> SalesAgent:
-    return SalesAgent(
+def make_agent(*, transfer_to: str = "", sip_identity: str = "", lumina_api=None) -> SalesAgent:
+    agent = SalesAgent(
         call_id="test-call",
         lead_name="Ravi",
         script=SCRIPT,
         opening_message="",
-        lumina_api=None,  # tools degrade gracefully without API
+        transfer_to=transfer_to,
+        lumina_api=lumina_api,  # tools degrade gracefully without API
     )
+    agent.sip_identity = sip_identity
+    return agent
 
 
 @needs_openai_key
@@ -136,3 +139,76 @@ async def test_amd_human_like_result_defers_to_normal_conversation(category):
     session.generate_reply.assert_not_called()
     lumina.post_outcome.assert_not_called()
     ctx.shutdown.assert_not_called()
+
+
+async def test_transfer_call_without_transfer_to_is_graceful():
+    agent = make_agent(sip_identity="+15551234567")  # no transfer_to configured
+    ctx = MagicMock()
+
+    result = await agent.transfer_call(ctx)
+
+    assert result == "no human representative is available right now"
+    ctx.session.generate_reply.assert_not_called()
+
+
+async def test_transfer_call_without_sip_identity_is_graceful():
+    # transfer_to is configured but the SIP callee hasn't been identified yet
+    # (e.g. transfer requested before wait_for_participant resolved).
+    agent = make_agent(transfer_to="+15559876543")
+    ctx = MagicMock()
+
+    result = await agent.transfer_call(ctx)
+
+    assert result == "no human representative is available right now"
+    ctx.session.generate_reply.assert_not_called()
+
+
+async def test_transfer_call_success_initiates_sip_refer_and_records_outcome():
+    lumina = MagicMock()
+    lumina.post_outcome = AsyncMock(return_value=True)
+    agent = make_agent(
+        transfer_to="+15559876543", sip_identity="+15551234567", lumina_api=lumina
+    )
+
+    speech = MagicMock()
+    speech.wait_for_playout = AsyncMock()
+    ctx = MagicMock()
+    ctx.session.generate_reply = MagicMock(return_value=speech)
+
+    job_ctx = MagicMock()
+    job_ctx.room.name = "call-abc123"
+    job_ctx.api.sip.transfer_sip_participant = AsyncMock()
+
+    with patch("agent.get_job_context", return_value=job_ctx):
+        result = await agent.transfer_call(ctx)
+
+    assert result == "transfer initiated"
+    speech.wait_for_playout.assert_awaited_once()
+    job_ctx.api.sip.transfer_sip_participant.assert_awaited_once()
+    request = job_ctx.api.sip.transfer_sip_participant.call_args.args[0]
+    assert request.room_name == "call-abc123"
+    assert request.participant_identity == "+15551234567"
+    assert request.transfer_to == "tel:+15559876543"
+    lumina.post_outcome.assert_awaited_once_with(
+        "test-call", "interested", "transferred to human"
+    )
+
+
+async def test_transfer_call_failure_returns_apology_and_offers_callback():
+    agent = make_agent(transfer_to="+15559876543", sip_identity="+15551234567")
+
+    speech = MagicMock()
+    speech.wait_for_playout = AsyncMock()
+    ctx = MagicMock()
+    ctx.session.generate_reply = MagicMock(return_value=speech)
+
+    job_ctx = MagicMock()
+    job_ctx.room.name = "call-abc123"
+    job_ctx.api.sip.transfer_sip_participant = AsyncMock(
+        side_effect=RuntimeError("trunk rejected REFER")
+    )
+
+    with patch("agent.get_job_context", return_value=job_ctx):
+        result = await agent.transfer_call(ctx)
+
+    assert result == "transfer failed, apologize and offer a callback instead"

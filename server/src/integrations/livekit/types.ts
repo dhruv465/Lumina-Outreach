@@ -12,7 +12,7 @@ export interface LiveKitDispatchMetadata {
   opening_message: string;
   voice_id: string;
   lead_name: string;
-  transfer_to?: string;
+  transfer_to: string;
 }
 
 export const LIVEKIT_ROOM_PREFIX = 'call-';

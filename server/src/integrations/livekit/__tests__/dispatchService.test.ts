@@ -59,6 +59,7 @@ describe('dispatchOutboundCall', () => {
       opening_message: '',
       voice_id: 'v1',
       lead_name: 'Ravi',
+      transfer_to: '',
     };
     const room = await dispatchOutboundCall(meta);
     expect(room).toBe('call-64b0c0ffee0ddeadbeef1234');
@@ -75,6 +76,7 @@ describe('dispatchOutboundCall', () => {
       dispatchOutboundCall({
         call_id: 'x', lead_id: '', campaign_id: '', phone_number: '',
         script: '', opening_message: '', voice_id: '', lead_name: '',
+        transfer_to: '',
       }),
     ).rejects.toThrow('LIVEKIT_URL');
   });

@@ -47,12 +47,20 @@ export interface ICampaign extends mongoose.Document {
     clarity?: number;
     style?: number;
   };
+  telephonyProvider: 'twilio' | 'livekit';
+  transferPhoneNumber?: string;
   metrics: {
     totalCalls: number;
     connectedCalls: number;
     successfulCalls: number;
     avgCallDuration: number;
     conversionRate: number;
+    totalCost?: number;
+  };
+  budget?: {
+    maxCostPerCall: number;
+    totalBudget: number;
+    isBudgetExceeded: boolean;
   };
   createdBy: mongoose.Schema.Types.ObjectId;
   createdAt: Date;
@@ -223,6 +231,15 @@ const CampaignSchema = new mongoose.Schema(
         max: 1,
       },
     },
+    telephonyProvider: {
+      type: String,
+      enum: ['twilio', 'livekit'],
+      default: 'twilio',
+    },
+    transferPhoneNumber: {
+      type: String,
+      default: '',
+    },
     metrics: {
       totalCalls: {
         type: Number,
@@ -241,6 +258,10 @@ const CampaignSchema = new mongoose.Schema(
         default: 0,
       },
       conversionRate: {
+        type: Number,
+        default: 0,
+      },
+      totalCost: {
         type: Number,
         default: 0,
       },

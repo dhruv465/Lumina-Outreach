@@ -74,6 +74,7 @@ export async function initiateLiveKitCall(params: {
       opening_message: campaign.openingMessage || '',
       voice_id: campaign.voiceConfiguration?.voiceId || '',
       lead_name: lead.name || '',
+      transfer_to: campaign.transferPhoneNumber || '',
     });
   } catch (error) {
     newCall.status = 'failed';

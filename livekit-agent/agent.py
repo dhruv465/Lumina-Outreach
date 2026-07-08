@@ -72,11 +72,16 @@ class SalesAgent(Agent):
         lead_name: str,
         script: str,
         opening_message: str = "",
+        transfer_to: str = "",
         lumina_api: LuminaAPI | None = None,
     ) -> None:
         super().__init__(instructions=build_instructions(lead_name, script, opening_message))
         self.call_id = call_id
         self.lumina = lumina_api
+        self.transfer_to = transfer_to
+        # Set by entrypoint once the outbound SIP callee has answered
+        # (participant_identity, which is the dialed phone number).
+        self.sip_identity: str = ""
 
     async def _hangup(self) -> None:
         ctx = get_job_context(required=False)
@@ -126,6 +131,32 @@ class SalesAgent(Agent):
             await self.lumina.post_outcome(self.call_id, "voicemail", "answering machine detected")
         await self._hangup()
         return "hung up on voicemail"
+
+    @function_tool()
+    async def transfer_call(self, ctx: RunContext) -> str:
+        """Transfer the call to a human sales representative. Confirm with the user first."""
+        if not self.transfer_to or not self.sip_identity:
+            return "no human representative is available right now"
+
+        job_ctx = get_job_context()
+        speech = ctx.session.generate_reply(
+            instructions="Tell the user you are transferring them to a colleague now."
+        )
+        await speech.wait_for_playout()
+        try:
+            await job_ctx.api.sip.transfer_sip_participant(
+                api.TransferSIPParticipantRequest(
+                    room_name=job_ctx.room.name,
+                    participant_identity=self.sip_identity,
+                    transfer_to=f"tel:{self.transfer_to}",
+                )
+            )
+            if self.lumina is not None:
+                await self.lumina.post_outcome(self.call_id, "interested", "transferred to human")
+            return "transfer initiated"
+        except Exception as e:
+            logger.error("transfer failed: %s", e)
+            return "transfer failed, apologize and offer a callback instead"
 
 
 server = AgentServer()
@@ -187,6 +218,7 @@ async def entrypoint(ctx: JobContext) -> None:
         lead_name=meta.get("lead_name", ""),
         script=meta.get("script", ""),
         opening_message=meta.get("opening_message", ""),
+        transfer_to=meta.get("transfer_to", ""),
         lumina_api=lumina,
     )
 
@@ -362,6 +394,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 )
                 await session_started
                 await ctx.wait_for_participant(identity=phone_number)
+                agent.sip_identity = phone_number
                 logger.info("callee answered call_id=%s", call_id)
                 # Outbound etiquette: let the callee speak first; agent responds after their turn.
 

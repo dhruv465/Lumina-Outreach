@@ -154,6 +154,57 @@ describe('handleLiveKitEvent', () => {
       expect(mockFindOneAndUpdate).not.toHaveBeenCalled();
     });
   });
+
+  describe('egress_ended', () => {
+    const RECORDING_URL = 'https://storage.googleapis.com/lumina-recordings/call-xyz.ogg';
+
+    it('ignores egress events for rooms that are not lumina calls (room name comes from egressInfo, not room)', async () => {
+      await handleLiveKitEvent({
+        event: 'egress_ended',
+        room: ROOM, // should be ignored for this event type
+        egressInfo: { roomName: 'other-room', fileResults: [{ location: RECORDING_URL }] },
+      });
+      expect(mockFindById).not.toHaveBeenCalled();
+      expect(mockFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('sets recordingUrl from the file result location via an atomic update', async () => {
+      mockFindById.mockResolvedValue(fakeCall({ status: 'completed' }));
+      mockFindOneAndUpdate.mockResolvedValue(
+        fakeCall({ status: 'completed', recordingUrl: RECORDING_URL })
+      );
+      await handleLiveKitEvent({
+        event: 'egress_ended',
+        egressInfo: {
+          roomName: ROOM.name,
+          fileResults: [{ location: RECORDING_URL, filename: 'call-xyz.ogg' }],
+        },
+      });
+      expect(mockFindOneAndUpdate).toHaveBeenCalledTimes(1);
+      const [filter, update, options] = mockFindOneAndUpdate.mock.calls[0];
+      expect(filter).toEqual({ _id: CALL_ID });
+      expect(update.$set).toEqual({ recordingUrl: RECORDING_URL });
+      expect(options).toEqual({ new: true });
+    });
+
+    it('warns and exits for unknown calls without writing', async () => {
+      mockFindById.mockResolvedValue(null);
+      await handleLiveKitEvent({
+        event: 'egress_ended',
+        egressInfo: { roomName: ROOM.name, fileResults: [{ location: RECORDING_URL }] },
+      });
+      expect(mockFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when the egress has no file result location', async () => {
+      await handleLiveKitEvent({
+        event: 'egress_ended',
+        egressInfo: { roomName: ROOM.name, fileResults: [] },
+      });
+      expect(mockFindById).not.toHaveBeenCalled();
+      expect(mockFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('livekitWebhookRoutes error semantics', () => {

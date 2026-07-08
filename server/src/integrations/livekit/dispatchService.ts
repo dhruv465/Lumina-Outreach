@@ -5,6 +5,7 @@ import Lead from '../../models/Lead';
 import Campaign from '../../models/Campaign';
 import logger, { getErrorMessage } from '../../utils/logger';
 import { LiveKitDispatchMetadata, roomNameForCall } from './types';
+import { startCallRecording } from './egressService';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -83,6 +84,16 @@ export async function initiateLiveKitCall(params: {
       `LiveKit dispatch failed for call ${newCall._id.toString()}: ${getErrorMessage(error)}`
     );
     throw error;
+  }
+
+  // Best-effort: recording is opt-in (compliance switch + GCS bucket) and a
+  // failure here must never fail the call itself.
+  try {
+    await startCallRecording(roomName);
+  } catch (error) {
+    logger.warn(
+      `LiveKit call recording failed to start for room ${roomName}: ${getErrorMessage(error)}`
+    );
   }
 
   newCall.status = 'dialing';

@@ -6,12 +6,18 @@ interface LiveKitWebhookEvent {
   event: string;
   room?: { name: string };
   participant?: { identity: string };
+  // Set when event is egress_*. `room` above is NOT populated for these
+  // events, so the room name must be read from here instead.
+  egressInfo?: {
+    roomName?: string;
+    fileResults?: { location?: string; filename?: string }[];
+  };
 }
 
 const TERMINAL_STATUSES = ['completed', 'failed', 'no-answer', 'busy', 'voicemail'];
 
 export async function handleLiveKitEvent(event: LiveKitWebhookEvent): Promise<void> {
-  const roomName = event.room?.name;
+  const roomName = event.event === 'egress_ended' ? event.egressInfo?.roomName : event.room?.name;
   if (!roomName) return;
   const callId = callIdFromRoomName(roomName);
   if (!callId) return;
@@ -60,6 +66,27 @@ export async function handleLiveKitEvent(event: LiveKitWebhookEvent): Promise<vo
       );
       if (updated) {
         logger.info(`LiveKit call ${callId} finalized as ${updated.status}`);
+      }
+      break;
+    }
+    case 'egress_ended': {
+      const recordingUrl = event.egressInfo?.fileResults?.[0]?.location;
+      if (!recordingUrl) {
+        logger.warn(`LiveKit egress_ended for call ${callId} has no file result location`);
+        return;
+      }
+      const call = await Call.findById(callId);
+      if (!call) {
+        logger.warn(`LiveKit webhook for unknown call ${callId} (${event.event})`);
+        return;
+      }
+      const updated = await Call.findOneAndUpdate(
+        { _id: callId },
+        { $set: { recordingUrl } },
+        { new: true }
+      );
+      if (updated) {
+        logger.info(`LiveKit call ${callId} recording URL set from egress`);
       }
       break;
     }

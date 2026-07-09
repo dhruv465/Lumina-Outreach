@@ -824,6 +824,10 @@ const startServer = async () => {
     const { waitForDatabaseConnection } = await import("./database/connection");
     await waitForDatabaseConnection();
 
+    void import("./services/batchCallService")
+      .then(({ batchCallService }) => batchCallService.resumeInterruptedBatches())
+      .catch((e) => logger.error(`batch resume on boot failed: ${e.message}`));
+
     // Step 2.5: Validate database-loaded configuration (optional)
     bootstrapLogger.info("Validating database configuration...");
     let config = null;

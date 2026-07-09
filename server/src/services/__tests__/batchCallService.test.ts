@@ -88,3 +88,13 @@ describe('batchCallService.createBatch', () => {
     runSpy.mockRestore();
   });
 });
+
+describe('batchCallService.resumeInterruptedBatches', () => {
+  it('re-runs each processing batch and skips already-processed leads', async () => {
+    asMock(BatchCall.find).mockReturnValue({ select: () => Promise.resolve([{ _id: 'batch1' }]) } as any);
+    asMock(BatchCall.findById).mockResolvedValue(fakeBatch({ processedLeadIds: ['L1', 'L2'] }));
+    await batchCallService.resumeInterruptedBatches();
+    await new Promise((r) => setTimeout(r, 20)); // let the fire-and-forget runBatch settle
+    expect(asMock(initiateLiveKitCall).mock.calls.map((c) => c[0].leadId)).toEqual(['L3']);
+  });
+});

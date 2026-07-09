@@ -1,11 +1,7 @@
 import BatchCall from '../models/BatchCall';
-import Lead from '../models/Lead';
-import Campaign from '../models/Campaign';
-import { getTelephonyService } from './realTelephonyService';
 import { runWithConcurrency } from '../utils/concurrencyPool';
 import { FinancialService } from '../utils/financialService';
 import logger from '../utils/logger';
-import mongoose from 'mongoose';
 import * as Sentry from '@sentry/node';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -114,22 +110,9 @@ class BatchCallService {
 
   private async processSingleCall(data: { batchId: string; leadId: string; campaignId: string }) {
     const { leadId, campaignId } = data;
-
-    const campaign = await Campaign.findById(campaignId);
-    if (campaign?.telephonyProvider === 'livekit') {
-      const { initiateLiveKitCall } = await import('../integrations/livekit/dispatchService');
-      await initiateLiveKitCall({ leadId, campaignId });
-      return;
-    }
-
-    const lead = await Lead.findById(leadId);
-    if (!lead) throw new Error(`Lead ${leadId} not found`);
-    const telephonyService = getTelephonyService();
-    const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || process.env.API_BASE_URL || 'http://localhost:8000';
-    const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER || '';
-    const conversationId = new mongoose.Types.ObjectId().toString();
-    const callbackUrl = `${WEBHOOK_BASE_URL}/api/calls/twiml/${campaignId}/${conversationId}`;
-    await telephonyService.makeCall(lead.phoneNumber, TWILIO_PHONE_NUMBER, callbackUrl);
+    // LiveKit-only: batch calls dispatch through the LiveKit agent.
+    const { initiateLiveKitCall } = await import('../integrations/livekit/dispatchService');
+    await initiateLiveKitCall({ leadId, campaignId });
   }
 
   private async updateBatchStats(batchId: string, status: 'successful' | 'failed') {

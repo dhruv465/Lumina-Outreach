@@ -234,7 +234,7 @@ const CampaignSchema = new mongoose.Schema(
     telephonyProvider: {
       type: String,
       enum: ['twilio', 'livekit'],
-      default: 'twilio',
+      default: 'livekit',
     },
     transferPhoneNumber: {
       type: String,

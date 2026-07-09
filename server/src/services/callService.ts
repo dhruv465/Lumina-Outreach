@@ -5,6 +5,8 @@ import Configuration from '../models/Configuration';
 import mongoose from 'mongoose';
 import twilio from 'twilio';
 import { unifiedAnalyticsService } from './unifiedAnalyticsService';
+import { twilioRecordingsService } from './twilioRecordingsService';
+import logger, { getErrorMessage } from '../utils/logger';
 
 class CallService {
   async initiateCall(leadId: string, campaignId: string, scheduleTime?: Date, notes?: string) {
@@ -18,75 +20,10 @@ class CallService {
       throw new Error('Campaign not found');
     }
 
-    const configuration = await Configuration.findOne();
-    if (!configuration || !configuration.twilioConfig.isEnabled) {
-      throw new Error('Twilio is not configured or enabled');
-    }
-
-    const activeScript = campaign.script.versions.find(version => version.isActive);
-    if (!activeScript) {
-      throw new Error('No active script found for this campaign');
-    }
-
-    const newCall = new Call({
-      leadId: new mongoose.Types.ObjectId(leadId),
-      campaignId: new mongoose.Types.ObjectId(campaignId),
-      phoneNumber: lead.phoneNumber,
-      status: scheduleTime ? 'scheduled' : 'queued',
-      scheduledAt: scheduleTime || new Date(),
-      notes: notes || '',
-      maxRetries: configuration.generalSettings.callRetryAttempts,
-      retryCount: 0,
-      recordCall: configuration.complianceSettings.recordCalls,
-      priority: 'medium',
-      personalityId: campaign.voiceConfiguration?.voiceId,
-      voiceProvider: campaign.voiceConfiguration?.provider,
-      conversationLog: [],
-    });
-
-    if (scheduleTime) {
-      await newCall.save();
-      return newCall;
-    }
-
-    const client = twilio(
-      configuration.twilioConfig.accountSid,
-      configuration.twilioConfig.authToken
-    );
-
-    const baseUrl = process.env.WEBHOOK_BASE_URL;
-    if (!baseUrl) {
-      throw new Error('WEBHOOK_BASE_URL environment variable is not set');
-    }
-
-    const webhookUrls = require('../utils/webhookUrls').default;
-
-    const twilioCall = await client.calls.create({
-      url: webhookUrls.getVoiceWebhookUrl(newCall._id.toString()),
-      to: lead.phoneNumber,
-      from: configuration.twilioConfig.phoneNumbers[0],
-      statusCallback: webhookUrls.getStatusWebhookUrl(newCall._id.toString()),
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-      record: configuration.complianceSettings.recordCalls,
-      recordingStatusCallback: `${baseUrl}/api/calls/recording-webhook?callId=${newCall._id}`,
-      recordingStatusCallbackEvent: ['completed'],
-      recordingChannels: 'dual', // Record both channels separately for better quality
-      recordingTrack: 'both', // Record both inbound and outbound audio
-      timeout: configuration.generalSettings.maxCallDuration,
-      machineDetection: 'DetectMessageEnd',
-    });
-
-    newCall.status = 'dialing';
-    newCall.twilioSid = twilioCall.sid;
-    newCall.startTime = new Date();
-
-    lead.lastContacted = new Date();
-    lead.callCount = (lead.callCount || 0) + 1;
-    await lead.save();
-
-    await newCall.save();
-
-    return newCall;
+    // LiveKit-only: all outbound calling is routed through the LiveKit agent.
+    // (Legacy Twilio calling path removed during the LiveKit consolidation.)
+    const { initiateLiveKitCall } = await import('../integrations/livekit/dispatchService');
+    return initiateLiveKitCall({ leadId, campaignId, scheduleTime, notes });
   }
 
   async getCallHistory(options: any) {
@@ -196,21 +133,35 @@ class CallService {
         : '';
 
       return { format, data: csv };
-        } else {
-          throw new Error('Unsupported format');
-        }
-      }
-    
-      async syncTwilioRecordings(days: number): Promise<any> {
-        // Placeholder implementation
-        return { success: true, message: 'Sync started' };
-      }
-    
-      async getCallRecordingDetails(id: string): Promise<any> {
-        // Placeholder implementation
-        return null;
-      }
+    } else {
+      throw new Error('Unsupported format');
     }
-    
-    export default new CallService();
-    
+  }
+
+  async syncTwilioRecordings(days: number): Promise<any> {
+    try {
+      const result = await twilioRecordingsService.syncAllRecordings(days);
+      return { success: true, ...result };
+    } catch (error) {
+      logger.error(`Error syncing Twilio recordings: ${getErrorMessage(error)}`);
+      return { success: false, error: getErrorMessage(error) };
+    }
+  }
+
+  async getCallRecordingDetails(id: string): Promise<any> {
+    try {
+      const call = await Call.findById(id);
+      if (!call || !call.twilioSid) return null;
+
+      const recordings = await twilioRecordingsService.fetchAllRecordings();
+      const recording = recordings.find(r => r.callSid === call.twilioSid);
+      
+      return recording || null;
+    } catch (error) {
+      logger.error(`Error getting recording details: ${getErrorMessage(error)}`);
+      return null;
+    }
+  }
+}
+
+export default new CallService();

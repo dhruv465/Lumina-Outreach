@@ -1,0 +1,90 @@
+jest.mock('../../models/BatchCall');
+jest.mock('../../models/Campaign');
+jest.mock('../../models/Lead');
+jest.mock('../../utils/financialService');
+jest.mock('../../integrations/livekit/dispatchService', () => ({
+  initiateLiveKitCall: jest.fn().mockResolvedValue({ _id: 'call1' }),
+}));
+
+import BatchCall from '../../models/BatchCall';
+import Campaign from '../../models/Campaign';
+import { FinancialService } from '../../utils/financialService';
+import { initiateLiveKitCall } from '../../integrations/livekit/dispatchService';
+import { batchCallService } from '../batchCallService';
+
+const asMock = (fn: any) => fn as jest.Mock;
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  asMock(FinancialService.isCampaignBudgetAvailable).mockResolvedValue(true);
+  asMock(Campaign.findById).mockResolvedValue({ telephonyProvider: 'livekit' });
+  asMock(BatchCall.findByIdAndUpdate).mockResolvedValue({ stats: { queued: 0 }, status: 'processing', save: jest.fn() });
+  asMock(BatchCall.updateOne).mockResolvedValue({});
+});
+
+function fakeBatch(overrides: any = {}) {
+  return {
+    _id: 'batch1',
+    campaignId: 'camp1',
+    leadIds: ['L1', 'L2', 'L3'],
+    processedLeadIds: [],
+    config: { maxConcurrency: 10, retryCount: 1, delayBetweenCalls: 0 },
+    stats: { total: 3, queued: 3, processed: 0, successful: 0, failed: 0 },
+    status: 'processing',
+    save: jest.fn(),
+    ...overrides,
+  };
+}
+
+describe('batchCallService.runBatch', () => {
+  it('dispatches only pending leads (skips processedLeadIds)', async () => {
+    asMock(BatchCall.findById).mockResolvedValue(fakeBatch({ processedLeadIds: ['L1'] }));
+    await batchCallService.runBatch('batch1');
+    expect(asMock(initiateLiveKitCall).mock.calls.map((c) => c[0].leadId).sort())
+      .toEqual(['L2', 'L3']);
+  });
+
+  it('marks each dispatched lead into processedLeadIds', async () => {
+    asMock(BatchCall.findById).mockResolvedValue(fakeBatch());
+    await batchCallService.runBatch('batch1');
+    const addToSetLeads = asMock(BatchCall.updateOne).mock.calls
+      .map((c) => c[1].$addToSet?.processedLeadIds)
+      .filter(Boolean).sort();
+    expect(addToSetLeads).toEqual(['L1', 'L2', 'L3']);
+  });
+
+  it('stops dispatching when campaign budget is depleted', async () => {
+    asMock(FinancialService.isCampaignBudgetAvailable).mockResolvedValue(false);
+    asMock(BatchCall.findById).mockResolvedValue(fakeBatch());
+    await batchCallService.runBatch('batch1');
+    expect(asMock(initiateLiveKitCall)).not.toHaveBeenCalled();
+  });
+
+  it('respects the concurrency cap from LUMINA_BATCH_CONCURRENCY', async () => {
+    process.env.LUMINA_BATCH_CONCURRENCY = '1';
+    let inFlight = 0; let maxInFlight = 0;
+    asMock(initiateLiveKitCall).mockImplementation(async () => {
+      inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5)); inFlight--; return { _id: 'c' };
+    });
+    asMock(BatchCall.findById).mockResolvedValue(fakeBatch({ leadIds: ['L1', 'L2', 'L3', 'L4'] }));
+    await batchCallService.runBatch('batch1');
+    expect(maxInFlight).toBe(1);
+    delete process.env.LUMINA_BATCH_CONCURRENCY;
+  });
+});
+
+describe('batchCallService.createBatch', () => {
+  it('creates a batch doc and returns without awaiting the run', async () => {
+    const runSpy = jest.spyOn(batchCallService, 'runBatch').mockResolvedValue(undefined);
+    asMock(BatchCall.create).mockResolvedValue(fakeBatch());
+    asMock(BatchCall.findById).mockResolvedValue(fakeBatch());
+    const batch = await batchCallService.createBatch({
+      name: 'n', campaignId: 'camp1', leadIds: ['L1', 'L2', 'L3'], createdBy: 'u1',
+    });
+    expect(batch._id).toBe('batch1');
+    expect(asMock(BatchCall.create)).toHaveBeenCalledTimes(1);
+    expect(runSpy).toHaveBeenCalledWith('batch1');
+    runSpy.mockRestore();
+  });
+});

@@ -2,107 +2,16 @@ import BatchCall from '../models/BatchCall';
 import Lead from '../models/Lead';
 import Campaign from '../models/Campaign';
 import { getTelephonyService } from './realTelephonyService';
+import { runWithConcurrency } from '../utils/concurrencyPool';
+import { FinancialService } from '../utils/financialService';
 import logger from '../utils/logger';
 import mongoose from 'mongoose';
-import { Queue, Worker, Job } from 'bullmq';
 import * as Sentry from '@sentry/node';
-import { FinancialService } from '../utils/financialService';
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 class BatchCallService {
-  private callQueue: Queue;
-  private callWorker: Worker;
-
-  constructor() {
-    // Create the BullMQ Queue
-    this.callQueue = new Queue('call-queue', {
-      connection: { url: REDIS_URL }
-    });
-
-    // Create the BullMQ Worker
-    this.callWorker = new Worker('call-queue', async (job: Job) => {
-      return this.processSingleCall(job.data);
-    }, {
-      connection: { url: REDIS_URL },
-      // Pilot cap (Task 18): LiveKit free tier + a single dev agent worker can
-      // only serve a couple of concurrent calls. Keep this low while the
-      // LiveKit path is validated; revert to a higher value at Phase 4
-      // scale-up when the agent is deployed to LiveKit Cloud with autoscaling.
-      concurrency: 2,
-    });
-
-    this.callWorker.on('completed', async (job) => {
-      logger.info(`Job ${job.id} completed for lead ${job.data.leadId}`);
-      await this.updateBatchStats(job.data.batchId, 'successful');
-    });
-
-    this.callWorker.on('failed', async (job, err) => {
-      logger.error(`Job ${job?.id} failed for lead ${job?.data?.leadId}: ${err.message}`);
-      if (process.env.SENTRY_DSN) Sentry.captureException(err);
-      if (job) {
-        await this.updateBatchStats(job.data.batchId, 'failed');
-      }
-    });
-  }
-
-  private async updateBatchStats(batchId: string, status: 'successful' | 'failed') {
-    try {
-      const updateDoc = status === 'successful'
-        ? { $inc: { 'stats.processed': 1, 'stats.successful': 1, 'stats.queued': -1 } }
-        : { $inc: { 'stats.processed': 1, 'stats.failed': 1, 'stats.queued': -1 } };
-
-      const batch = await BatchCall.findByIdAndUpdate(batchId, updateDoc, { new: true });
-      
-      // Check if batch is completed
-      if (batch && batch.stats.queued <= 0 && batch.status !== 'completed') {
-        batch.status = 'completed';
-        batch.completedAt = new Date();
-        await batch.save();
-        logger.info(`Batch ${batchId} is completely processed.`);
-      }
-    } catch (err) {
-      logger.error(`Failed to update batch stats for ${batchId}: ${err.message}`);
-    }
-  }
-
-  private async processSingleCall(data: { batchId: string, leadId: string, campaignId: string }) {
-    const { batchId, leadId, campaignId } = data;
-    
-    // Check if campaign budget is still available
-    const isBudgetAvailable = await FinancialService.isCampaignBudgetAvailable(campaignId);
-    if (!isBudgetAvailable) {
-      logger.warn(`Skipping call for lead ${leadId} in batch ${batchId} due to campaign budget depletion`);
-      return;
-    }
-
-    const campaign = await Campaign.findById(campaignId);
-    if (campaign?.telephonyProvider === 'livekit') {
-      const { initiateLiveKitCall } = await import('../integrations/livekit/dispatchService');
-      await initiateLiveKitCall({ leadId, campaignId });
-      return;
-    }
-
-    const lead = await Lead.findById(leadId);
-    if (!lead) throw new Error(`Lead ${leadId} not found`);
-
-    const telephonyService = getTelephonyService();
-    const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || process.env.API_BASE_URL || 'http://localhost:8000';
-    const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER || '';
-
-    const conversationId = new mongoose.Types.ObjectId().toString();
-    const callbackUrl = `${WEBHOOK_BASE_URL}/api/calls/twiml/${campaignId}/${conversationId}`;
-
-    await telephonyService.makeCall(
-      lead.phoneNumber,
-      TWILIO_PHONE_NUMBER,
-      callbackUrl
-    );
-  }
-
-  /**
-   * Create a new batch call job
-   */
+  /** Create a batch and start processing it (non-blocking). */
   async createBatch(params: {
     name: string;
     campaignId: string;
@@ -117,44 +26,132 @@ class BatchCallService {
       createdBy: params.createdBy,
       status: 'processing',
       startedAt: new Date(),
+      processedLeadIds: [],
       stats: {
         total: params.leadIds.length,
         queued: params.leadIds.length,
         processed: 0,
         successful: 0,
-        failed: 0
+        failed: 0,
       },
-      config: params.config || {
-        maxConcurrency: 10,
-        retryCount: 1,
-        delayBetweenCalls: 2000
-      }
+      config: params.config || { maxConcurrency: 10, retryCount: 1, delayBetweenCalls: 2000 },
     });
 
-    logger.info(`Queuing ${params.leadIds.length} calls for batch ${batch._id}`);
-
-    // Add all leads to the BullMQ queue
-    const jobs = params.leadIds.map((leadId, index) => ({
-      name: 'make-call',
-      data: {
-        batchId: batch._id.toString(),
-        leadId,
-        campaignId: params.campaignId
-      },
-      opts: {
-        // Space out the calls to respect delayBetweenCalls
-        delay: index * (batch.config.delayBetweenCalls || 2000),
-        attempts: batch.config.retryCount || 1,
-        backoff: {
-          type: 'exponential',
-          delay: 5000
-        }
-      }
-    }));
-
-    await this.callQueue.addBulk(jobs);
-
+    logger.info(`Starting batch ${batch._id} with ${params.leadIds.length} leads`);
+    // Fire-and-forget; MongoDB is the source of truth so a crash is recoverable.
+    void this.runBatch(batch._id.toString());
     return batch;
+  }
+
+  /** Process every pending lead of a batch with bounded concurrency. */
+  async runBatch(batchId: string): Promise<void> {
+    try {
+      const batch = await BatchCall.findById(batchId);
+      if (!batch || batch.status === 'completed') return;
+
+      const processed = new Set(batch.processedLeadIds.map((id: any) => id.toString()));
+      const pending = batch.leadIds
+        .map((id: any) => id.toString())
+        .filter((id: string) => !processed.has(id));
+
+      if (pending.length === 0) {
+        await this.finalizeIfDone(batchId);
+        return;
+      }
+
+      const envCap = parseInt(process.env.LUMINA_BATCH_CONCURRENCY || '2', 10);
+      const limit = Math.min(batch.config.maxConcurrency || 2, envCap);
+      const delay = batch.config.delayBetweenCalls || 0;
+      const retries = batch.config.retryCount || 1;
+      const campaignId = batch.campaignId.toString();
+
+      let budgetDepleted = false;
+
+      await runWithConcurrency(pending, limit, async (leadId) => {
+        if (budgetDepleted) return;
+
+        if (!(await FinancialService.isCampaignBudgetAvailable(campaignId))) {
+          budgetDepleted = true;
+          logger.warn(`Batch ${batchId}: campaign ${campaignId} budget depleted, stopping`);
+          return;
+        }
+
+        if (delay > 0) await sleep(delay);
+
+        let ok = false;
+        for (let attempt = 0; attempt < retries && !ok; attempt++) {
+          try {
+            await this.processSingleCall({ batchId, leadId, campaignId });
+            ok = true;
+          } catch (err: any) {
+            logger.error(`Batch ${batchId} lead ${leadId} attempt ${attempt + 1} failed: ${err.message}`);
+            if (process.env.SENTRY_DSN) Sentry.captureException(err);
+          }
+        }
+
+        await BatchCall.updateOne({ _id: batchId }, { $addToSet: { processedLeadIds: leadId } });
+        await this.updateBatchStats(batchId, ok ? 'successful' : 'failed');
+      });
+
+      if (budgetDepleted) {
+        await BatchCall.updateOne({ _id: batchId }, { $set: { status: 'paused' } });
+        return;
+      }
+      await this.finalizeIfDone(batchId);
+    } catch (err: any) {
+      logger.error(`runBatch ${batchId} crashed: ${err.message}`);
+      if (process.env.SENTRY_DSN) Sentry.captureException(err);
+    }
+  }
+
+  /** Re-run any batch left in `processing` after a restart (idempotent). */
+  async resumeInterruptedBatches(): Promise<void> {
+    const stuck = await BatchCall.find({ status: 'processing' }).select('_id');
+    if (stuck.length === 0) return;
+    logger.info(`Resuming ${stuck.length} interrupted batch(es)`);
+    for (const b of stuck) void this.runBatch(b._id.toString());
+  }
+
+  private async processSingleCall(data: { batchId: string; leadId: string; campaignId: string }) {
+    const { leadId, campaignId } = data;
+
+    const campaign = await Campaign.findById(campaignId);
+    if (campaign?.telephonyProvider === 'livekit') {
+      const { initiateLiveKitCall } = await import('../integrations/livekit/dispatchService');
+      await initiateLiveKitCall({ leadId, campaignId });
+      return;
+    }
+
+    const lead = await Lead.findById(leadId);
+    if (!lead) throw new Error(`Lead ${leadId} not found`);
+    const telephonyService = getTelephonyService();
+    const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || process.env.API_BASE_URL || 'http://localhost:8000';
+    const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER || '';
+    const conversationId = new mongoose.Types.ObjectId().toString();
+    const callbackUrl = `${WEBHOOK_BASE_URL}/api/calls/twiml/${campaignId}/${conversationId}`;
+    await telephonyService.makeCall(lead.phoneNumber, TWILIO_PHONE_NUMBER, callbackUrl);
+  }
+
+  private async updateBatchStats(batchId: string, status: 'successful' | 'failed') {
+    try {
+      const updateDoc = status === 'successful'
+        ? { $inc: { 'stats.processed': 1, 'stats.successful': 1, 'stats.queued': -1 } }
+        : { $inc: { 'stats.processed': 1, 'stats.failed': 1, 'stats.queued': -1 } };
+      await BatchCall.findByIdAndUpdate(batchId, updateDoc, { new: true });
+      await this.finalizeIfDone(batchId);
+    } catch (err: any) {
+      logger.error(`Failed to update batch stats for ${batchId}: ${err.message}`);
+    }
+  }
+
+  private async finalizeIfDone(batchId: string) {
+    const batch = await BatchCall.findById(batchId);
+    if (batch && batch.stats.queued <= 0 && batch.status !== 'completed') {
+      batch.status = 'completed';
+      batch.completedAt = new Date();
+      await batch.save();
+      logger.info(`Batch ${batchId} completed.`);
+    }
   }
 
   async getBatchStatus(batchId: string) {
@@ -162,10 +159,7 @@ class BatchCallService {
   }
 
   async listBatches(limit: number = 20) {
-    return await BatchCall.find()
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .populate('campaignId', 'name');
+    return await BatchCall.find().sort({ createdAt: -1 }).limit(limit).populate('campaignId', 'name');
   }
 }
 

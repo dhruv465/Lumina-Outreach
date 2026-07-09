@@ -98,3 +98,20 @@ describe('batchCallService.resumeInterruptedBatches', () => {
     expect(asMock(initiateLiveKitCall).mock.calls.map((c) => c[0].leadId)).toEqual(['L3']);
   });
 });
+
+describe('batchCallService finalize (durability)', () => {
+  it('completes from processedLeadIds even if stats.queued drifted above 0 (crash-window safe)', async () => {
+    // Durable truth: every lead is processed, but a crash left stats.queued at 1.
+    // The old `stats.queued <= 0` check would strand this batch in `processing`.
+    const batch = fakeBatch({
+      leadIds: ['L1'],
+      processedLeadIds: ['L1'],
+      status: 'processing',
+      stats: { total: 1, queued: 1, processed: 1, successful: 1, failed: 0 },
+    });
+    asMock(BatchCall.findById).mockResolvedValue(batch);
+    await batchCallService.runBatch('batch1');
+    expect(batch.status).toBe('completed');
+    expect(batch.save).toHaveBeenCalled();
+  });
+});

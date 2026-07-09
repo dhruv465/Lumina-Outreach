@@ -146,7 +146,15 @@ class BatchCallService {
 
   private async finalizeIfDone(batchId: string) {
     const batch = await BatchCall.findById(batchId);
-    if (batch && batch.stats.queued <= 0 && batch.status !== 'completed') {
+    // Completion is derived from the durable truth (`processedLeadIds`), not
+    // `stats.queued`. A crash between the `$addToSet processedLeadIds` and the
+    // `stats.queued` decrement would otherwise leave `queued > 0` forever and
+    // strand a fully-processed batch in `processing`.
+    if (
+      batch &&
+      batch.processedLeadIds.length >= batch.leadIds.length &&
+      batch.status !== 'completed'
+    ) {
       batch.status = 'completed';
       batch.completedAt = new Date();
       await batch.save();

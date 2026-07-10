@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { batchCallService } from '../services/batchCallService';
+import Campaign from '../models/Campaign';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
 
@@ -11,6 +12,17 @@ export class BatchCallController {
 
       if (!campaignId || !leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
         return reply.status(400).send({ success: false, error: 'Missing required fields: campaignId and leadIds array' });
+      }
+
+      // Ownership: the caller must own the campaign (or be admin). Prevents an
+      // authenticated user from launching a batch against someone else's
+      // campaign (IDOR).
+      const campaign = await Campaign.findById(campaignId).select('createdBy');
+      if (!campaign) {
+        return reply.status(404).send({ success: false, error: 'Campaign not found' });
+      }
+      if (user?.role !== 'admin' && campaign.createdBy.toString() !== user?.id) {
+        return reply.status(403).send({ success: false, error: 'Access denied: you do not own this campaign' });
       }
 
       const batch = await batchCallService.createBatch({

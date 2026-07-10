@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import CallFeedback from '../models/CallFeedback';
+import Campaign from '../models/Campaign';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
 
@@ -9,10 +10,23 @@ export class CallFeedbackController {
    */
   async getPendingFeedback(req: FastifyRequest, reply: FastifyReply) {
     try {
+      const user = (req as any).user;
       const { campaignId, limit = 50, skip = 0 } = req.query as any;
-      
+
       const query: any = { isUsedForTraining: false };
       if (campaignId) query.campaignId = campaignId;
+
+      // Non-admins only see feedback for campaigns they own (prevents IDOR
+      // enumeration of other users' campaign feedback).
+      if (user?.role !== 'admin') {
+        const ownedIds = (await Campaign.find({ createdBy: user?.id }).select('_id')).map(
+          (c) => c._id
+        );
+        query.campaignId =
+          campaignId && !ownedIds.some((id) => id.toString() === String(campaignId))
+            ? { $in: [] }
+            : campaignId || { $in: ownedIds };
+      }
 
       const feedback = await CallFeedback.find(query)
         .sort({ createdAt: -1 })
@@ -48,6 +62,15 @@ export class CallFeedbackController {
       const feedback = await CallFeedback.findById(id);
       if (!feedback) {
         return reply.status(404).send({ success: false, error: 'Feedback not found' });
+      }
+
+      // Ownership: non-admins may only review feedback for campaigns they own.
+      const user = (req as any).user;
+      if (user?.role !== 'admin') {
+        const campaign = await Campaign.findById(feedback.campaignId).select('createdBy');
+        if (!campaign || campaign.createdBy.toString() !== user?.id) {
+          return reply.status(403).send({ success: false, error: 'Access denied' });
+        }
       }
 
       feedback.actualIntent = actualIntent;

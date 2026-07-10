@@ -289,21 +289,20 @@ const CallLeadSheet = ({
 
       await callsApi.initiateCall(callData);
       
-      // Simulate call connection after a delay (in real scenario, this would be based on actual call status)
+      setCallStatus('connected');
+      setIsCallingInProgress(false);
+      
+      toast({
+        title: "Call Initiated",
+        description: "The call has been dispatched successfully.",
+      });
+      
+      onSuccess?.();
+      
+      // Keep sheet open for a short time to show success state before closing
       setTimeout(() => {
-        setCallStatus('connected');
-        
-        // Simulate call completion after a delay (in real scenario, this would be updated via webhook or polling)
-        setTimeout(() => {
-          setCallStatus('completed');
-          setIsCallingInProgress(false);
-          
-          toast({
-            title: "Call Completed",
-            description: "Call has been completed successfully.",
-          });
-        }, 5000);
-      }, 3000);
+        onOpenChange(false);
+      }, 2000);
     } catch (error) {
       console.error('Error initiating call:', error);
       setCallStatus('failed');

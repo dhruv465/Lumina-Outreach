@@ -5,6 +5,8 @@
  * across the audio pipeline, WebSocket handling, and external services.
  */
 
+import logger from '../utils/logger';
+
 export interface LatencyOptimizationConfig {
   // Audio Processing
   audio: {
@@ -172,7 +174,7 @@ export const getLatencyConfig = (profile: LatencyProfile): LatencyOptimizationCo
 };
 
 export const applyLatencyConfig = (config: LatencyOptimizationConfig): void => {
-  console.log('Applying latency optimization configuration:', {
+  logger.info('Applying latency optimization configuration:', {
     profile: config.audio.sampleRate === 16000 && config.audio.frameSize === 5 ? 'ultra-low' : 'other',
     audioFrameSize: config.audio.frameSize,
     maxProcessingLatency: config.processing.maxProcessingLatency,

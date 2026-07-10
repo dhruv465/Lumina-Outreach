@@ -32,7 +32,7 @@ export interface ICall extends mongoose.Document {
   notes?: string;
   failureCode?: string;
   providerData?: {
-    provider: 'twilio' | 'nexmo' | 'plivo';
+    provider: 'twilio' | 'nexmo' | 'plivo' | 'livekit';
     callId: string;
     cost?: number;
     diagnostics?: Record<string, any>;
@@ -117,6 +117,13 @@ export interface ICall extends mongoose.Document {
     };
     custom?: Record<string, any>;
   };
+  cost?: {
+    llm: number;
+    stt: number;
+    tts: number;
+    telephony: number;
+    total: number;
+  };
   conversationLog?: Array<{
     role: string;
     content: string;
@@ -192,7 +199,7 @@ const CallSchema = new mongoose.Schema({
   providerData: {
     provider: { 
       type: String, 
-      enum: ['twilio', 'nexmo', 'plivo'] 
+      enum: ['twilio', 'nexmo', 'plivo', 'livekit']
     },
     callId: String,
     cost: Number,
@@ -289,6 +296,13 @@ const CallSchema = new mongoose.Schema({
       processingLatency: Number
     },
     custom: mongoose.Schema.Types.Mixed
+  },
+  cost: {
+    llm: { type: Number, default: 0 },
+    stt: { type: Number, default: 0 },
+    tts: { type: Number, default: 0 },
+    telephony: { type: Number, default: 0 },
+    total: { type: Number, default: 0 }
   },
   conversationLog: [{
     role: { type: String, required: true },

@@ -19,6 +19,7 @@ import {
 } from "../ui/select";
 import { useToast } from "@/hooks/useToast";
 import { campaignsApi } from "../../services/campaignsApi";
+import { batchCallsApi } from "../../services/batchCallsApi";
 
 interface BatchCallSheetProps {
   isOpen: boolean;
@@ -83,29 +84,33 @@ const BatchCallSheet = ({
     setIsInitiating(true);
 
     try {
-      // TODO: Implement batch call API endpoint
-      // For now, show a placeholder message
-      toast({
-        title: "Batch Call Initiated",
-        description: `Starting calls for ${selectedLeadIds.length} leads using the selected campaign.`,
+      const campaignName = campaignsData?.campaigns?.find((c: any) => (c.id || c._id) === selectedCampaignId)?.name || 'Unknown';
+      
+      const response = await batchCallsApi.createBatch({
+        campaignId: selectedCampaignId,
+        leadIds: selectedLeadIds,
+        name: `Batch: ${campaignName} (${new Date().toLocaleDateString()})`,
+        config: {
+          maxConcurrency: 10,
+          delayBetweenCalls: 1000
+        }
       });
 
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-
-      toast({
-        title: "Batch Call Started",
-        description: `${selectedLeadIds.length} calls have been queued and will be processed according to concurrent call limits.`,
-      });
-
-      onSuccess?.();
-      handleClose();
-    } catch (error) {
+      if (response.success) {
+        toast({
+          title: "Batch Call Initiated",
+          description: `Successfully queued ${selectedLeadIds.length} calls for the "${campaignName}" campaign.`,
+        });
+        onSuccess?.();
+        handleClose();
+      } else {
+        throw new Error(response.error || 'Failed to start batch call');
+      }
+    } catch (error: any) {
       console.error("Error initiating batch call:", error);
       toast({
         title: "Batch Call Failed",
-        description:
-          "An error occurred while initiating batch calls. Please try again.",
+        description: error.message || "An error occurred while initiating batch calls. Please try again.",
         variant: "destructive",
       });
     } finally {

@@ -16,11 +16,13 @@ import {
   MessageSquare,
   BarChart3,
   Zap,
-  X
+  X,
+  DollarSign
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Progress } from '@/components/ui/progress';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -85,6 +87,12 @@ interface Campaign {
     successfulCalls: number;
     avgCallDuration: number;
     conversionRate: number;
+    totalCost?: number;
+  };
+  budget?: {
+    maxCostPerCall: number;
+    totalBudget: number;
+    isBudgetExceeded: boolean;
   };
 }
 
@@ -721,6 +729,67 @@ const Campaigns = () => {
                             <div className="p-3 bg-muted/50 rounded-md border">
                               <span className="text-xs text-muted-foreground block mb-1">Conversion</span>
                               <span className="text-xl font-semibold text-foreground">{selectedCampaign.metrics.conversionRate}%</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Budget Section - Shown only when budget exists */}
+                      {selectedCampaign.budget && (
+                        <div className="bg-card p-4 rounded-lg border">
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-base font-medium flex items-center gap-2 text-card-foreground">
+                              <DollarSign size={16} className="text-muted-foreground" />
+                              Budget Tracking
+                            </h3>
+                            {selectedCampaign.budget.isBudgetExceeded && (
+                              <Badge variant="destructive" className="text-xs">
+                                Budget Exceeded
+                              </Badge>
+                            )}
+                          </div>
+                          
+                          <div className="space-y-4">
+                            <div className="flex justify-between items-end mb-1">
+                              <div>
+                                <span className="text-2xl font-bold">
+                                  ${(selectedCampaign.metrics?.totalCost || 0).toFixed(2)}
+                                </span>
+                                <span className="text-sm text-muted-foreground ml-2">
+                                  of ${selectedCampaign.budget.totalBudget.toFixed(2)}
+                                </span>
+                              </div>
+                              <span className="text-sm font-medium">
+                                {Math.min(100, Math.round(((selectedCampaign.metrics?.totalCost || 0) / selectedCampaign.budget.totalBudget) * 100))}%
+                              </span>
+                            </div>
+                            
+                            <Progress 
+                              value={((selectedCampaign.metrics?.totalCost || 0) / selectedCampaign.budget.totalBudget) * 100} 
+                              className={`h-2 ${selectedCampaign.budget.isBudgetExceeded ? 'bg-red-100 dark:bg-red-950' : ''}`}
+                            />
+
+                            <div className="grid grid-cols-2 gap-4 pt-2">
+                              <div className="flex items-center gap-2">
+                                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                                  <DollarSign size={14} className="text-primary" />
+                                </div>
+                                <div>
+                                  <p className="text-xs text-muted-foreground">Max Per Call</p>
+                                  <p className="text-sm font-medium">${selectedCampaign.budget.maxCostPerCall.toFixed(2)}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                                  <BarChart3 size={14} className="text-muted-foreground" />
+                                </div>
+                                <div>
+                                  <p className="text-xs text-muted-foreground">Avg Cost/Call</p>
+                                  <p className="text-sm font-medium">
+                                    ${selectedCampaign.metrics?.totalCalls ? ((selectedCampaign.metrics?.totalCost || 0) / selectedCampaign.metrics.totalCalls).toFixed(2) : '0.00'}
+                                  </p>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>

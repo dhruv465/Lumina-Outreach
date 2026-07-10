@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { LineChart, PieChart, Phone, Users, Calendar, Clock, CheckCircle, Info } from 'lucide-react';
+import { LineChart, PieChart, Phone, Users, Clock, CheckCircle, Info, TrendingUp, Activity, Zap, Target, PlayCircle, UserPlus as UserPlusIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 import { Skeleton } from "@/components/ui/skeleton";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
@@ -82,6 +83,49 @@ const Dashboard = () => {
   const [timeframe, setTimeframe] = useState('week'); // week, month, year
   const { isConnected, systemMetrics, activeCalls } = useSocketIO();
   const [dashboardState, setDashboardState] = useState<DashboardData | null>(null);
+
+  // Fetch active campaigns
+  const { data: campaignsData } = useQuery({
+    queryKey: ['activeCampaigns'],
+    queryFn: async () => {
+      try {
+        const response = await api.get('/campaigns', {
+          params: {
+            limit: 100
+          }
+        });
+        
+        // Get campaigns array
+        const campaigns = response.data?.campaigns || [];
+        
+        // Filter for active campaigns (case-insensitive and check for common active statuses)
+        const activeCampaigns = campaigns.filter((c: any) => {
+          const status = c.status?.toLowerCase();
+          return status === 'active' || status === 'running' || status === 'in-progress';
+        });
+        
+        // Process campaigns with metrics
+        const processedCampaigns = activeCampaigns.map((campaign: any) => {
+          // Use metrics from campaign if available
+          const totalLeads = campaign.metrics?.totalCalls || 0;
+          const completedLeads = campaign.metrics?.connectedCalls || 0;
+          
+          return {
+            ...campaign,
+            totalLeads,
+            completedLeads,
+            completionPercentage: totalLeads > 0 ? Math.round((completedLeads / totalLeads) * 100) : 0
+          };
+        });
+        
+        return processedCampaigns;
+      } catch (error) {
+        console.error('Error fetching campaigns:', error);
+        return [];
+      }
+    },
+    refetchInterval: 5 * 60 * 1000, // Refresh every 5 minutes
+  });
 
   // Fetch dashboard data
   const { data: dashboardData, isLoading, error } = useQuery({
@@ -651,74 +695,179 @@ const Dashboard = () => {
         </Card>
       </div>
 
-      {/* Recent Activity and Callbacks */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        {/* Recent Calls */}
+      {/* Quick Actions & Active Campaigns */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+        {/* Quick Actions */}
         <Card className="p-4 sm:p-6">
-          <div className="flex items-center justify-between gap-2 mb-4">
-            <h3 className="text-base sm:text-lg font-medium">Recent Calls</h3>
-            <Button variant="outline" size="sm">View All</Button>
+          <h3 className="text-base sm:text-lg font-medium mb-4">Quick Actions</h3>
+          <div className="space-y-3">
+            <Button 
+              variant="outline" 
+              className="w-full justify-start gap-3 h-auto py-3"
+              onClick={() => window.location.href = '/campaigns'}
+            >
+              <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
+                <PlayCircle size={16} className="text-blue-600 dark:text-blue-400" />
+              </div>
+              <div className="text-left flex-1">
+                <p className="font-medium text-sm">Start Campaign</p>
+                <p className="text-xs text-muted-foreground">Launch a new calling campaign</p>
+              </div>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className="w-full justify-start gap-3 h-auto py-3"
+              onClick={() => window.location.href = '/leads'}
+            >
+              <div className="h-8 w-8 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center shrink-0">
+                <UserPlusIcon size={16} className="text-green-600 dark:text-green-400" />
+              </div>
+              <div className="text-left flex-1">
+                <p className="font-medium text-sm">Add Leads</p>
+                <p className="text-xs text-muted-foreground">Import or create new leads</p>
+              </div>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className="w-full justify-start gap-3 h-auto py-3"
+              onClick={() => window.location.href = '/analytics'}
+            >
+              <div className="h-8 w-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center shrink-0">
+                <TrendingUp size={16} className="text-purple-600 dark:text-purple-400" />
+              </div>
+              <div className="text-left flex-1">
+                <p className="font-medium text-sm">View Analytics</p>
+                <p className="text-xs text-muted-foreground">Detailed performance reports</p>
+              </div>
+            </Button>
           </div>
-          {displayData.recentCalls && displayData.recentCalls.length > 0 ? (
-            <div className="divide-y">
-              {displayData.recentCalls.map((call: RecentCall) => (
-                <div key={call.id} className="py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium truncate">{call.leadName}</p>
-                    <p className="text-sm text-muted-foreground">{call.time} • {call.duration}</p>
-                  </div>
-                  <div className="flex-shrink-0">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      call.outcome === 'Interested' 
-                        ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100' 
-                        : call.outcome === 'Not Interested'
-                        ? 'bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100'
-                        : 'bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100'
-                    }`}>
-                      {call.outcome}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="py-8 text-center border-t">
-              <p className="text-muted-foreground text-sm">No recent calls to display</p>
-            </div>
-          )}
         </Card>
 
-        {/* Upcoming Callbacks */}
-        <Card className="p-4 sm:p-6">
-          <div className="flex items-center justify-between gap-2 mb-4">
-            <h3 className="text-base sm:text-lg font-medium">Upcoming Callbacks</h3>
-            <Button variant="outline" size="sm">View All</Button>
+        {/* Active Campaigns */}
+        <Card className="lg:col-span-2 p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base sm:text-lg font-medium">Active Campaigns</h3>
+            <Button variant="ghost" size="sm" onClick={() => window.location.href = '/campaigns'}>
+              View All
+            </Button>
           </div>
-          {displayData.upcomingCallbacks && displayData.upcomingCallbacks.length > 0 ? (
-            <div className="divide-y">
-              {displayData.upcomingCallbacks.map((callback: UpcomingCallback) => (
-                <div key={callback.id} className="py-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium truncate">{callback.leadName}</p>
-                      <p className="text-sm text-muted-foreground truncate">{callback.company}</p>
+          {campaignsData && campaignsData.length > 0 ? (
+            <div className="space-y-3">
+              {campaignsData.slice(0, 3).map((campaign: any, index: number) => {
+                const colors = [
+                  { from: 'from-blue-500', to: 'to-blue-600', bar: 'bg-blue-500' },
+                  { from: 'from-purple-500', to: 'to-purple-600', bar: 'bg-purple-500' },
+                  { from: 'from-orange-500', to: 'to-orange-600', bar: 'bg-orange-500' },
+                ];
+                const color = colors[index % colors.length];
+                const completion = campaign.completionPercentage || 0;
+
+                return (
+                  <div 
+                    key={campaign._id} 
+                    className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors cursor-pointer"
+                    onClick={() => window.location.href = '/campaigns'}
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className={cn(
+                        "h-10 w-10 rounded-full bg-gradient-to-br flex items-center justify-center shrink-0",
+                        color.from,
+                        color.to
+                      )}>
+                        <Target size={18} className="text-white" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">{campaign.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {campaign.totalLeads || 0} leads • {completion}% completion
+                        </p>
+                      </div>
                     </div>
-                    <Button variant="outline" size="sm">Call Now</Button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="h-2 w-24 bg-muted rounded-full overflow-hidden hidden sm:block">
+                        <div className={cn("h-full", color.bar)} style={{ width: `${completion}%` }} />
+                      </div>
+                      <span className={cn(
+                        "inline-flex items-center px-2 py-1 rounded-full text-xs font-medium capitalize",
+                        campaign.status === 'active' 
+                          ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+                          : campaign.status === 'paused'
+                          ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400"
+                          : "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400"
+                      )}>
+                        {campaign.status}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center mt-2 text-sm text-muted-foreground">
-                    <Calendar className="h-4 w-4 mr-1 flex-shrink-0" />
-                    <span className="truncate">{callback.date}, {callback.time}</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
-            <div className="py-8 text-center border-t">
-              <p className="text-muted-foreground text-sm">No upcoming callbacks scheduled</p>
+            <div className="py-12 text-center border rounded-lg">
+              <Target className="h-12 w-12 text-muted-foreground/50 mx-auto mb-3" />
+              <p className="text-muted-foreground text-sm mb-2">No active campaigns</p>
+              <Button variant="outline" size="sm" onClick={() => window.location.href = '/campaigns'}>
+                Create Campaign
+              </Button>
             </div>
           )}
         </Card>
       </div>
+
+      {/* System Status */}
+      <Card className="p-4 sm:p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base sm:text-lg font-medium">System Status</h3>
+          <div className="flex items-center gap-2">
+            <div className={cn(
+              "h-2 w-2 rounded-full",
+              isConnected ? "bg-green-500 animate-pulse" : "bg-red-500"
+            )} />
+            <span className="text-xs text-muted-foreground">
+              {isConnected ? "Connected" : "Disconnected"}
+            </span>
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="flex items-center gap-3 p-3 rounded-lg border bg-card">
+            <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
+              <Activity size={18} className="text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Active Calls</p>
+              <p className="text-lg font-bold">{activeCalls?.length || 0}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 p-3 rounded-lg border bg-card">
+            <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center shrink-0">
+              <Zap size={18} className="text-green-600 dark:text-green-400" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">System Load</p>
+              <p className="text-lg font-bold">{systemMetrics?.activeConnections || 0}%</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 p-3 rounded-lg border bg-card">
+            <div className="h-10 w-10 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center shrink-0">
+              <TrendingUp size={18} className="text-purple-600 dark:text-purple-400" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Success Rate</p>
+              <p className="text-lg font-bold">
+                {systemMetrics?.successRate24h 
+                  ? `${Math.round(systemMetrics.successRate24h * 100)}%` 
+                  : "0%"}
+              </p>
+            </div>
+          </div>
+        </div>
+      </Card>
+
     </div>
   );
 };

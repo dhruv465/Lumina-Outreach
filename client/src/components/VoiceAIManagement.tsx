@@ -76,7 +76,7 @@ const VoiceAIManagement: React.FC = () => {
     setTrainingProgress(0);
     
     try {
-      // Simulate training progress
+      // Track training progress UI state
       const progressInterval = setInterval(() => {
         setTrainingProgress(prev => {
           if (prev >= 95) {

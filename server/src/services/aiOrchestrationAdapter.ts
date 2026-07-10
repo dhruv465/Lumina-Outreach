@@ -18,9 +18,9 @@ export class AIOrchestrationAdapter {
   getActiveProviders() {
     // Return a list of active AI providers
     return {
-      llm: ['openai', 'anthropic'], // Hard-coded as the service doesn't provide this method
-      voice: ['elevenlabs'],
-      speech: ['google', 'assembly'],
+      llm: ['openai', 'anthropic'],
+      voice: ['livekit-agent'],
+      speech: ['livekit-agent'],
       rag: ['internal']
     };
   }
@@ -53,13 +53,7 @@ export class AIOrchestrationAdapter {
   }
 
   processVoice(text: string, voiceId: string, options: any) {
-    // We'll use any to bypass TypeScript's strict checking
-    return (this.service.processVoiceRequest as any)({
-      text,
-      personalityId: voiceId, // Map voiceId to personalityId
-      language: options?.language,
-      timeout: options?.timeout
-    });
+    return this.service.processVoiceRequest();
   }
 
   updateConfig(config: any) {
@@ -71,6 +65,10 @@ export class AIOrchestrationAdapter {
   
   getMetrics() {
     return this.service.getMetrics();
+  }
+
+  getSpeechService() {
+    return this.service.getSpeechService();
   }
 }
 

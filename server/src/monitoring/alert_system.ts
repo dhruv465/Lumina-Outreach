@@ -2,6 +2,7 @@
  * Alert System Stub
  * Minimal implementation to replace removed monitoring functionality
  */
+import logger from '../utils/logger';
 
 export enum AlertLevel {
   LOW = 'low',
@@ -30,12 +31,12 @@ export interface Alert {
 class AlertSystemStub {
   sendAlert(alert: Alert): void {
     // Stub implementation - just log the alert
-    console.log(`[ALERT] ${alert.level.toUpperCase()}: ${alert.message}`);
+    logger.info(`[ALERT] ${alert.level.toUpperCase()}: ${alert.message}`);
   }
 
   createAlert(level: AlertLevel, type: AlertType, message: string, metadata?: any, source?: string): void {
     // Stub implementation - just log the alert
-    console.log(`[ALERT] ${level.toUpperCase()}: ${message}`, metadata ? metadata : '', source ? `(${source})` : '');
+    logger.info(`[ALERT] ${level.toUpperCase()}: ${message}`, metadata ? metadata : '', source ? `(${source})` : '');
   }
 }
 

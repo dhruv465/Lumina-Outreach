@@ -35,7 +35,6 @@ export const getCallTimeline = async (req: FastifyRequest, reply: FastifyReply):
 
 /**
  * Get campaign performance metrics
- * TODO: Implement this method in unifiedAnalyticsService
  */
 export const getCampaignPerformance = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
@@ -74,7 +73,6 @@ export const getCampaignPerformance = async (req: FastifyRequest, reply: Fastify
 
 /**
  * Get call distribution metrics
- * TODO: Implement this method in unifiedAnalyticsService
  */
 export const getCallDistribution = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
@@ -106,7 +104,6 @@ export const getCallDistribution = async (req: FastifyRequest, reply: FastifyRep
 
 /**
  * Get conversation metrics
- * TODO: Implement this method in unifiedAnalyticsService
  */
 export const getConversationMetrics = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   try {
@@ -166,7 +163,6 @@ export const getConversationMetrics = async (req: FastifyRequest, reply: Fastify
 
 /**
  * Get detailed metrics for a specific call
- * TODO: Implement this method in unifiedAnalyticsService
  */
 export const getDetailedCallMetrics = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
   const { id } = req.params as any;

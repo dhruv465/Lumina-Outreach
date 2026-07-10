@@ -221,27 +221,16 @@ Answer:`,
       }
       
       // Try to use real embedding API through orchestration
-      try {
-        const embeddingResponse = await orchestration.generateEmbedding({
-          provider: 'openai',
-          model: this.config.embeddingModel,
-          input: text
-        });
-        
-        if (embeddingResponse && embeddingResponse.embedding) {
-          return embeddingResponse.embedding;
-        }
-      } catch (apiError) {
-        logger.warn(`Failed to generate real embedding: ${getErrorMessage(apiError)}, falling back to simulation`);
+      const embeddingResponse = await orchestration.generateEmbedding({
+        provider: 'openai',
+        model: this.config.embeddingModel,
+        input: text
+      });
+      
+      if (embeddingResponse && embeddingResponse.embedding) {
+        return embeddingResponse.embedding;
       }
-      
-      // Fallback to simulated embedding
-      const embeddingDimension = this.config.embeddingDimension;
-      const embedding = Array(embeddingDimension).fill(0).map(() => Math.random() * 2 - 1);
-      
-      // Normalize the embedding vector
-      const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
-      return embedding.map(val => val / magnitude);
+      throw new Error('Embedding response was empty or missing embedding data.');
     } catch (error) {
       logger.error(`Error generating embedding: ${getErrorMessage(error)}`);
       throw error;
@@ -480,44 +469,54 @@ Answer:`,
   }
   
   /**
-   * Perform vector search on documents
+   * Perform vector search on documents using MongoDB Atlas Vector Search
    */
   private async performVectorSearch(
     queryEmbedding: number[],
     dbQuery: any,
     maxDocuments: number
   ): Promise<any[]> {
-    // In a real implementation, this would use a vector database
-    // For now, simulate with a mock response
-    const KnowledgeBase = mongoose.model('KnowledgeBase');
-    
-    // This is a simulation - in real implementation would use:
-    // - Vector search in MongoDB (if using Atlas)
-    // - Pinecone, Weaviate, Qdrant, or similar vector DB
-    // - Custom vector search implementation
-    
-    // Simulated vector search
     try {
-      // Get documents
-      const documents = await KnowledgeBase.find(dbQuery).limit(100);
+      const KnowledgeBase = mongoose.model('KnowledgeBase');
       
-      // Simulate relevance scoring
-      const scoredDocuments = documents.map(doc => {
-        // In a real implementation, this would compute similarity between
-        // query embedding and document embedding
-        const score = Math.random() * 0.3 + 0.7; // Simulate high relevance
-        
-        return {
-          ...doc.toObject(),
-          score
-        };
-      });
+      // Use MongoDB Atlas Vector Search if available, fallback to scoring logic
+      // Note: This requires a vector index named 'vector_index' on the collection
+      const pipeline: any[] = [
+        {
+          $vectorSearch: {
+            index: 'vector_index',
+            path: 'embedding',
+            queryVector: queryEmbedding,
+            numCandidates: maxDocuments * 10,
+            limit: maxDocuments,
+            filter: { isActive: true, ...dbQuery }
+          }
+        },
+        {
+          $addFields: {
+            score: { $meta: 'vectorSearchScore' }
+          }
+        }
+      ];
+
+      try {
+        const results = await KnowledgeBase.aggregate(pipeline);
+        if (results.length > 0) {
+          return results;
+        }
+      } catch (atlasError) {
+        logger.warn('Atlas Vector Search failed or not configured, falling back to basic retrieval:', atlasError.message);
+      }
+
+      // Fallback: Basic retrieval with manual scoring (less efficient but works everywhere)
+      const documents = await KnowledgeBase.find({ isActive: true, ...dbQuery }).limit(50);
       
-      // Sort by score
-      scoredDocuments.sort((a, b) => b.score - a.score);
-      
-      // Return top N
-      return scoredDocuments.slice(0, maxDocuments);
+      // If we have query embedding, we could manually calculate cosine similarity here
+      // but for simplicity in fallback, we'll return documents as is
+      return documents.map(doc => ({
+        ...doc.toObject(),
+        score: 0.5 // Default score for fallback
+      }));
     } catch (error) {
       logger.error(`Error in vector search: ${getErrorMessage(error)}`);
       throw error;
@@ -939,6 +938,86 @@ Remember to cite the source numbers [1], [2], etc. when using specific informati
       if (value.timestamp < expiryThreshold) {
         this.cache.delete(key);
       }
+    }
+  }
+  
+  /**
+   * Add a chunk to the vector store
+   */
+  public async addChunk(chunkId: string, text: string, metadata: any): Promise<void> {
+    try {
+      const embedding = await this.getEmbedding(text);
+      const KnowledgeBase = mongoose.model('KnowledgeBase');
+      
+      await KnowledgeBase.findByIdAndUpdate(chunkId, {
+        embedding,
+        content: text,
+        metadata,
+        isActive: true,
+        type: metadata.type || DocumentType.KNOWLEDGE_BASE,
+        source: metadata.fileName || 'unknown'
+      }, { upsert: true });
+      
+      logger.debug(`Chunk ${chunkId} added to vector store`);
+    } catch (error) {
+      logger.error(`Error adding chunk to vector store: ${getErrorMessage(error)}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Update a chunk in the vector store
+   */
+  public async updateChunk(chunkId: string, text: string): Promise<void> {
+    try {
+      const embedding = await this.getEmbedding(text);
+      const KnowledgeBase = mongoose.model('KnowledgeBase');
+      
+      await KnowledgeBase.findByIdAndUpdate(chunkId, {
+        embedding,
+        content: text,
+        updatedAt: new Date()
+      });
+      
+      logger.debug(`Chunk ${chunkId} updated in vector store`);
+    } catch (error) {
+      logger.error(`Error updating chunk in vector store: ${getErrorMessage(error)}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete all chunks for a document
+   */
+  public async deleteByDocumentId(documentId: string): Promise<void> {
+    try {
+      const KnowledgeBase = mongoose.model('KnowledgeBase');
+      await KnowledgeBase.deleteMany({ 'metadata.documentId': documentId });
+      logger.debug(`Chunks for document ${documentId} deleted from vector store`);
+    } catch (error) {
+      logger.error(`Error deleting chunks from vector store: ${getErrorMessage(error)}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Search vector store (compatibility with KnowledgeService)
+   */
+  public async search(query: string, limit: number = 10, filters: any = {}): Promise<any[]> {
+    try {
+      const result = await this.generateEnhancedPrompt(query, [], {
+        maxDocuments: limit,
+        filterMetadata: filters
+      });
+      
+      return result.selectedDocuments.map(doc => ({
+        id: doc.id,
+        score: doc.relevanceScore,
+        content: doc.content
+      }));
+    } catch (error) {
+      logger.error(`Error searching vector store: ${getErrorMessage(error)}`);
+      return [];
     }
   }
 }

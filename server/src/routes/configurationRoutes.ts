@@ -22,7 +22,6 @@ import {
   getDynamicProviderModels,
   testLLMChat
 } from '../controllers/configurationController';
-import { testDeepgramASRConnection } from '../controllers/testDeepgramASRConnection';
 // llmControllers removed (file deleted)
 import { 
   testModelCompatibility,
@@ -57,7 +56,6 @@ const configurationRoutes = async (fastify, opts: Record<string, any>) => {
   fastify.post('/test-twilio', testTwilioConnection);
   fastify.post('/test-elevenlabs', testElevenLabsConnection);
   fastify.post('/test-deepgram-tts', testDeepgramTTSConnection);
-  fastify.post('/test-deepgram', testDeepgramASRConnection);
   fastify.post('/test-voice', testVoiceSynthesis);
   fastify.post('/test-call', makeTestCall);
   fastify.post('/verify/elevenlabs', verifyElevenLabsApiKey);

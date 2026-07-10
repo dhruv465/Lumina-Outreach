@@ -9,6 +9,7 @@ import { getRAGSystem, initializeRAGSystem } from '../services/rag/ragSystem';
 import { getLLMService } from '../services';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
+import { isAdmin } from '../middleware/auth';
 
 const ragRoutes = async (fastify, opts: Record<string, any>) => {
   // Validation schemas
@@ -268,9 +269,9 @@ const ragRoutes = async (fastify, opts: Record<string, any>) => {
             },
             capabilities: {
               textSearch: true,
-              vectorSearch: false, // TODO: Implement real vector search
-              hybridSearch: false, // TODO: Implement real hybrid search
-              semanticRetrieval: false // TODO: Implement real semantic retrieval
+              vectorSearch: true,
+              hybridSearch: true,
+              semanticRetrieval: true
             }
           }
         });
@@ -288,9 +289,10 @@ const ragRoutes = async (fastify, opts: Record<string, any>) => {
   /**
    * @desc    Initialize RAG system with advanced features
    * @route   POST /api/rag/initialize
-   * @access  Private (Admin only - TODO: Add admin check)
+   * @access  Private (Admin only)
    */
   fastify.post('/initialize',
+    { onRequest: [isAdmin] },
     async (request, reply) => {
       try {
         logger.info('Initializing advanced RAG system...');
@@ -321,9 +323,10 @@ const ragRoutes = async (fastify, opts: Record<string, any>) => {
   /**
    * @desc    Clear RAG service cache
    * @route   POST /api/rag/cache/clear
-   * @access  Private (Admin only - TODO: Add admin check)
+   * @access  Private (Admin only)
    */
   fastify.post('/cache/clear',
+    { onRequest: [isAdmin] },
     async (request, reply) => {
       try {
         const ragService = getRAGSystem();

@@ -1,705 +1,589 @@
-/**
- * Campaign Service - Handles campaign execution and A/B testing
- */
-
-import mongoose from 'mongoose';
-import { getVoiceAIService } from '.';
-import { logger, getErrorMessage } from '../index';
-import leadService from './leadService';
-import ConversationEngineService from './conversationEngineService';
-import { EnhancedVoiceAIService } from './enhancedVoiceAIService';
-import SpeechAnalysisService from './speechAnalysisService';
-import { LLMService } from './llm/service';
+import ScriptTemplate from '../models/ScriptTemplate';
+import ABTest from '../models/ABTest';
+import Campaign from '../models/Campaign';
 import Configuration from '../models/Configuration';
-import { v4 as uuidv4 } from 'uuid';
+import { logger } from '../index';
+import { LLMService } from './llm/service';
+import { LLMConfig, LLMProvider } from './llm/types';
+import { batchCallService } from './batchCallService';
 
-export interface CampaignVariant {
-  id: string;
-  name: string;
-  personality: string;
-  script: string;
-  language: 'English' | 'Hindi';
-  isControl?: boolean;
-}
+// Initialize LLM service instance with database configuration
+let llmService: LLMService;
+let defaultLLMModel: string = 'gpt-4'; // Renamed from defaultModel
+let isLLMServiceProperlyInitialized = false; // Tracks if initialized with DB config
+let llmInitializationPromise: Promise<void> | null = null;
 
-export interface Campaign {
-  id: string;
-  name: string;
-  description: string;
-  status: 'draft' | 'active' | 'paused' | 'completed';
-  targetCount: number;
-  currentCount: number;
-  startDate?: Date;
-  endDate?: Date;
-  leadFilters: {
-    status?: string[];
-    source?: string[];
-    tags?: string[];
-    languagePreference?: string[];
-  };
-  variants: CampaignVariant[];
-  metrics: {
-    totalCalls: number;
-    completedCalls: number;
-    failedCalls: number;
-    positiveEmotions: number;
-    negativeEmotions: number;
-    averageCallDuration: number;
-    conversionRate: number;
-    variantPerformance: {
-      [variantId: string]: {
-        calls: number;
-        completions: number;
-        positiveEmotions: number;
-        conversionRate: number;
+const initializeLLMServiceInternal = async (): Promise<void> => {
+  try {
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState !== 1) {
+      logger.warn('MongoDB not connected. CampaignService LLM service will use fallback or existing instance.');
+      if (!llmService) { // Only create a new fallback if no service exists at all
+        defaultLLMModel = 'gpt-4';
+        const emptyConfig: LLMConfig = {
+          providers: [],
+          defaultProvider: 'openai' as LLMProvider,
+          defaultModel: defaultLLMModel,
+          timeoutMs: 30000,
+          retryConfig: { maxRetries: 2, initialDelayMs: 1000, maxDelayMs: 5000 }
+        };
+        llmService = new LLMService(emptyConfig);
+        logger.info('CampaignService: LLM service created with fallback empty config (MongoDB not ready).');
+      }
+      isLLMServiceProperlyInitialized = false; // Explicitly mark as not properly initialized
+      return;
+    }
+
+    const configDoc = await Configuration.findOne();
+    const dbLlmConfig = configDoc?.llmConfig;
+
+    if (dbLlmConfig && dbLlmConfig.providers) {
+      defaultLLMModel = dbLlmConfig.defaultModel || 'gpt-4';
+      
+      const llmServiceConfig: LLMConfig = {
+        providers: dbLlmConfig.providers.map(p => ({
+          name: p.name.toLowerCase() as LLMProvider,
+          apiKey: p.apiKey,
+          isEnabled: p.isEnabled,
+          models: p.availableModels || []
+        })),
+        defaultProvider: (dbLlmConfig.defaultProvider?.toLowerCase() || 'openai') as LLMProvider,
+        defaultModel: defaultLLMModel,
+        timeoutMs: (dbLlmConfig as any).timeoutMs || 30000, // Cast to any to bypass strict type checking if schema is out of sync
+        retryConfig: (dbLlmConfig as any).retryConfig || { // Cast to any for retryConfig as well
+          maxRetries: 2,
+          initialDelayMs: 1000,
+          maxDelayMs: 5000
+        }
       };
+      
+      llmService = new LLMService(llmServiceConfig); // Create new instance with DB config
+      logger.info('CampaignService: LLM service initialized/updated with database configuration.');
+      isLLMServiceProperlyInitialized = true;
+    } else {
+      logger.warn('CampaignService: No LLM configuration in DB. Using fallback empty configuration.');
+      defaultLLMModel = 'gpt-4';
+      const emptyConfig: LLMConfig = {
+        providers: [],
+        defaultProvider: 'openai' as LLMProvider,
+        defaultModel: defaultLLMModel,
+        timeoutMs: 30000,
+        retryConfig: { maxRetries: 2, initialDelayMs: 1000, maxDelayMs: 5000 }
+      };
+      llmService = new LLMService(emptyConfig); // Create new instance with fallback
+      isLLMServiceProperlyInitialized = false;
+    }
+  } catch (error) {
+    logger.error('CampaignService: Failed to initialize LLM service:', error);
+    defaultLLMModel = 'gpt-4';
+    const errorFallbackConfig: LLMConfig = {
+      providers: [],
+      defaultProvider: 'openai' as LLMProvider,
+      defaultModel: defaultLLMModel,
+      timeoutMs: 30000,
+      retryConfig: { maxRetries: 2, initialDelayMs: 1000, maxDelayMs: 5000 }
     };
-  };
-  callRecords: string[]; // IDs of call records
-  systemPrompt?: string;
+    if (!llmService || !isLLMServiceProperlyInitialized) { // Create if doesn't exist or wasn't proper
+        llmService = new LLMService(errorFallbackConfig);
+        logger.info('CampaignService: LLM service created with error fallback config.');
+    }
+    isLLMServiceProperlyInitialized = false;
+  }
+};
+
+// IMPORTANT: This function should be called by your main application startup sequence
+// AFTER MongoDB is connected and configurations are loaded.
+// For example, in your main server setup file (e.g., index.ts or app.ts):
+// import { reinitializeLLMServiceWithDbConfig } from './services/campaignService';
+// await reinitializeLLMServiceWithDbConfig();
+export const reinitializeLLMServiceWithDbConfig = async (): Promise<void> => {
+    logger.info('CampaignService: Received signal to re-initialize LLM service with DB config.');
+    isLLMServiceProperlyInitialized = false; 
+    if (llmInitializationPromise) {
+        logger.info('CampaignService: Waiting for existing LLM initialization to complete before re-initializing.');
+        await llmInitializationPromise.catch(() => {}); // Wait for any ongoing promise to settle
+    }
+    llmInitializationPromise = null; // Clear promise to force new initialization
+    await ensureLLMServiceInitialized(); // Trigger re-initialization
+};
+
+const ensureLLMServiceInitialized = async (): Promise<void> => {
+  const mongoose = require('mongoose');
+  const needsInitialization = !isLLMServiceProperlyInitialized || !llmService;
+  const dbReady = mongoose.connection.readyState === 1;
+
+  if (needsInitialization) {
+    if (llmInitializationPromise) {
+      logger.debug('CampaignService: Waiting for ongoing LLM initialization.');
+      await llmInitializationPromise;
+      if (isLLMServiceProperlyInitialized && llmService) {
+        logger.debug('CampaignService: LLM service became properly initialized while waiting.');
+        return; 
+      }
+      logger.debug('CampaignService: LLM service still needs initialization after waiting.');
+    }
+    
+    // Conditions to start a new initialization:
+    // 1. Service doesn't exist yet.
+    // 2. Service exists but is not properly initialized, AND the DB is now ready.
+    if (!llmService || (!isLLMServiceProperlyInitialized && dbReady)) {
+        logger.info(`CampaignService: LLM service requires initialization (ProperlyInitialized: ${isLLMServiceProperlyInitialized}, DBReady: ${dbReady}, ServiceExists: ${!!llmService}).`);
+        llmInitializationPromise = initializeLLMServiceInternal().finally(() => {
+            llmInitializationPromise = null; 
+        });
+        await llmInitializationPromise;
+    } else if (!llmService && !dbReady) { // Service doesn't exist, DB not ready -> fallback
+        logger.info('CampaignService: LLM service requires fallback initialization (DB not ready, service does not exist).');
+        llmInitializationPromise = initializeLLMServiceInternal().finally(() => {
+            llmInitializationPromise = null;
+        });
+        await llmInitializationPromise;
+    }
+  }
+
+  if (!llmService) {
+    logger.error('CampaignService: LLMService is CRITICALLY UNINITIALIZED after all attempts. This indicates a severe startup issue.'); // Changed from fatal to error
+    const minimalFallbackConfig: LLMConfig = {
+      providers: [], defaultProvider: 'openai' as LLMProvider, defaultModel: 'gpt-4', timeoutMs: 1000,
+      retryConfig: { maxRetries: 1, initialDelayMs: 500, maxDelayMs: 1000 }
+    };
+    llmService = new LLMService(minimalFallbackConfig);
+    isLLMServiceProperlyInitialized = false;
+  }
+};
+
+export interface ScriptGenerationOptions {
+  industry: string;
+  targetAudience: string;
+  campaignGoal: string;
+  tone: 'professional' | 'friendly' | 'authoritative' | 'casual';
+  language: string;
+  complianceRegion: string[];
+  customVariables?: { [key: string]: string };
 }
 
-export interface CallRecord {
-  id: string;
+export interface ABTestConfig {
+  name: string;
   campaignId: string;
-  leadId: string;
-  variantId: string;
-  startTime: Date;
-  endTime?: Date;
-  duration?: number;
-  status: 'in-progress' | 'completed' | 'failed' | 'no-answer';
-  emotions: {
-    primary: string;
-    trends: string;
-    finalScore: number;
+  testType: 'script' | 'voice' | 'timing' | 'approach';
+  variants: Array<{
+    name: string;
+    configuration: any;
+    trafficAllocation: number;
+  }>;
+  hypothesis: string;
+  successCriteria: {
+    primaryMetric: string;
+    minimumImprovement: number;
+    sampleSize: number;
   };
-  outcome: string;
-  notes?: string;
-  transcriptPath?: string;
-  recordingPath?: string;
+  duration: {
+    startDate: Date;
+    endDate: Date;
+  };
 }
 
 export class CampaignService {
-  private campaigns: Map<string, Campaign> = new Map();
-  private callRecords: Map<string, CallRecord> = new Map();
-  private conversationEngine: ConversationEngineService;
   
-  constructor(
-    openAIApiKey: string = '', 
-    anthropicApiKey?: string,
-    googleSpeechKey?: string,
-    deepgramApiKey?: string
-  ) {
-    // Create EnhancedVoiceAIService
-    const voiceAI = getVoiceAIService();
-    
-    // Create SpeechAnalysisService
-    const speechAnalysis = new SpeechAnalysisService(openAIApiKey, googleSpeechKey, deepgramApiKey);
-    
-    // Create LLMService with default config
-    const llmService = new LLMService({
-      providers: [
-        { name: 'openai', apiKey: openAIApiKey, isEnabled: true },
-        { name: 'anthropic', apiKey: anthropicApiKey || '', isEnabled: !!anthropicApiKey }
-      ]
-    });
-    
-    this.conversationEngine = new ConversationEngineService(
-      voiceAI,
-      speechAnalysis,
-      llmService
-    );
-    
-    // Initialize with credentials from database
-    this.initializeWithCredentials().catch(error => {
-      logger.error(`Error initializing CampaignService with credentials: ${getErrorMessage(error)}`);
-    });
-  }
-  
-  // Get credentials from database configuration
-  private async initializeWithCredentials(): Promise<void> {
+  // Script Generation
+  async generateScript(options: ScriptGenerationOptions): Promise<any> {
     try {
-      // Get configuration from database
-      const config = await Configuration.findOne();
+      // Ensure LLM service is initialized
+      await ensureLLMServiceInitialized();
       
-      if (config) {
-        let elevenLabsKey = config.elevenLabsConfig?.apiKey || '';
-        
-        // Get LLM providers
-        const openAIProvider = config.llmConfig?.providers?.find((p: any) => p.name === 'openai');
-        const openAIKey = openAIProvider?.apiKey || '';
-        
-        const anthropicProvider = config.llmConfig?.providers?.find((p: any) => p.name === 'anthropic');
-        const anthropicKey = anthropicProvider?.apiKey || '';
-        
-        const googleProvider = config.llmConfig?.providers?.find((p: any) => p.name === 'google');
-        const googleKey = googleProvider?.apiKey || '';
-        
-        // Create services
-        const voiceAI = getVoiceAIService();
-        voiceAI.updateApiKey(elevenLabsKey);
-        const speechAnalysis = new SpeechAnalysisService(openAIKey, googleKey, '');
-        const llmService = new LLMService({
-          providers: [
-            { name: 'openai', apiKey: openAIKey, isEnabled: true },
-            { name: 'anthropic', apiKey: anthropicKey, isEnabled: !!anthropicKey },
-            { name: 'google', apiKey: googleKey, isEnabled: !!googleKey }
-          ]
-        });
-        
-        // Reinitialize the conversation engine with database credentials
-        this.conversationEngine = new ConversationEngineService(
-          voiceAI,
-          speechAnalysis,
-          llmService
-        );
-        
-        logger.info('CampaignService initialized with credentials from configuration');
-      }
-    } catch (error) {
-      logger.error(`Failed to initialize CampaignService with credentials: ${getErrorMessage(error)}`);
-    }
-  }
-
-  /**
-   * Create a new campaign
-   */
-  public createCampaign(campaignData: Partial<Campaign>): Campaign {
-    const id = uuidv4();
-    
-    const campaign: Campaign = {
-      id,
-      name: campaignData.name || `Campaign ${id}`,
-      description: campaignData.description || '',
-      status: campaignData.status || 'draft',
-      targetCount: campaignData.targetCount || 100,
-      currentCount: 0,
-      leadFilters: campaignData.leadFilters || {},
-      variants: campaignData.variants || [],
-      metrics: {
-        totalCalls: 0,
-        completedCalls: 0,
-        failedCalls: 0,
-        positiveEmotions: 0,
-        negativeEmotions: 0,
-        averageCallDuration: 0,
-        conversionRate: 0,
-        variantPerformance: {}
-      },
-      callRecords: []
-    } as any;
-    
-    // Initialize variant performance metrics
-    campaign.variants.forEach(variant => {
-      campaign.metrics.variantPerformance[variant.id] = {
-        calls: 0,
-        completions: 0,
-        positiveEmotions: 0,
-        conversionRate: 0
-      };
-    });
-    
-    this.campaigns.set(id, campaign);
-    logger.info(`Created campaign: ${campaign.name} (${id})`);
-    
-    return campaign;
-  }
-
-  /**
-   * Get a campaign by ID
-   */
-  public getCampaign(id: string): Campaign | undefined {
-    return this.campaigns.get(id);
-  }
-
-  /**
-   * Get all campaigns
-   */
-  public getAllCampaigns(): Campaign[] {
-    return Array.from(this.campaigns.values());
-  }
-
-  /**
-   * Update a campaign
-   */
-  public updateCampaign(id: string, updateData: Partial<Campaign>): Campaign | undefined {
-    const campaign = this.campaigns.get(id);
-    
-    if (!campaign) {
-      return undefined;
-    }
-    
-    // Update campaign data
-    Object.assign(campaign, {
-      ...campaign,
-      ...updateData,
-      id // Ensure ID isn't changed
-    });
-    
-    this.campaigns.set(id, campaign);
-    logger.info(`Updated campaign: ${campaign.name} (${id})`);
-    
-    return campaign;
-  }
-
-  /**
-   * Delete a campaign
-   */
-  public deleteCampaign(id: string): boolean {
-    const success = this.campaigns.delete(id);
-    
-    if (success) {
-      logger.info(`Deleted campaign: ${id}`);
-    }
-    
-    return success;
-  }
-
-  /**
-   * Start a campaign
-   */
-  public startCampaign(id: string): Campaign | undefined {
-    const campaign = this.campaigns.get(id);
-    
-    if (!campaign) {
-      return undefined;
-    }
-    
-    campaign.status = 'active';
-    campaign.startDate = new Date();
-    
-    this.campaigns.set(id, campaign);
-    logger.info(`Started campaign: ${campaign.name} (${id})`);
-    
-    // Start processing the campaign
-    this.processCampaign(id).catch(err => {
-      logger.error(`Error processing campaign: ${err.message}`);
-    });
-    
-    return campaign;
-  }
-
-  /**
-   * Pause a campaign
-   */
-  public pauseCampaign(id: string): Campaign | undefined {
-    const campaign = this.campaigns.get(id);
-    
-    if (!campaign) {
-      return undefined;
-    }
-    
-    campaign.status = 'paused';
-    
-    this.campaigns.set(id, campaign);
-    logger.info(`Paused campaign: ${campaign.name} (${id})`);
-    
-    return campaign;
-  }
-
-  /**
-   * Complete a campaign
-   */
-  public completeCampaign(id: string): Campaign | undefined {
-    const campaign = this.campaigns.get(id);
-    
-    if (!campaign) {
-      return undefined;
-    }
-    
-    campaign.status = 'completed';
-    campaign.endDate = new Date();
-    
-    this.campaigns.set(id, campaign);
-    logger.info(`Completed campaign: ${campaign.name} (${id})`);
-    
-    return campaign;
-  }
-
-  /**
-   * Process campaign by making calls
-   */
-  private async processCampaign(id: string): Promise<void> {
-    const campaign = this.campaigns.get(id);
-    
-    if (!campaign || campaign.status !== 'active') {
-      return;
-    }
-    
-    // Check if campaign is complete
-    if (campaign.currentCount >= campaign.targetCount) {
-      this.completeCampaign(id);
-      return;
-    }
-    
-    try {
-      // Get leads for calling based on campaign filters
-      const filters = {
-        status: campaign.leadFilters.status?.length ? campaign.leadFilters.status[0] : undefined,
-        tags: campaign.leadFilters.tags,
-        languagePreference: campaign.leadFilters.languagePreference?.length ? 
-          campaign.leadFilters.languagePreference[0] : undefined
-      };
+      // Find similar templates for reference
+      const similarTemplates = await this.findSimilarTemplates(options);
       
-      // Get leads that haven't been called in this campaign
-      const excludeIds = campaign.callRecords.map(recordId => {
-        const record = this.callRecords.get(recordId);
-        return record?.leadId || '';
-      }).filter(id => id);
+      // Generate script using LLM
+      const prompt = this.buildScriptGenerationPrompt(options, similarTemplates);
       
-      const leads = await leadService.getLeadsForCalling(
-        10, // Get 10 leads at a time
-        filters.languagePreference,
-        excludeIds
-      );
-      
-      // Process each lead
-      for (const lead of leads) {
-        // Skip if campaign is no longer active
-        const updatedCampaign = this.campaigns.get(id);
-        if (!updatedCampaign || updatedCampaign.status !== 'active') {
-          break;
+      // Use the new LLM service chat method with default provider
+      const defaultProvider = llmService.getDefaultProvider();
+      const llmResponse = await llmService.chat({
+        provider: defaultProvider.getProviderName(),
+        model: defaultLLMModel, // Changed from defaultModel
+        messages: [
+          { role: 'user', content: prompt }
+        ],
+        options: {
+          temperature: 0.7,
+          maxTokens: 1500
         }
-        
-        // Select a variant for A/B testing
-        const variant = this.selectVariant(campaign);
-        
-        if (!variant) {
-          logger.error(`No variants available for campaign: ${campaign.id}`);
-          continue;
-        }
-        
-        // Create call record
-        const callRecordId = uuidv4();
-        const callRecord: CallRecord = {
-          id: callRecordId,
-          campaignId: campaign.id,
-          leadId: lead.id,
-          variantId: variant.id,
-          startTime: new Date(),
-          status: 'in-progress',
-          emotions: {
-            primary: 'neutral',
-            trends: 'stable',
-            finalScore: 0.5
-          },
-          outcome: 'pending'
-        };
-        
-        this.callRecords.set(callRecordId, callRecord);
-        campaign.callRecords.push(callRecordId);
-        
-        // Update campaign metrics
-        campaign.currentCount++;
-        campaign.metrics.totalCalls++;
-        campaign.metrics.variantPerformance[variant.id].calls++;
-        
-        try {
-          // Initialize conversation
-          const sessionId = uuidv4();
-          
-          // Get the personality object from the personality ID
-          const personalities = await EnhancedVoiceAIService.getEnhancedVoicePersonalities();
-          const personalityObj = personalities.find(p => p.id === variant.personality) || personalities[0];
-          
-          await this.conversationEngine.createSession(
-            lead.id,
-            campaign.id,
-            variant.language,
-            personalityObj?.id
-          );
-          
-          // Generate opening message
-          const openingMessage = await this.conversationEngine.generateOpeningMessage(
-            sessionId,
-            lead.name,
-            campaign.name
-          );
-          
-          logger.info(`Call initiated for lead: ${lead.name} (${lead.id}) with variant: ${variant.name}`);
-          
-          // In a real implementation, this would integrate with Twilio to make the call
-          // For now, we'll simulate a successful call
-          
-          // Simulate call completion
-          setTimeout(() => {
-            this.completeCall(callRecordId, 'completed', 'interested', 0.7);
-          }, 5000);
-          
-        } catch (error) {
-          logger.error(`Error processing call for lead ${lead.id}: ${getErrorMessage(error)}`);
-          this.completeCall(callRecordId, 'failed', 'neutral', 0.5);
-        }
-      }
+      });
       
-      // Schedule next batch if campaign is still active
-      setTimeout(() => {
-        this.processCampaign(id);
-      }, 30000); // Process next batch after 30 seconds
+      const generatedScript = llmResponse.content;
       
-    } catch (error) {
-      logger.error(`Error processing campaign ${id}: ${getErrorMessage(error)}`);
+      // Validate compliance
+      const complianceCheck = await this.validateCompliance(generatedScript, options.complianceRegion);
       
-      // Retry after a delay
-      setTimeout(() => {
-        this.processCampaign(id);
-      }, 60000); // Retry after 1 minute
-    }
-  }
-
-  /**
-   * Select a variant for A/B testing
-   */
-  private selectVariant(campaign: Campaign): CampaignVariant | undefined {
-    if (campaign.variants.length === 0) {
-      return undefined;
-    }
-    
-    // If campaign is just starting, distribute evenly
-    if (campaign.metrics.totalCalls < campaign.variants.length * 10) {
-      // Find the variant with the fewest calls
-      return campaign.variants.reduce((min, variant) => {
-        const minCalls = campaign.metrics.variantPerformance[min.id].calls;
-        const variantCalls = campaign.metrics.variantPerformance[variant.id].calls;
-        return variantCalls < minCalls ? variant : min;
-      }, campaign.variants[0]);
-    }
-    
-    // If we have enough data, use Thompson sampling for multi-armed bandit
-    // This prioritizes variants with higher conversion rates
-    const randomSamples = campaign.variants.map(variant => {
-      const performance = campaign.metrics.variantPerformance[variant.id];
-      const conversions = performance.conversionRate * performance.completions;
-      const nonConversions = performance.completions - conversions;
-      
-      // Sample from beta distribution (simplified)
-      const alpha = conversions + 1; // Add 1 for smoothing
-      const beta = nonConversions + 1; // Add 1 for smoothing
-      
-      // Simple approximation of beta sampling
-      let sample = 0;
-      for (let i = 0; i < 12; i++) {
-        sample += Math.random();
-      }
-      sample = sample - 6;
-      sample = sample * Math.sqrt(1 / (alpha + beta)) + (alpha / (alpha + beta));
-      
-      return { variant, sample };
-    });
-    
-    // Select the variant with the highest sample
-    randomSamples.sort((a, b) => b.sample - a.sample);
-    return randomSamples[0].variant;
-  }
-
-  /**
-   * Complete a call and update metrics
-   */
-  public completeCall(
-    callRecordId: string,
-    status: 'completed' | 'failed' | 'no-answer',
-    primaryEmotion: string = 'neutral',
-    emotionScore: number = 0.5,
-    outcome: string = 'undecided',
-    notes?: string
-  ): CallRecord | undefined {
-    const callRecord = this.callRecords.get(callRecordId);
-    
-    if (!callRecord) {
-      return undefined;
-    }
-    
-    // Update call record
-    callRecord.status = status;
-    callRecord.endTime = new Date();
-    callRecord.duration = callRecord.endTime.getTime() - callRecord.startTime.getTime();
-    callRecord.emotions.primary = primaryEmotion;
-    callRecord.emotions.finalScore = emotionScore;
-    callRecord.outcome = outcome;
-    
-    if (notes) {
-      callRecord.notes = notes;
-    }
-    
-    this.callRecords.set(callRecordId, callRecord);
-    
-    // Update campaign metrics
-    const campaign = this.campaigns.get(callRecord.campaignId);
-    
-    if (campaign) {
-      const isPositiveEmotion = ['interested', 'happy', 'excited', 'satisfied'].includes(primaryEmotion);
-      const isConversion = outcome === 'converted';
-      
-      if (status === 'completed') {
-        campaign.metrics.completedCalls++;
-        campaign.metrics.variantPerformance[callRecord.variantId].completions++;
-        
-        if (isPositiveEmotion) {
-          campaign.metrics.positiveEmotions++;
-          campaign.metrics.variantPerformance[callRecord.variantId].positiveEmotions++;
-        } else {
-          campaign.metrics.negativeEmotions++;
-        }
-        
-        if (isConversion) {
-          campaign.metrics.conversionRate = campaign.metrics.completedCalls > 0 ? 
-            campaign.metrics.totalCalls / campaign.metrics.completedCalls : 0;
-            
-          campaign.metrics.variantPerformance[callRecord.variantId].conversionRate = 
-            campaign.metrics.variantPerformance[callRecord.variantId].completions > 0 ?
-            campaign.metrics.variantPerformance[callRecord.variantId].calls / 
-            campaign.metrics.variantPerformance[callRecord.variantId].completions : 0;
-        }
-      } else {
-        campaign.metrics.failedCalls++;
-      }
-      
-      // Calculate average call duration
-      const completedRecords = campaign.callRecords
-        .map(id => this.callRecords.get(id))
-        .filter(record => record && record.status === 'completed' && record.duration);
-        
-      const totalDuration = completedRecords.reduce((sum, record) => sum + (record?.duration || 0), 0);
-      campaign.metrics.averageCallDuration = completedRecords.length > 0 ? 
-        totalDuration / completedRecords.length : 0;
-      
-      this.campaigns.set(campaign.id, campaign);
-    }
-    
-    // Update lead status based on call outcome
-    this.updateLeadAfterCall(callRecord);
-    
-    logger.info(`Call completed: ${callRecordId}, status: ${status}, outcome: ${outcome}`);
-    
-    return callRecord;
-  }
-
-  /**
-   * Update lead status after call
-   */
-  private async updateLeadAfterCall(callRecord: CallRecord): Promise<void> {
-    try {
-      let status = 'Contacted';
-      let notes = callRecord.notes || '';
-      let callbackDate: Date | undefined;
-      
-      switch (callRecord.outcome) {
-        case 'converted':
-          status = 'Converted';
-          break;
-        case 'not_interested':
-          status = 'Not Interested';
-          break;
-        case 'callback_requested':
-          status = 'Scheduled Callback';
-          callbackDate = new Date();
-          callbackDate.setDate(callbackDate.getDate() + 3); // Schedule callback in 3 days
-          break;
-      }
-      
-      // Append emotion information to notes
-      notes += `\nCall outcome: ${callRecord.outcome}. Primary emotion: ${callRecord.emotions.primary}. Emotion score: ${callRecord.emotions.finalScore}.`;
-      
-      await leadService.updateLeadAfterCall(
-        callRecord.leadId,
-        status,
-        notes,
-        callbackDate
-      );
-      
-    } catch (error) {
-      logger.error(`Error updating lead after call: ${getErrorMessage(error)}`);
-    }
-  }
-
-  /**
-   * Get call record by ID
-   */
-  public getCallRecord(id: string): CallRecord | undefined {
-    return this.callRecords.get(id);
-  }
-
-  /**
-   * Get call records for a campaign
-   */
-  public getCallRecordsForCampaign(campaignId: string): CallRecord[] {
-    return Array.from(this.callRecords.values())
-      .filter(record => record.campaignId === campaignId);
-  }
-
-  /**
-   * Get call records for a lead
-   */
-  public getCallRecordsForLead(leadId: string): CallRecord[] {
-    return Array.from(this.callRecords.values())
-      .filter(record => record.leadId === leadId);
-  }
-
-  /**
-   * Get campaign performance report
-   */
-  public getCampaignPerformanceReport(campaignId: string): any {
-    const campaign = this.campaigns.get(campaignId);
-    
-    if (!campaign) {
-      return null;
-    }
-    
-    // Calculate additional metrics
-    const callRecords = this.getCallRecordsForCampaign(campaignId);
-    const completedCalls = callRecords.filter(record => record.status === 'completed');
-    const conversionRate = completedCalls.length > 0 ? 
-      completedCalls.filter(record => record.outcome === 'converted').length / completedCalls.length : 0;
-    
-    // Calculate variant performance
-    const variantPerformance = campaign.variants.map(variant => {
-      const variantRecords = callRecords.filter(record => record.variantId === variant.id);
-      const variantCompletedCalls = variantRecords.filter(record => record.status === 'completed');
-      const variantConversionRate = variantCompletedCalls.length > 0 ?
-        variantCompletedCalls.filter(record => record.outcome === 'converted').length / variantCompletedCalls.length : 0;
+      // Parse and structure the generated script
+      const structuredScript = this.parseGeneratedScript(generatedScript);
       
       return {
-        variantId: variant.id,
-        variantName: variant.name,
-        personality: variant.personality,
-        totalCalls: variantRecords.length,
-        completedCalls: variantCompletedCalls.length,
-        conversionRate: variantConversionRate,
-        positiveEmotions: variantRecords.filter(record => 
-          ['interested', 'happy', 'excited', 'satisfied'].includes(record.emotions.primary)
-        ).length
+        script: structuredScript,
+        compliance: complianceCheck,
+        metadata: {
+          generatedAt: new Date(),
+          options,
+          templateInfluences: similarTemplates.map(t => t._id)
+        }
       };
-    });
+    } catch (error) {
+      logger.error('Error generating script:', error);
+      throw new Error('Script generation failed');
+    }
+  }
+
+  private async findSimilarTemplates(options: ScriptGenerationOptions) {
+    return await ScriptTemplate.find({
+      industry: options.industry,
+      'compliance.approved': true,
+      'compliance.region': { $in: options.complianceRegion }
+    })
+    .sort({ 'performance.conversionRate': -1 })
+    .limit(3);
+  }
+
+  private buildScriptGenerationPrompt(options: ScriptGenerationOptions, templates: any[]): string {
+    const templateExamples = templates.map(t => `
+      Template: ${t.name}
+      Opening: ${t.template.opening}
+      Presentation: ${t.template.presentation}
+      Closing: ${t.template.closing}
+    `).join('\n');
+
+    return `
+      Generate a ${options.tone} outreach script for the ${options.industry} industry.
+      
+      Requirements:
+      - Target Audience: ${options.targetAudience}
+      - Campaign Goal: ${options.campaignGoal}
+      - Language: ${options.language}
+      - Compliance Region: ${options.complianceRegion.join(', ')}
+      
+      High-performing templates for reference:
+      ${templateExamples}
+      
+      The script should include:
+      1. Opening (30 seconds max)
+      2. Presentation (2-3 minutes)
+      3. Common objection handling responses
+      4. Closing with clear call-to-action
+      
+      Format as JSON with sections: opening, presentation, objectionHandling, closing, variables
+    `;
+  }
+
+  public async validateCompliance(script: string, regions: string[]): Promise<any> {
+    // Implement compliance checking logic
+    const complianceRules = {
+      'IN': [ // India
+        'Must include opt-out option',
+        'Cannot call DND numbers',
+        'Must identify caller and purpose',
+        'Limited calling hours: 9 AM - 9 PM'
+      ],
+      'US': [
+        'TCPA compliance required',
+        'Must provide opt-out mechanism',
+        'Cannot use robocalls without consent'
+      ],
+      'EU': [
+        'GDPR compliance required',
+        'Must obtain explicit consent',
+        'Right to be forgotten must be mentioned'
+      ]
+    };
+
+    const violations = [];
+    for (const region of regions) {
+      const rules = complianceRules[region as keyof typeof complianceRules] || [];
+      // Check script against rules (simplified)
+      // In real implementation, use NLP to detect compliance issues
+    }
+
+    return {
+      approved: violations.length === 0,
+      violations,
+      recommendations: this.getComplianceRecommendations(regions)
+    };
+  }
+
+  private parseGeneratedScript(generatedContent: string): any {
+    try {
+      // Try to parse as JSON first
+      return JSON.parse(generatedContent);
+    } catch (error) {
+      // If not JSON, parse manually
+      return {
+        opening: this.extractSection(generatedContent, 'opening'),
+        presentation: this.extractSection(generatedContent, 'presentation'),
+        objectionHandling: this.extractObjectionHandling(generatedContent),
+        closing: this.extractSection(generatedContent, 'closing'),
+        variables: {}
+      };
+    }
+  }
+
+  private extractSection(content: string, section: string): string {
+    const regex = new RegExp(`${section}:?\\s*([\\s\\S]*?)(?=\\n(?:presentation|objection|closing|$))`, 'i');
+    const match = content.match(regex);
+    return match ? match[1].trim() : '';
+  }
+
+  private extractObjectionHandling(content: string): string[] {
+    const regex = /objection[s]?:?\s*([\s\S]*?)(?=\n(?:closing|$))/i;
+    const match = content.match(regex);
+    if (match) {
+      return match[1].split('\n').filter(line => line.trim()).map(line => line.trim());
+    }
+    return [];
+  }
+
+  private getComplianceRecommendations(regions: string[]): string[] {
+    const recommendations = [];
+    if (regions.includes('IN')) {
+      recommendations.push('Add DND compliance check', 'Include calling time restrictions');
+    }
+    if (regions.includes('US')) {
+      recommendations.push('Add TCPA compliance statement');
+    }
+    if (regions.includes('EU')) {
+      recommendations.push('Include GDPR consent language');
+    }
+    return recommendations;
+  }
+
+  // Template Management
+  async createTemplate(templateData: any, userId: string): Promise<any> {
+    try {
+      const template = new ScriptTemplate({
+        ...templateData,
+        createdBy: userId
+      });
+      
+      // Run compliance check
+      const complianceCheck = await this.validateCompliance(
+        JSON.stringify(templateData.template), 
+        templateData.compliance.region
+      );
+      
+      template.compliance.approved = complianceCheck.approved;
+      
+      return await template.save();
+    } catch (error) {
+      logger.error('Error creating template:', error);
+      throw new Error('Template creation failed');
+    }
+  }
+
+  async getTemplates(filters: any = {}): Promise<any> {
+    return await ScriptTemplate.find(filters)
+      .sort({ 'performance.conversionRate': -1 })
+      .populate('createdBy', 'name email');
+  }
+
+  async updateTemplatePerformance(templateId: string, metrics: any): Promise<any> {
+    return await ScriptTemplate.findByIdAndUpdate(
+      templateId,
+      { $set: { performance: metrics } },
+      { new: true }
+    );
+  }
+
+  // A/B Testing
+  async createABTest(config: ABTestConfig, userId: string): Promise<any> {
+    try {
+      // Validate traffic allocation totals 100%
+      const totalAllocation = config.variants.reduce((sum, v) => sum + v.trafficAllocation, 0);
+      if (totalAllocation !== 100) {
+        throw new Error('Traffic allocation must total 100%');
+      }
+
+      const abTest = new ABTest({
+        ...config,
+        createdBy: userId,
+        variants: config.variants.map((variant, index) => ({
+          ...variant,
+          id: `variant_${index + 1}`,
+          metrics: {
+            calls: 0,
+            conversions: 0,
+            conversionRate: 0,
+            averageCallDuration: 0,
+            customerSatisfactionScore: 0
+          }
+        }))
+      });
+
+      return await abTest.save();
+    } catch (error) {
+      logger.error('Error creating A/B test:', error);
+      throw new Error('A/B test creation failed');
+    }
+  }
+
+  async updateABTestMetrics(testId: string, variantId: string, metrics: any): Promise<any> {
+    try {
+      const test = await ABTest.findById(testId);
+      if (!test) throw new Error('A/B test not found');
+
+      const variant = test.variants.find(v => v.id === variantId);
+      if (!variant) throw new Error('Variant not found');
+
+      // Update metrics
+      variant.metrics = { ...variant.metrics, ...metrics };
+      variant.metrics.conversionRate = variant.metrics.calls > 0 
+        ? (variant.metrics.conversions / variant.metrics.calls) * 100 
+        : 0;
+
+      await test.save();
+
+      // Check if test should be concluded
+      await this.checkTestCompletion(testId);
+
+      return test;
+    } catch (error) {
+      logger.error('Error updating A/B test metrics:', error);
+      throw new Error('A/B test update failed');
+    }
+  }
+
+  private async checkTestCompletion(testId: string): Promise<void> {
+    const test = await ABTest.findById(testId);
+    if (!test || test.status !== 'running') return;
+
+    const totalCalls = test.variants.reduce((sum, v) => sum + v.metrics.calls, 0);
     
-    // Calculate emotion distribution
-    const emotionDistribution: Record<string, number> = {};
-    completedCalls.forEach(record => {
-      emotionDistribution[record.emotions.primary] = 
-        (emotionDistribution[record.emotions.primary] || 0) + 1;
-    });
+    if (totalCalls >= test.successCriteria.sampleSize || new Date() >= test.duration.endDate) {
+      // Calculate statistical significance
+      const results = this.calculateTestResults(test);
+      
+      test.results = results;
+      test.status = 'completed';
+      test.duration.actualEndDate = new Date();
+      
+      await test.save();
+    }
+  }
+
+  private calculateTestResults(test: any): any {
+    // Simplified statistical analysis
+    const variants = test.variants.sort((a, b) => b.metrics.conversionRate - a.metrics.conversionRate);
+    const winner = variants[0];
+    const control = variants[1];
+
+    const improvement = control.metrics.conversionRate > 0 
+      ? ((winner.metrics.conversionRate - control.metrics.conversionRate) / control.metrics.conversionRate) * 100
+      : 0;
+
+    const confidence = this.calculateConfidence(winner.metrics, control.metrics);
     
     return {
-      campaignId: campaign.id,
-      campaignName: campaign.name,
-      status: campaign.status,
-      startDate: campaign.startDate,
-      endDate: campaign.endDate,
-      targetCount: campaign.targetCount,
-      currentCount: campaign.currentCount,
-      metrics: {
-        totalCalls: callRecords.length,
-        completedCalls: completedCalls.length,
-        conversionRate,
-        averageCallDuration: campaign.metrics.averageCallDuration / 1000, // Convert to seconds
-        emotionDistribution
-      },
-      variantPerformance,
-      bestPerformingVariant: variantPerformance.length > 0 ? 
-        variantPerformance.reduce((best, current) => 
-          current.conversionRate > best.conversionRate ? current : best
-        ) : null
+      winner: winner.id,
+      confidence,
+      statisticalSignificance: confidence >= test.successCriteria.confidenceLevel,
+      insights: [
+        `${winner.name} performed ${improvement.toFixed(2)}% better than control`,
+        `Achieved ${confidence.toFixed(1)}% confidence level`
+      ],
+      recommendations: improvement >= test.successCriteria.minimumImprovement
+        ? [`Implement ${winner.name} configuration for improved performance`]
+        : ['No significant improvement detected. Consider testing different variables.']
     };
+  }
+
+  private calculateConfidence(winnerMetrics: any, controlMetrics: any): number {
+    // Simplified confidence calculation
+    // In a real implementation, use proper statistical tests (Chi-square, Z-test, etc.)
+    const winnerRate = winnerMetrics.conversionRate / 100;
+    const controlRate = controlMetrics.conversionRate / 100;
+    
+    if (winnerMetrics.calls < 30 || controlMetrics.calls < 30) return 0;
+    
+    const pooledRate = (winnerMetrics.conversions + controlMetrics.conversions) / 
+                     (winnerMetrics.calls + controlMetrics.calls);
+    
+    const standardError = Math.sqrt(pooledRate * (1 - pooledRate) * 
+                         (1/winnerMetrics.calls + 1/controlMetrics.calls));
+    
+    if (standardError === 0) return 0;
+    
+    const zScore = Math.abs(winnerRate - controlRate) / standardError;
+    
+    // Convert Z-score to confidence (simplified)
+    if (zScore >= 2.58) return 99;
+    if (zScore >= 1.96) return 95;
+    if (zScore >= 1.65) return 90;
+    if (zScore >= 1.28) return 80;
+    return Math.min(zScore * 50, 75);
+  }
+
+  async getABTests(campaignId?: string): Promise<any> {
+    const filter = campaignId ? { campaignId } : {};
+    return await ABTest.find(filter)
+      .populate('campaignId', 'name')
+      .sort({ createdAt: -1 });
+  }
+
+  async getABTestResults(testId: string): Promise<any> {
+    const test = await ABTest.findById(testId).populate('campaignId', 'name');
+    if (!test) throw new Error('A/B test not found');
+    
+    return {
+      test,
+      analysis: test.status === 'completed' ? test.results : null,
+      performance: test.variants.map(v => ({
+        variant: v.name,
+        metrics: v.metrics,
+        trafficAllocation: v.trafficAllocation
+      }))
+    };
+  }
+
+  // Industrial Campaign Execution
+  async startCampaign(campaignId: string, userId: string): Promise<any> {
+    const campaign = await Campaign.findById(campaignId);
+    if (!campaign) throw new Error('Campaign not found');
+
+    if (campaign.status === 'Active') {
+      logger.warn(`Campaign ${campaignId} is already active`);
+      return campaign;
+    }
+
+    // Update status
+    campaign.status = 'Active';
+    campaign.startDate = new Date();
+    await campaign.save();
+
+    // Get leads for this campaign based on filters (example: status 'New')
+    const Lead = require('../models/Lead').default;
+    const leads = await Lead.find({ 
+      status: 'New',
+      leadSources: { $in: campaign.leadSources }
+    }).select('_id');
+
+    if (leads.length > 0) {
+      // Trigger industrial batch processing via BullMQ
+      await batchCallService.createBatch({
+        name: `Campaign: ${campaign.name} Auto-Start`,
+        campaignId: campaign._id.toString(),
+        leadIds: leads.map(l => l._id.toString()),
+        createdBy: userId
+      });
+      logger.info(`Campaign ${campaignId} started with ${leads.length} leads queued.`);
+    } else {
+      logger.warn(`Campaign ${campaignId} started but no matching leads found.`);
+    }
+
+    return campaign;
+  }
+
+  async pauseCampaign(campaignId: string): Promise<any> {
+    const campaign = await Campaign.findByIdAndUpdate(campaignId, { status: 'Paused' }, { new: true });
+    logger.info(`Campaign ${campaignId} paused.`);
+    return campaign;
   }
 }
 
-export default CampaignService;
+export const campaignService = new CampaignService();

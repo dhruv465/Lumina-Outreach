@@ -85,12 +85,14 @@ export class CircuitBreakerService {
     // Merge default options with custom options
     const options = { ...DEFAULT_OPTIONS, ...customOptions };
     
-    // Create a dummy function for the circuit
-    // Real function will be provided when fire() is called
-    const dummyFunction = async () => null;
+    // Create an action wrapper for the circuit
+    // This allows passing any function to fire() and having it executed
+    const actionWrapper = async (fn: (...args: any[]) => Promise<any>, ...args: any[]) => {
+      return fn(...args);
+    };
     
     // Create the circuit breaker
-    const circuit = new CircuitBreaker(dummyFunction, {
+    const circuit = new CircuitBreaker(actionWrapper, {
       timeout: options.timeout,
       resetTimeout: options.resetTimeout,
       errorThresholdPercentage: options.errorThresholdPercentage,

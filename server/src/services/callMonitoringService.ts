@@ -628,6 +628,13 @@ export class CallMonitoringService extends EventEmitter {
   }
   
   /**
+   * Get all alert rules
+   */
+  public getAlertRules(): AlertRule[] {
+    return Array.from(this.alertRules.values());
+  }
+
+  /**
    * Shutdown monitoring service
    */
   public shutdown(): void {

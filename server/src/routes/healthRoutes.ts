@@ -8,7 +8,6 @@
 import { FastifyInstance } from 'fastify';
 import { getCallResilienceService } from '../services/callResilienceService';
 import { getCallMonitoringService } from '../services/callMonitoringService';
-import { getFallbackTTSService } from '../services/fallbackTTSService';
 import logger from '../utils/logger';
 
 const healthRoutes = async (fastify, opts: Record<string, any>) => {
@@ -216,109 +215,50 @@ const healthRoutes = async (fastify, opts: Record<string, any>) => {
   });
 
   /**
-   * GET /api/fallback/tts/test/:callId
-   * Test fallback TTS capabilities
-   */
-  fastify.get('/fallback/tts/test/:callId', async (request, reply) => {
-    try {
-      const { callId } = request.params as any;
-      
-      const fallbackTTS = getFallbackTTSService();
-      const results = await fallbackTTS.testFallbacks(callId);
-      
-      reply.send({
-        callId,
-        fallbackCapabilities: results,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      logger.error('Error testing fallback TTS:', error);
-      reply.code(500).send({
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  /**
-   * GET /api/fallback/tts/cache/stats
-   * Get TTS fallback cache statistics
-   */
-  fastify.get('/fallback/tts/cache/stats', async (request, reply) => {
-    try {
-      const fallbackTTS = getFallbackTTSService();
-      const stats = fallbackTTS.getCacheStats();
-      
-      reply.send(stats);
-    } catch (error) {
-      logger.error('Error getting cache stats:', error);
-      reply.code(500).send({
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  /**
-   * DELETE /api/fallback/tts/cache
-   * Clear TTS fallback cache
-   */
-  fastify.delete('/fallback/tts/cache', async (request, reply) => {
-    try {
-      const fallbackTTS = getFallbackTTSService();
-      fallbackTTS.clearCache();
-      
-      reply.send({
-        success: true,
-        message: 'TTS fallback cache cleared'
-      });
-    } catch (error) {
-      logger.error('Error clearing cache:', error);
-      reply.code(500).send({
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  /**
-   * GET /api/fallback/tts/messages
-   * Get available prerecorded messages
-   */
-  fastify.get('/fallback/tts/messages', async (request, reply) => {
-    try {
-      const fallbackTTS = getFallbackTTSService();
-      const messages = fallbackTTS.getPrerecordedMessages();
-      
-      reply.send(messages);
-    } catch (error) {
-      logger.error('Error getting prerecorded messages:', error);
-      reply.code(500).send({
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  /**
    * GET /api/monitoring/alerts/rules
    * Get all monitoring alert rules
    */
   fastify.get('/monitoring/alerts/rules', async (request, reply) => {
     try {
       const monitoringService = getCallMonitoringService();
+      const rules = monitoringService.getAlertRules();
       
-      // Access the alert rules (we'll need to add a getter method)
-      // For now, return a placeholder response
       reply.send({
-        rules: [],
-        message: 'Alert rules endpoint - implementation needed'
+        success: true,
+        rules: rules.map(r => ({
+          id: r.id,
+          name: r.name,
+          severity: r.severity,
+          enabled: r.enabled,
+          cooldown: r.cooldown
+        }))
       });
     } catch (error) {
       logger.error('Error getting alert rules:', error);
       reply.code(500).send({
         error: 'Internal server error',
         message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  /**
+   * GET /api/monitoring/status
+   * Get current call monitoring statistics
+   */
+  fastify.get('/monitoring/status', async (request, reply) => {
+    try {
+      const monitoringService = getCallMonitoringService();
+      const stats = monitoringService.getMonitoringStats();
+      
+      reply.send({
+        success: true,
+        data: stats
+      });
+    } catch (error) {
+      logger.error('Error getting monitoring status:', error);
+      reply.code(500).send({
+        error: 'Internal server error'
       });
     }
   });

@@ -70,6 +70,10 @@ interface CampaignFormData {
     speed: number;
     pitch: number;
   };
+  budget: {
+    maxCostPerCall: number;
+    totalBudget: number;
+  };
 }
 
 // Initial form state
@@ -106,6 +110,10 @@ const initialFormState: CampaignFormData = {
     voiceId: "", // Will be set from system configuration during form load
     speed: 1.0,
     pitch: 1.0,
+  },
+  budget: {
+    maxCostPerCall: 2.0,
+    totalBudget: 1000.0,
   },
 };
 
@@ -157,7 +165,7 @@ const CampaignForm = ({
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState<CampaignFormData>(initialFormState);
   const [currentTab, setCurrentTab] = useState<
-    "basic" | "script" | "scheduling" | "ai"
+    "basic" | "script" | "scheduling" | "ai" | "budget"
   >("basic");
   const [systemConfig, setSystemConfig] = useState<any>(null);
   const [availableLLMModels, setAvailableLLMModels] =
@@ -243,6 +251,10 @@ const CampaignForm = ({
           voiceId: campaignData.voiceConfiguration?.voiceId || "",
           speed: campaignData.voiceConfiguration?.speed || 1.0,
           pitch: campaignData.voiceConfiguration?.pitch || 1.0,
+        },
+        budget: {
+          maxCostPerCall: campaignData.budget?.maxCostPerCall ?? 2.0,
+          totalBudget: campaignData.budget?.totalBudget ?? 1000.0,
         },
       };
 
@@ -1081,6 +1093,10 @@ const CampaignForm = ({
           speed: Number(formData.voiceConfiguration.speed) || 1.0,
           pitch: Number(formData.voiceConfiguration.pitch) || 1.0,
         },
+        budget: {
+          maxCostPerCall: Number(formData.budget.maxCostPerCall) || 2.0,
+          totalBudget: Number(formData.budget.totalBudget) || 1000.0,
+        },
       };
 
       // Debug log to verify required fields are present
@@ -1292,6 +1308,15 @@ const CampaignForm = ({
                     onClick={() => setCurrentTab("ai")}
                   >
                     AI & Voice
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-3 sm:px-5 py-3 text-sm sm:text-base whitespace-nowrap ${
+                      currentTab === "budget" ? "border-b-2 border-primary" : ""
+                    }`}
+                    onClick={() => setCurrentTab("budget")}
+                  >
+                    Budget
                   </button>
                 </div>
 
@@ -1971,6 +1996,61 @@ const CampaignForm = ({
                           <div className="flex justify-between text-xs text-muted-foreground">
                             <span>-1.0 (Lower)</span>
                             <span>1.0 (Higher)</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Budget Tab */}
+                  {currentTab === "budget" && (
+                    <div className="space-y-6">
+                      <div className="bg-card p-5 rounded-xl border shadow-sm">
+                        <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                          <span className="p-1.5 bg-primary/10 text-primary rounded-lg">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                          </span>
+                          Campaign Budget Limits
+                        </h3>
+                        <p className="text-sm text-muted-foreground mb-6">
+                          Set financial boundaries for this campaign to prevent runaway costs from AI providers. These limits are enforced in real-time.
+                        </p>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="space-y-3">
+                            <label className={labelStyles}>
+                              Total Campaign Budget ($)
+                            </label>
+                            <Input
+                              type="number"
+                              name="budget.totalBudget"
+                              value={formData.budget.totalBudget}
+                              onChange={handleChange}
+                              placeholder="e.g., 1000.00"
+                              min="0"
+                              step="0.01"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              The campaign will automatically pause if the total cost exceeds this amount.
+                            </p>
+                          </div>
+
+                          <div className="space-y-3">
+                            <label className={labelStyles}>
+                              Max Cost Per Call ($)
+                            </label>
+                            <Input
+                              type="number"
+                              name="budget.maxCostPerCall"
+                              value={formData.budget.maxCostPerCall}
+                              onChange={handleChange}
+                              placeholder="e.g., 2.00"
+                              min="0"
+                              step="0.01"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              A call will gracefully terminate if its individual processing cost exceeds this limit.
+                            </p>
                           </div>
                         </div>
                       </div>

@@ -259,12 +259,34 @@ class LeadService {
   }
 
   async getLeadsForCalling(limit: number, language: string, excludeIds: string[]): Promise<any[]> {
-    // Placeholder implementation
-    return [];
+    const query: any = {
+      status: 'New',
+      languagePreference: language,
+      _id: { $nin: excludeIds.map(id => new mongoose.Types.ObjectId(id)) }
+    };
+
+    return await Lead.find(query).limit(limit).sort({ lastContacted: 1 });
   }
 
   async updateLeadAfterCall(leadId: string, status: string, notes: string, callbackDate?: Date): Promise<void> {
-    // Placeholder implementation
+    const lead = await Lead.findById(leadId);
+    if (!lead) return;
+
+    const newNote = `[${new Date().toLocaleString()}] ${notes}`;
+    const updatedNotes = lead.notes ? `${lead.notes}\n${newNote}` : newNote;
+
+    const updateData: any = {
+      status,
+      $inc: { callCount: 1 },
+      lastContacted: new Date(),
+      notes: updatedNotes
+    };
+
+    if (callbackDate) {
+      updateData.nextCallback = callbackDate;
+    }
+
+    await Lead.findByIdAndUpdate(leadId, updateData);
   }
 }
 

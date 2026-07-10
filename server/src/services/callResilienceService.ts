@@ -7,8 +7,7 @@
 
 import { EventEmitter } from 'events';
 import logger from '../utils/logger';
-import { CallState, CallEvent, RealTimeCallStateMachine } from './realTimeCallStateMachine';
-import { RateLimitAwareCircuitBreaker } from '../utils/circuitBreaker';
+import { CallState } from './realTimeCallStateMachine';
 
 export interface CallResilienceConfig {
   maxRetries: number;
@@ -47,23 +46,18 @@ export class CallResilienceService extends EventEmitter {
   private cleanupTimer: NodeJS.Timeout | null = null;
   private healthCheckTimer: NodeJS.Timeout | null = null;
   
-  // Circuit breakers for external services
-  private ttsCircuitBreaker: RateLimitAwareCircuitBreaker<any[], any>;
-  private sttCircuitBreaker: RateLimitAwareCircuitBreaker<any[], any>;
-  private llmCircuitBreaker: RateLimitAwareCircuitBreaker<any[], any>;
-  
   constructor(config: Partial<CallResilienceConfig> = {}) {
     super();
     
     this.config = {
       maxRetries: 3,
       retryDelay: 1000,
-      circuitBreakerThreshold: 3, // Reduced from 5 for faster failover
-      fallbackTimeout: 3000, // Reduced from 5000 for faster fallback activation
-      heartbeatInterval: 5000, // Reduced from 10000 for more frequent health checks
-      connectionTimeout: 15000, // Reduced from 30000 for faster timeout detection
+      circuitBreakerThreshold: 3,
+      fallbackTimeout: 3000,
+      heartbeatInterval: 5000,
+      connectionTimeout: 15000,
       audioBufferMaxSize: 10 * 1024 * 1024, // 10MB
-      cleanupInterval: 30000, // Reduced from 60000 for more frequent cleanup
+      cleanupInterval: 30000,
       ...config
     };
     
@@ -75,67 +69,8 @@ export class CallResilienceService extends EventEmitter {
       database: true
     };
     
-    this.initializeCircuitBreakers();
     this.startHealthMonitoring();
     this.startCleanupService();
-  }
-  
-  /**
-   * Initialize circuit breakers for external services
-   */
-  private initializeCircuitBreakers(): void {
-    const circuitBreakerConfig = {
-      timeout: this.config.fallbackTimeout,
-      errorThresholdPercentage: 40, // Reduced from 50 for faster circuit breaking
-      resetTimeout: 15000, // Reduced from 30000 for faster recovery attempts
-      volumeThreshold: this.config.circuitBreakerThreshold,
-      maxRetries: this.config.maxRetries,
-      baseDelay: this.config.retryDelay,
-      maxDelay: 5000, // Reduced from 10000 for faster retries
-      jitter: true
-    };
-    
-    // TTS Circuit Breaker
-    this.ttsCircuitBreaker = new RateLimitAwareCircuitBreaker(
-      async (provider: string, text: string, voiceId: string) => {
-        // This will be wrapped around actual TTS calls
-        throw new Error('TTS circuit breaker not implemented');
-      },
-      circuitBreakerConfig,
-      'tts'
-    );
-    
-    // STT Circuit Breaker
-    this.sttCircuitBreaker = new RateLimitAwareCircuitBreaker(
-      async (audioData: Buffer) => {
-        // This will be wrapped around actual STT calls
-        throw new Error('STT circuit breaker not implemented');
-      },
-      circuitBreakerConfig,
-      'stt'
-    );
-    
-    // LLM Circuit Breaker
-    this.llmCircuitBreaker = new RateLimitAwareCircuitBreaker(
-      async (messages: any[], provider: string) => {
-        // This will be wrapped around actual LLM calls
-        throw new Error('LLM circuit breaker not implemented');
-      },
-      circuitBreakerConfig,
-      'llm'
-    );
-    
-    // Setup circuit breaker event handlers
-    this.setupCircuitBreakerHandlers();
-  }
-  
-  /**
-   * Setup circuit breaker event handlers
-   */
-  private setupCircuitBreakerHandlers(): void {
-    // Note: Circuit breaker events are handled internally
-    // This is a placeholder for future event handling implementation
-    logger.info('Circuit breaker event handlers initialized');
   }
   
   /**
@@ -302,9 +237,6 @@ export class CallResilienceService extends EventEmitter {
     for (const [callId, session] of this.sessions) {
       const age = now.getTime() - session.lastHeartbeat.getTime();
       
-      // More aggressive cleanup for better memory management:
-      // Remove sessions older than 5 minutes with no heartbeat (for live calls)
-      // or sessions in failed state older than 2 minutes
       if (age > 300000 || (session.connectionHealth === 'failed' && age > 120000)) {
         expiredSessions.push(callId);
       }
@@ -313,15 +245,8 @@ export class CallResilienceService extends EventEmitter {
     expiredSessions.forEach(callId => {
       this.sessions.delete(callId);
       logger.info(`Cleaned up expired call session ${callId}`);
-      
-      // Emit cleanup event for other services to clean their resources
       this.emit('sessionCleaned', callId);
     });
-    
-    // Log cleanup statistics
-    if (expiredSessions.length > 0) {
-      logger.info(`Cleanup completed: removed ${expiredSessions.length} expired sessions, ${this.sessions.size} active sessions remaining`);
-    }
   }
   
   /**
@@ -332,8 +257,6 @@ export class CallResilienceService extends EventEmitter {
     if (session) {
       this.sessions.delete(callId);
       logger.info(`Call ${callId} unregistered from resilience monitoring`);
-      
-      // Emit cleanup event for coordinated resource cleanup
       this.emit('sessionCleaned', callId);
     }
   }
@@ -354,27 +277,6 @@ export class CallResilienceService extends EventEmitter {
     
     this.sessions.clear();
     logger.info('Call resilience service shutdown');
-  }
-  
-  /**
-   * Get circuit breaker for TTS
-   */
-  public getTTSCircuitBreaker(): RateLimitAwareCircuitBreaker<any[], any> {
-    return this.ttsCircuitBreaker;
-  }
-  
-  /**
-   * Get circuit breaker for STT
-   */
-  public getSTTCircuitBreaker(): RateLimitAwareCircuitBreaker<any[], any> {
-    return this.sttCircuitBreaker;
-  }
-  
-  /**
-   * Get circuit breaker for LLM
-   */
-  public getLLMCircuitBreaker(): RateLimitAwareCircuitBreaker<any[], any> {
-    return this.llmCircuitBreaker;
   }
 }
 

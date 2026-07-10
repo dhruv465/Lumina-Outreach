@@ -416,9 +416,6 @@ const AudioPlayer = ({
           pixelRatio: window.devicePixelRatio || 1,
           backend: 'MediaElement', // Use MediaElement backend for better compatibility
           mediaControls: false,
-          interact: true,
-          hideScrollbar: true,
-          autoCenter: true,
           fillParent: true,
         });
 

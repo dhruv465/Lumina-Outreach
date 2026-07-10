@@ -47,12 +47,20 @@ export interface ICampaign extends mongoose.Document {
     clarity?: number;
     style?: number;
   };
+  telephonyProvider: 'livekit';
+  transferPhoneNumber?: string;
   metrics: {
     totalCalls: number;
     connectedCalls: number;
     successfulCalls: number;
     avgCallDuration: number;
     conversionRate: number;
+    totalCost?: number;
+  };
+  budget?: {
+    maxCostPerCall: number;
+    totalBudget: number;
+    isBudgetExceeded: boolean;
   };
   createdBy: mongoose.Schema.Types.ObjectId;
   createdAt: Date;
@@ -223,6 +231,15 @@ const CampaignSchema = new mongoose.Schema(
         max: 1,
       },
     },
+    telephonyProvider: {
+      type: String,
+      enum: ['livekit'],
+      default: 'livekit',
+    },
+    transferPhoneNumber: {
+      type: String,
+      default: '',
+    },
     metrics: {
       totalCalls: {
         type: Number,
@@ -244,6 +261,10 @@ const CampaignSchema = new mongoose.Schema(
         type: Number,
         default: 0,
       },
+      totalCost: {
+        type: Number,
+        default: 0,
+      },
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -253,21 +274,6 @@ const CampaignSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
-// Validate voice configuration before saving
-CampaignSchema.pre('save', async function (next) {
-  try {
-    if (this.isModified('voiceConfiguration.voiceId')) {
-      // Import directly to avoid circular dependencies
-      const { EnhancedVoiceAIService } = await import('../services/enhancedVoiceAIService');
-      // Get valid voice ID (will fallback to default if the voice ID is invalid)
-      this.voiceConfiguration.voiceId = await EnhancedVoiceAIService.getValidVoiceId(this.voiceConfiguration.voiceId);
-    }
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
 
 // Index for faster queries
 CampaignSchema.index({ status: 1 });

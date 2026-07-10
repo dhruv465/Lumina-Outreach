@@ -3,7 +3,6 @@ import fastifyHelmet from "@fastify/helmet";
 import fastifyRateLimit from "@fastify/rate-limit";
 import fastify from "fastify";
 
-import fastifyWebsocket from "@fastify/websocket";
 import dotenv from "dotenv";
 import http from "http";
 import mongoose from "mongoose";
@@ -14,38 +13,26 @@ import { validateStartupConfig } from "./config/database-validation";
 import { connectToDatabase } from "./database/connection";
 import aiOrchestrationRoutes from "./routes/aiOrchestrationRoutes";
 import analyticsRoutes from "./routes/analyticsRoutes";
-import audioStreamingRoutes from "./routes/audioStreamingRoutes";
+import batchCallRoutes from "./routes/batchCallRoutes";
 import callRoutes from "./routes/callRoutes";
+import callFeedbackRoutes from "./routes/callFeedbackRoutes";
 import campaignRoutes from "./routes/campaignRoutes";
 import configurationRoutes from "./routes/configurationRoutes";
-import connectionPreWarmingRoutes from "./routes/connectionPreWarmingRoutes";
 import dashboardRoutes from "./routes/dashboardRoutes";
 import debugRoutes from "./routes/debugRoutes";
-import deepgramTTSRoutes from "./routes/deepgramTTSRoutes";
-import enhancedRealTimeRoutes from "./routes/enhancedRealTimeRoutes";
 import healthRoutes from "./routes/healthRoutes";
 import knowledgeRoutes from "./routes/knowledgeRoutes";
 import leadRoutes from "./routes/leadRoutes";
+import livekitInternalRoutes from "./routes/livekitInternalRoutes";
+import livekitWebhookRoutes from "./routes/livekitWebhookRoutes";
+import { startLiveKitReconciliation } from "./integrations/livekit/reconciliationJob";
 import performanceRoutes from "./routes/performanceRoutes";
 import ragRoutes from "./routes/ragRoutes";
-import rootWebhookRoutes from "./routes/rootWebhookRoutes";
-import streamingTTSRoutes from "./routes/streamingTTSRoutes";
-import streamRoutes from "./routes/streamRoutes";
-import sttRoutes from "./routes/sttRoutes";
-import transcriptionRoutes from "./routes/transcriptionRoutes";
-import ttsProviderRoutes from "./routes/ttsProviderRoutes";
 import userRoutes from "./routes/userRoutes";
-import voiceAIRoutes from "./routes/voiceAIRoutes";
 import { getAIOrchestrationService } from "./services/aiOrchestrationService";
-import { AudioStreamingService } from "./services/audioStreamingService";
-import CampaignService from "./services/campaignService";
-import ConversationEngineService from "./services/conversationEngineService";
-import { EnhancedVoiceAIService } from "./services/enhancedVoiceAIService";
+import { campaignService } from "./services";
 import leadService from "./services/leadService";
-import { LLMService } from "./services/llm/service";
 import { getRAGSystem } from "./services/rag/ragSystem";
-import SpeechAnalysisService from "./services/speechAnalysisService";
-import { TwilioStreamHandler } from "./services/twilioStreamHandler";
 import { initCloudinary } from "./utils/cloudinaryService";
 
 import { authenticate } from "./middleware/auth";
@@ -59,6 +46,25 @@ import { cacheOnSendHook } from "./utils/responseCache";
 
 // Load environment variables
 dotenv.config();
+
+// Initialize Sentry for Performance Monitoring and Error Tracking
+import * as Sentry from '@sentry/node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
+
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    integrations: [
+      nodeProfilingIntegration(),
+    ],
+    // Tracing
+    tracesSampleRate: 1.0, //  Capture 100% of the transactions
+    // Set sampling rate for profiling - this is relative to tracesSampleRate
+    profilesSampleRate: 1.0,
+    environment: process.env.NODE_ENV || 'development',
+  });
+  logger.info('Sentry Initialized');
+}
 
 // Use phase-based logging for bootstrap phase
 const bootstrapLogger = phaseLogger("BOOTSTRAP");
@@ -100,22 +106,6 @@ const io = new SocketIOServer(server, {
   transports: ["websocket", "polling"],
   allowEIO3: true,
   serveClient: false,
-});
-
-// Initialize Audio Streaming Service
-const audioStreamingService = new AudioStreamingService(io);
-
-// Register fastify-websocket plugin
-app.register(fastifyWebsocket);
-
-// Setup WebSocket routes
-app.register(async function (fastify) {
-  // Handle Twilio Media Streams
-  fastify.get('/voice/stream/:callId/:conversationId', { websocket: true }, (connection, req) => {
-    new TwilioStreamHandler(connection, req.raw);
-  });
-
-  // Deepgram WebSocket endpoint removed (deepgramTestRoutes deleted)
 });
 
 // Enhanced middleware setup for production
@@ -209,10 +199,11 @@ const authLimitMax = parseInt(
 
 // Metrics endpoint removed
 
-// Webhooks and WebSocket routes (no rate limiting or heavy middleware)
-// These need to be fast and shouldn't be rate limited
-app.register(rootWebhookRoutes, { prefix: "/" });
-app.register(streamRoutes, { prefix: "/" });
+// LiveKit webhook (signature-authenticated, outside the /api JWT scope)
+app.register(livekitWebhookRoutes, { prefix: "/webhooks" });
+
+// LiveKit reconciliation: finalizes calls whose webhooks were missed
+startLiveKitReconciliation();
 
 // Consolidated API routes with shared rate limiting
 // This groups all API routes together for better routing performance
@@ -238,30 +229,20 @@ app.register(async (apiRouter) => {
   apiRouter.register(leadRoutes, { prefix: "/leads" });
   apiRouter.register(campaignRoutes, { prefix: "/campaigns" });
   apiRouter.register(callRoutes, { prefix: "/calls" });
+  apiRouter.register(batchCallRoutes, { prefix: "/batch-calls" });
+  apiRouter.register(callFeedbackRoutes, { prefix: "/feedback" });
   apiRouter.register(dashboardRoutes, { prefix: "/dashboard" });
   apiRouter.register(configurationRoutes, { prefix: "/configuration" });
   apiRouter.register(analyticsRoutes, { prefix: "/analytics" });
 
-  // AI and voice routes
-  apiRouter.register(voiceAIRoutes, { prefix: "/lumina-outreach" });
+  // AI routes
   apiRouter.register(aiOrchestrationRoutes, { prefix: "/ai-orchestration" });
   apiRouter.register(knowledgeRoutes, { prefix: "/knowledge" });
   apiRouter.register(ragRoutes, { prefix: "/rag" });
 
-  // Telephony and communication routes
-  apiRouter.register(transcriptionRoutes, { prefix: "/transcription" });
-  apiRouter.register(sttRoutes, { prefix: "/stt" });
+  // Internal service-to-service routes (LiveKit agent tools)
+  apiRouter.register(livekitInternalRoutes, { prefix: "/internal/livekit" });
 
-  // TTS and audio routes
-  // deepgramTestRoutes removed (file deleted)
-  apiRouter.register(deepgramTTSRoutes, { prefix: "/deepgram-tts" });
-  apiRouter.register(streamingTTSRoutes, { prefix: "/streaming-tts" });
-  apiRouter.register(ttsProviderRoutes, { prefix: "/tts-provider" });
-  apiRouter.register(connectionPreWarmingRoutes, { prefix: "/connection-pre-warming" });
-
-  // Real-time and streaming routes
-  apiRouter.register(enhancedRealTimeRoutes, { prefix: "/realtime" });
-  apiRouter.register(audioStreamingRoutes, { prefix: '/audio-streaming', audioStreamingService });
 
   // Health and monitoring routes
   apiRouter.register(healthRoutes, { prefix: "/" });
@@ -269,10 +250,6 @@ app.register(async (apiRouter) => {
   // Performance monitoring routes
   apiRouter.register(performanceRoutes, { prefix: "/performance" });
 
-  // Temporarily disabled metrics endpoint
-  apiRouter.get("/deepgram-metrics", (req, res) => {
-    res.status(503).send({ error: "Deepgram metrics service temporarily unavailable" });
-  });
 
   // Debug routes only in development
   if (process.env.NODE_ENV !== "production") {
@@ -284,6 +261,10 @@ app.register(async (apiRouter) => {
 
 // Enhanced global error handler
 app.setErrorHandler((error, request, reply) => {
+  if (process.env.SENTRY_DSN) {
+    Sentry.captureException(error);
+  }
+
   const errorId = Math.random().toString(36).substring(7);
 
   logger.error("Unhandled error:", {
@@ -362,435 +343,12 @@ io.on("connection", (socket) => {
 
 // Initialize services with configuration from database
 const initializeServices = async () => {
-  try {
-    // Get configuration from database
-    const Configuration = require("./models/Configuration").default;
-    const config = await Configuration.findOne();
+  global.campaignService = campaignService;
+  logger.info("Legacy voice pipeline services removed; initializing LiveKit-era services only");
 
-    let elevenLabsApiKey = "";
-    let openAIApiKey = "";
-    let anthropicApiKey = "";
-    let googleSpeechApiKey = "";
-    let deepgramApiKey = "";
-
-    // If configuration exists, use it; otherwise use empty keys (no environment fallback)
-    if (config) {
-      logger.info("Using API configuration from database");
-
-      // ElevenLabs
-      elevenLabsApiKey = config.elevenLabsConfig?.apiKey || "";
-
-      // LLM providers
-      const openAIProvider = config.llmConfig?.providers?.find(
-        (p: any) => p.name === "openai"
-      );
-      openAIApiKey = openAIProvider?.apiKey || "";
-
-      const anthropicProvider = config.llmConfig?.providers?.find(
-        (p: any) => p.name === "anthropic"
-      );
-      anthropicApiKey = anthropicProvider?.apiKey || "";
-
-      // Google (if configured)
-      const googleProvider = config.llmConfig?.providers?.find(
-        (p: any) => p.name === "google"
-      );
-      googleSpeechApiKey = googleProvider?.apiKey || "";
-
-      // Deepgram for STT (Nova-2) - now purely database-driven
-      deepgramApiKey = config.deepgramConfig?.apiKey || "";
-      logger.info(
-        "Deepgram API key " +
-        (deepgramApiKey ? "found" : "not found") +
-        " in database configuration"
-      );
-
-      // Initialize and validate Deepgram auto-configuration with graceful startup
-      if (deepgramApiKey) {
-        try {
-          logger.info("Initializing Deepgram auto-configuration service...");
-          const { getDeepgramAutoConfigService } = await import(
-            "./services/deepgramAutoConfigService"
-          );
-          const autoConfigService = getDeepgramAutoConfigService();
-          await autoConfigService.initialize(deepgramApiKey);
-
-          // Perform graceful startup validation that won't fail the server
-          logger.info("Performing graceful Deepgram startup validation...");
-          const gracefulResult =
-            await autoConfigService.performGracefulStartupValidation();
-
-          if (gracefulResult.success) {
-            logger.info(
-              `Deepgram startup validation successful: ${gracefulResult.message}`
-            );
-
-            // Log details about the configuration
-            if (gracefulResult.autoConfigResult) {
-              logger.info("Auto-configuration details:", {
-                model: gracefulResult.autoConfigResult.model,
-                accountTier: gracefulResult.autoConfigResult.accountTier,
-                availableModels:
-                  gracefulResult.autoConfigResult.availableModels.length,
-                warnings: gracefulResult.autoConfigResult.warnings,
-              });
-
-              // Update deepgramApiKey reference for service initialization
-              const updatedConfig = await Configuration.findOne();
-              if (updatedConfig?.deepgramConfig?.apiKey) {
-                deepgramApiKey = updatedConfig.deepgramConfig.apiKey;
-              }
-            }
-          } else {
-            logger.warn(
-              `Deepgram startup validation issues: ${gracefulResult.message}`
-            );
-
-            // Log validation details for troubleshooting
-            if (gracefulResult.validationResult) {
-              logger.warn("Validation details:", {
-                model: gracefulResult.validationResult.model,
-                error: gracefulResult.validationResult.error,
-                suggestedAction:
-                  gracefulResult.validationResult.suggestedAction,
-              });
-            }
-
-            if (
-              gracefulResult.autoConfigResult &&
-              !gracefulResult.autoConfigResult.success
-            ) {
-              logger.warn("Auto-configuration failed:", {
-                error: gracefulResult.autoConfigResult.error,
-                warnings: gracefulResult.autoConfigResult.warnings,
-              });
-            }
-
-            // Server continues regardless - graceful degradation
-            logger.info("Server will continue with Deepgram in degraded mode");
-          }
-
-          // Always start background validation if possible
-          try {
-            autoConfigService.startBackgroundValidation();
-            logger.info("Deepgram background validation started");
-          } catch (bgError) {
-            logger.warn(
-              `Failed to start background validation: ${getErrorMessage(
-                bgError
-              )}`
-            );
-          }
-        } catch (error) {
-          logger.error(
-            `Deepgram auto-configuration initialization failed: ${getErrorMessage(
-              error
-            )}`
-          );
-          logger.warn(
-            "Deepgram services will start without auto-configuration"
-          );
-          logger.info(
-            "Manual configuration may be required via the Configuration page"
-          );
-
-          // Server continues even if initialization completely fails
-          logger.info(
-            "Server startup continuing without Deepgram auto-configuration"
-          );
-        }
-      } else {
-        logger.info(
-          "No Deepgram API key found - Deepgram services will be disabled"
-        );
-        logger.info("To enable speech-to-text functionality:");
-        logger.info("1. Configure Deepgram API key in the Configuration page");
-        logger.info(
-          "2. The system will automatically detect optimal model settings"
-        );
-        logger.info(
-          "3. Background validation will ensure continued compatibility"
-        );
-      }
-    } else {
-      logger.info(
-        "No configuration found in database, all services will start with empty configuration"
-      );
-      logger.info(
-        "API keys can be configured dynamically through the web interface"
-      );
-      // No environment variable fallbacks - system is now fully dynamic
-      elevenLabsApiKey = "";
-      openAIApiKey = "";
-      anthropicApiKey = "";
-      googleSpeechApiKey = "";
-      deepgramApiKey = "";
-    }
-
-    // Speech synthesis service
-    // const speechService = initializeSpeechService(
-    //   elevenLabsApiKey,
-    //   path.join(__dirname, "../uploads/audio")
-    // );
-
-    // Get the selected TTS provider from configuration
-    const selectedTTSProvider = config?.ttsConfig?.provider || "elevenlabs";
-    logger.info(
-      `Initializing services for selected TTS provider: ${selectedTTSProvider}`
-    );
-
-    // Import TTS configuration helper
-    const { isTTSProviderConfigured } = await import(
-      "./utils/ttsServiceFactory"
-    );
-    const isSelectedTTSConfigured = isTTSProviderConfigured(config);
-
-    // Initialize Enhanced Voice AI Service only if ElevenLabs is the selected TTS provider AND properly configured
-    let enhancedVoiceAI;
-    if (
-      selectedTTSProvider === "elevenlabs" &&
-      isSelectedTTSConfigured &&
-      elevenLabsApiKey
-    ) {
-      enhancedVoiceAI = new EnhancedVoiceAIService(elevenLabsApiKey);
-      logger.info("ElevenLabs Enhanced Voice AI Service initialized");
-    } else {
-      // Create a minimal service instance for compatibility
-      enhancedVoiceAI = new EnhancedVoiceAIService("");
-      if (selectedTTSProvider !== "elevenlabs") {
-        logger.info(
-          `Skipping ElevenLabs service initialization - selected TTS provider is ${selectedTTSProvider}`
-        );
-      } else if (!isSelectedTTSConfigured) {
-        logger.warn(
-          "ElevenLabs selected as TTS provider but not properly configured"
-        );
-      } else {
-        logger.warn(
-          "ElevenLabs selected as TTS provider but no API key available"
-        );
-      }
-    }
-
-    // Initialize Deepgram TTS service if it's the selected provider or as fallback
-    const shouldInitializeDeepgramAsSelected =
-      selectedTTSProvider === "deepgram" &&
-      isSelectedTTSConfigured &&
-      deepgramApiKey;
-    const shouldInitializeDeepgramAsFallback =
-      selectedTTSProvider !== "deepgram" && deepgramApiKey;
-
-    if (shouldInitializeDeepgramAsSelected) {
-      try {
-        const { initializeDeepgramTTS } = await import(
-          "./services/deepgramTTSService"
-        );
-        initializeDeepgramTTS(deepgramApiKey);
-        logger.info("Deepgram TTS service initialized as primary TTS provider");
-
-        // Initialize streaming TTS service
-        const { initializeStreamingTTS } = await import(
-          "./services/streamingTTSService"
-        );
-        initializeStreamingTTS(deepgramApiKey);
-        logger.info("Streaming TTS service initialized successfully");
-
-        // Initialize connection pre-warming service
-        const { initializeConnectionPreWarming } = await import(
-          "./services/connectionPreWarmingService"
-        );
-        const preWarmingService = initializeConnectionPreWarming();
-
-        // Initialize WebSocket connection pool
-        const { initializeWebSocketConnectionPool } = await import(
-          "./services/websocketConnectionPool"
-        );
-        initializeWebSocketConnectionPool();
-
-        // Start pre-warming connections in the background
-        preWarmingService.preWarmConnections().catch(error => {
-          logger.warn(`Connection pre-warming failed: ${getErrorMessage(error)}`);
-        });
-      } catch (error) {
-        logger.warn(
-          `Failed to initialize Deepgram TTS service: ${getErrorMessage(error)}`
-        );
-      }
-    } else if (shouldInitializeDeepgramAsFallback) {
-      try {
-        const { initializeDeepgramTTS } = await import(
-          "./services/deepgramTTSService"
-        );
-        initializeDeepgramTTS(deepgramApiKey);
-        logger.info(
-          "Deepgram TTS service initialized as fallback for voice synthesis"
-        );
-
-        // Initialize streaming TTS service
-        const { initializeStreamingTTS } = await import(
-          "./services/streamingTTSService"
-        );
-        initializeStreamingTTS(deepgramApiKey);
-        logger.info("Streaming TTS service initialized as fallback");
-
-        // Initialize connection pre-warming service
-        const { initializeConnectionPreWarming } = await import(
-          "./services/connectionPreWarmingService"
-        );
-        const preWarmingService = initializeConnectionPreWarming();
-
-        // Initialize WebSocket connection pool
-        const { initializeWebSocketConnectionPool } = await import(
-          "./services/websocketConnectionPool"
-        );
-        initializeWebSocketConnectionPool();
-
-        // Start pre-warming connections in the background
-        preWarmingService.preWarmConnections().catch(error => {
-          logger.warn(`Connection pre-warming failed: ${getErrorMessage(error)}`);
-        });
-      } catch (error) {
-        logger.warn(
-          `Failed to initialize Deepgram TTS service: ${getErrorMessage(error)}`
-        );
-      }
-    } else {
-      if (selectedTTSProvider === "deepgram" && !isSelectedTTSConfigured) {
-        logger.warn(
-          "Deepgram selected as TTS provider but not properly configured"
-        );
-      } else if (selectedTTSProvider === "deepgram" && !deepgramApiKey) {
-        logger.warn(
-          "Deepgram selected as TTS provider but no API key available"
-        );
-      } else {
-        logger.info(
-          "Deepgram TTS service not initialized - not selected and no API key for fallback"
-        );
-      }
-    }
-
-    // Initialize Deepgram STT service if API key is available
-    if (deepgramApiKey) {
-      try {
-        const { initializeDeepgramService } = await import(
-          "./services/deepgramService"
-        );
-        initializeDeepgramService(deepgramApiKey);
-        logger.info("Deepgram STT service initialized successfully");
-      } catch (error) {
-        logger.warn(
-          `Failed to initialize Deepgram STT service: ${getErrorMessage(error)}`
-        );
-      }
-    } else {
-      logger.warn(
-        "Deepgram STT service not initialized - no API key available"
-      );
-    }
-
-    // Initialize TTS Provider Service
-    try {
-      const { initializeTTSProviderService } = await import(
-        "./services/ttsProviderService"
-      );
-      initializeTTSProviderService();
-      logger.info("TTS Provider Service initialized");
-    } catch (error) {
-      logger.warn(
-        `Failed to initialize TTS Provider Service: ${getErrorMessage(error)}`
-      );
-    }
-
-    // Conversation engine
-    const conversationEngine = new ConversationEngineService(
-      enhancedVoiceAI,
-      new SpeechAnalysisService(
-        openAIApiKey,
-        googleSpeechApiKey,
-        deepgramApiKey
-      ),
-      new LLMService({
-        providers: [
-          {
-            name: "openai",
-            apiKey: openAIApiKey,
-            isEnabled: true,
-          },
-          {
-            name: "google",
-            apiKey: googleSpeechApiKey,
-            isEnabled: true,
-          },
-          {
-            name: "anthropic",
-            apiKey: anthropicApiKey,
-            isEnabled: true,
-          },
-        ],
-        defaultProvider: "openai",
-      })
-    );
-
-    // Campaign service
-    const campaignService = new CampaignService(
-      openAIApiKey,
-      anthropicApiKey,
-      googleSpeechApiKey,
-      deepgramApiKey
-    );
-
-    // Initialize RealTelephonyService with configuration
-    try {
-      const {
-        initializeTelephonyService,
-      } = require("./services/realTelephonyService");
-
-      // Get Twilio configuration from database or environment
-      const twilioAccountSid =
-        config?.twilioConfig?.accountSid ||
-        process.env.TWILIO_ACCOUNT_SID ||
-        "";
-      const twilioAuthToken =
-        config?.twilioConfig?.authToken || process.env.TWILIO_AUTH_TOKEN || "";
-      const webhookBaseUrl =
-        process.env.WEBHOOK_BASE_URL ||
-        process.env.API_BASE_URL ||
-        "http://localhost:8000";
-
-      if (twilioAccountSid && twilioAuthToken) {
-        initializeTelephonyService({
-          accountSid: twilioAccountSid,
-          authToken: twilioAuthToken,
-          webhookBaseUrl: webhookBaseUrl,
-        });
-        logger.info("Real telephony service initialized successfully");
-      } else {
-        logger.warn(
-          "Twilio credentials not found - telephony service will be unavailable"
-        );
-        logger.info(
-          "To enable telephony features, configure Twilio credentials in the Configuration page"
-        );
-      }
-    } catch (error) {
-      logger.error("Failed to initialize telephony service:", error);
-      logger.warn("Telephony features will be unavailable");
-    }
-
-    // Export services
-    // global.speechService = speechService;
-    global.conversationEngine = conversationEngine;
-    global.campaignService = campaignService;
-
-    return {
-      conversationEngine,
-      campaignService,
-    };
-  } catch (error) {
-    logger.error("Error initializing services:", error);
-    throw error;
-  }
+  return {
+    campaignService,
+  };
 };
 
 // Enhanced server startup with production optimizations
@@ -830,14 +388,15 @@ const startServer = async () => {
 
     // Step 2.5: Validate database-loaded configuration (optional)
     bootstrapLogger.info("Validating database configuration...");
-    let config = null;
-    let activeProviders = { tts: "unknown", llm: [], optionalMissing: [] };
+    let activeProviders: { llm: string[]; optionalMissing: string[] } = {
+      llm: [],
+      optionalMissing: [],
+    };
 
     try {
-      const { validateDatabaseLoadedConfig, validateDeepgramStartupConfig } =
-        await import("./config/database-validation");
+      const { validateDatabaseLoadedConfig } = await import("./config/database-validation");
       const Configuration = require("./models/Configuration").default;
-      config = await Configuration.findOne();
+      const config = await Configuration.findOne();
 
       const dbConfigValidation = validateDatabaseLoadedConfig(config);
       if (!dbConfigValidation.isValid) {
@@ -848,76 +407,24 @@ const startServer = async () => {
         bootstrapLogger.warn(
           "Services will start with limited functionality. Configure API keys in the Configuration page."
         );
-
-        // Log warnings if they exist
-        if (dbConfigValidation.details?.warnings) {
-          dbConfigValidation.details.warnings.forEach((warning: string) => {
-            bootstrapLogger.warn(`Configuration warning: ${warning}`);
-          });
-        }
       } else {
         bootstrapLogger.info("Database configuration is valid");
-
-        // Log warnings even for valid configurations
-        if (dbConfigValidation.details?.warnings) {
-          dbConfigValidation.details.warnings.forEach((warning: string) => {
-            bootstrapLogger.warn(`Configuration warning: ${warning}`);
-          });
-        }
       }
 
-      // Perform specific Deepgram startup validation
-      if (config?.deepgramConfig) {
-        bootstrapLogger.info(
-          "Performing Deepgram-specific startup validation..."
-        );
-        const deepgramValidation = validateDeepgramStartupConfig(
-          config.deepgramConfig
-        );
-
-        if (!deepgramValidation.isValid) {
-          bootstrapLogger.warn(
-            `Deepgram startup validation failed: ${deepgramValidation.error}`
-          );
-          bootstrapLogger.info(
-            "Auto-configuration will attempt to resolve these issues during service initialization"
-          );
-        } else {
-          bootstrapLogger.info("Deepgram startup validation passed");
-          if (deepgramValidation.details) {
-            bootstrapLogger.info(
-              "Deepgram validation details:",
-              deepgramValidation.details
-            );
-          }
-        }
+      if (dbConfigValidation.details?.warnings) {
+        dbConfigValidation.details.warnings.forEach((warning: string) => {
+          bootstrapLogger.warn(`Configuration warning: ${warning}`);
+        });
       }
 
-      // Determine active providers for summary
       if (config) {
-        // Determine TTS provider
-        if (config.deepgramConfig?.ttsApiKey) {
-          activeProviders.tts = "deepgram";
-        } else if (config.elevenLabsApiKey) {
-          activeProviders.tts = "elevenlabs";
-        } else {
-          activeProviders.tts = "fallback";
-        }
-
-        // Determine LLM providers
         if (config.openaiApiKey) activeProviders.llm.push("openai");
         if (config.anthropicApiKey) activeProviders.llm.push("anthropic");
         if (config.googleApiKey) activeProviders.llm.push("google");
 
-        // Determine missing optional providers
-        if (!config.elevenLabsApiKey)
-          activeProviders.optionalMissing.push("elevenlabs");
-        if (!config.openaiApiKey)
-          activeProviders.optionalMissing.push("openai");
-        if (!config.anthropicApiKey)
-          activeProviders.optionalMissing.push("anthropic");
-        if (!config.googleApiKey)
-          activeProviders.optionalMissing.push("google");
+        if (!config.openaiApiKey) activeProviders.optionalMissing.push("openai");
+        if (!config.anthropicApiKey) activeProviders.optionalMissing.push("anthropic");
+        if (!config.googleApiKey) activeProviders.optionalMissing.push("google");
       }
     } catch (error) {
       bootstrapLogger.warn("Could not validate database configuration:", error);
@@ -932,7 +439,6 @@ const startServer = async () => {
     // Emit provider summary
     runtimeLogger.info("Provider configuration summary", {
       event: "providers.summary",
-      tts: activeProviders.tts,
       llm: activeProviders.llm,
       optionalMissing: activeProviders.optionalMissing,
     });
@@ -973,9 +479,6 @@ const startServer = async () => {
 
       // OpenAI - 60 requests per minute (default tier)
       getRateLimiter("openai", { requestsPerMinute: 60, queueSize: 30 });
-
-      // ElevenLabs - 30 requests per minute (default tier)
-      getRateLimiter("elevenlabs", { requestsPerMinute: 30, queueSize: 20 });
 
       logger.info("Rate limiters initialized for API providers");
     } catch (error) {
@@ -1107,22 +610,6 @@ const gracefulShutdown = (signal: string) => {
       // Perform final cleanup of temp files
       TempFileCleanup.emergencyCleanup();
 
-      // Stop Deepgram auto-configuration background validation
-      try {
-        const {
-          getDeepgramAutoConfigService,
-        } = require("./services/deepgramAutoConfigService");
-        const autoConfigService = getDeepgramAutoConfigService();
-        autoConfigService.cleanup();
-        logger.info("Deepgram auto-configuration service cleaned up");
-      } catch (error) {
-        logger.warn(
-          `Error cleaning up Deepgram auto-config service: ${getErrorMessage(
-            error
-          )}`
-        );
-      }
-
       // Clean up enhanced WebSocket connections
 
       // Close database connections
@@ -1184,7 +671,6 @@ function getErrorMessage(error: unknown): string {
 // Define global namespace for TypeScript
 declare global {
   var modelRegistry: any;
-  var conversationEngine: any;
   var campaignService: any;
 }
 

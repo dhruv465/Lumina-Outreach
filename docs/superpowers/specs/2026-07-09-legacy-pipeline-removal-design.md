@@ -54,6 +54,42 @@ Each stage is its own commit with only that stage's paths (repo has ~90 uncommit
 
 Pass the **Task 14 lifecycle gate** (5 app-path LiveKit calls with the webhook configured) first, so the LiveKit replacement is verified before the Twilio fallback is deleted. Deleting the fallback while the replacement is unverified is the main risk.
 
+## Concrete execution map (classified 2026-07-10)
+
+Topology: the legacy files form a self-contained subgraph reachable only via
+`index.ts` registrations, the `services/index.ts` barrel, and ~16 survivor
+files. **Order: refactor survivors → remove registrations → delete the subgraph
+as one batch → prune deps.** (Deleting piecemeal fails because each leaf is
+imported by another still-present delete-target.)
+
+**SAFE-LEAF (no survivor consumers; only referenced by other delete-targets):**
+audioStreamManager, deepgramErrorHandler, streamingAudioPipeline,
+streamingVoiceSynthesis, streamingWebhookHandlers, sttTestController, textToSpeechService.
+
+**INDEX-ONLY (only `index.ts` registers them):** audioStreamingRoutes,
+audioStreamingService, connectionPreWarmingRoutes, connectionPreWarmingService,
+deepgramService, deepgramTTSRoutes, streamingTTSRoutes, streamingTTSService,
+sttRoutes, transcriptionRoutes, ttsProviderRoutes, twilioStreamHandler,
+websocketConnectionPool. (`index.ts` legacy lines: imports 17,23,26,27,37,38,39,40,44,52,54;
+instantiation 131; route registers 287,288,292,293,294,295,298,299;
+lazy imports 632,639,645,670,677,683,716; retraining cron 825.)
+
+**SURVIVORS TO REFACTOR (remove legacy usage before deletion):**
+1. `models/Campaign.ts:283` — dynamic `import EnhancedVoiceAIService` in a method.
+2. `controllers/configurationController.ts` — deepgramAutoConfigService, realSpeechService, ttsProviderService, deepgramConfigValidator, deepgramTTSService, enhancedVoiceAIService.
+3. `services/webhookHandlers.ts` — realTelephonyService, ttsChainHandler, voiceSynthesis, ttsServiceFactory, enhancedVoiceAIService (largely Twilio-voice; likely mostly deletable).
+4. `services/aiOrchestrationService.ts` + `aiOrchestration/orchestrationLayer.ts` — conversationEngineService, speechAnalysisService, enhancedVoiceAIService, elevenlabsSDKService. (Wired to `aiService.ts` + `aiOrchestrationAdapter.ts`; decide keep-and-strip-voice vs delete-the-chain.)
+5. `services/parallelProcessingService.ts` — conversationEngineService, elevenlabsSDKService.
+6. `routes/enhancedRealTimeRoutes.ts` + `controllers/enhancedRealTimeController.ts` — enhancedBargeInDetectionService, optimizedRealTimeAudioPipeline (+ services barrel + ttsServiceFactory).
+7. `routes/healthRoutes.ts` — fallbackTTSService.
+8. `controllers/callFeedbackController.ts` — retrainingService.
+9. `services/modelCompatibilityService.ts` — deepgramUtils; `controllers/modelManagementController.ts` — deepgramConfigValidator.
+10. `routes/configurationRoutes.ts` — testDeepgramASRConnection.
+11. `services/callService.ts` + `controllers/callController.ts` + `routes/callRoutes.ts` — twilioRecordingsService / syncTwilioRecordings / recording-webhook (Twilio purge).
+12. `services/index.ts` barrel — remove legacy re-exports (also imported by `campaignController`, `voiceAIController`, `ragRoutes`, `ttsServiceFactory` — verify those don't use the removed exports).
+
+**Dialogflow:** `retrainingService` (+ any CX services) + the 2 AM cron at `index.ts:825`.
+
 ## Risks
 
 - **No fallback after deletion:** once legacy is gone, LiveKit is the only pipeline — verify it first.

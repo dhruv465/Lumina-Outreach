@@ -15,6 +15,9 @@ import {
   Settings,
   ChevronRight,
   Bell,
+  UserPlus,
+  CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,7 +26,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
-  DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import {
   Sheet,
@@ -46,6 +48,7 @@ const Header = ({ toggleSidebar, sidebarCollapsed }: HeaderProps) => {
   const { user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const location = useLocation();
 
   const getThemeIcon = () => {
@@ -153,9 +156,113 @@ const Header = ({ toggleSidebar, sidebarCollapsed }: HeaderProps) => {
 
         {/* Right side actions */}
         <div className="flex items-center gap-1 shrink-0 ml-auto">
-          {/* Notifications */}
+          {/* Notifications - Mobile Sheet */}
+          <Sheet open={notificationsOpen} onOpenChange={setNotificationsOpen}>
+            <SheetTrigger asChild className="sm:hidden">
+              <Button variant="ghost" size="icon" className="relative h-9 w-9">
+                <Bell size={18} />
+                <Badge
+                  variant="destructive"
+                  className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-[10px]"
+                >
+                  3
+                </Badge>
+                <span className="sr-only">Notifications</span>
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-full sm:max-w-md p-0">
+              <SheetTitle className="sr-only">Notifications</SheetTitle>
+              <SheetDescription className="sr-only">
+                View your recent notifications
+              </SheetDescription>
+              
+              <div className="flex flex-col h-full">
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-4 border-b">
+                  <h3 className="text-lg font-medium">Notifications</h3>
+                  <Badge variant="secondary" className="text-xs">3 new</Badge>
+                </div>
+
+                {/* Notifications List */}
+                <div className="flex-1 overflow-y-auto">
+                  {/* Notification 1 */}
+                  <div className="px-4 py-4 border-b hover:bg-accent/50 cursor-pointer transition-colors">
+                    <div className="flex gap-3">
+                      <div className="shrink-0">
+                        <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                          <UserPlus size={18} className="text-blue-600 dark:text-blue-400" />
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-medium text-sm">New lead assigned</p>
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">2m</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          John Doe has been assigned to your campaign
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notification 2 */}
+                  <div className="px-4 py-4 border-b hover:bg-accent/50 cursor-pointer transition-colors">
+                    <div className="flex gap-3">
+                      <div className="shrink-0">
+                        <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                          <CheckCircle2 size={18} className="text-green-600 dark:text-green-400" />
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-medium text-sm">Campaign completed</p>
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">1h</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Summer Sale campaign has finished successfully
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notification 3 */}
+                  <div className="px-4 py-4 border-b hover:bg-accent/50 cursor-pointer transition-colors">
+                    <div className="flex gap-3">
+                      <div className="shrink-0">
+                        <div className="h-10 w-10 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                          <Sparkles size={18} className="text-purple-600 dark:text-purple-400" />
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-medium text-sm">System update</p>
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">3h</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          New features are now available in your dashboard
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="p-4 border-t">
+                  <Button 
+                    variant="outline" 
+                    className="w-full"
+                    onClick={() => setNotificationsOpen(false)}
+                  >
+                    View All
+                  </Button>
+                </div>
+              </div>
+            </SheetContent>
+          </Sheet>
+
+          {/* Notifications - Desktop Dropdown */}
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+            <DropdownMenuTrigger asChild className="hidden sm:flex">
               <Button variant="ghost" size="icon" className="relative h-9 w-9">
                 <Bell size={18} />
                 <Badge
@@ -167,39 +274,92 @@ const Header = ({ toggleSidebar, sidebarCollapsed }: HeaderProps) => {
                 <span className="sr-only">Notifications</span>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
-              <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+            <DropdownMenuContent 
+              align="end" 
+              className="w-96"
+              sideOffset={8}
+            >
+              <div className="flex items-center justify-between px-4 py-3">
+                <h3 className="text-lg font-medium">Notifications</h3>
+                <Badge variant="secondary" className="text-xs">3 new</Badge>
+              </div>
               <DropdownMenuSeparator />
-              <div className="max-h-[300px] overflow-y-auto">
-                <DropdownMenuItem className="cursor-pointer flex-col items-start py-3">
-                  <div className="font-medium text-sm">New lead assigned</div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    John Doe has been assigned to your campaign
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    2 minutes ago
+              
+              <div className="max-h-[400px] overflow-y-auto">
+                {/* Notification 1 */}
+                <DropdownMenuItem className="cursor-pointer px-4 py-3 focus:bg-accent/50">
+                  <div className="flex gap-3 w-full">
+                    <div className="shrink-0">
+                      <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                        <UserPlus size={16} className="text-blue-600 dark:text-blue-400" />
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-medium text-sm">New lead assigned</p>
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">2m</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-2">
+                        John Doe has been assigned to your campaign
+                      </p>
+                    </div>
                   </div>
                 </DropdownMenuItem>
+
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="cursor-pointer flex-col items-start py-3">
-                  <div className="font-medium text-sm">Campaign completed</div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    Summer Sale campaign has finished
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    1 hour ago
+
+                {/* Notification 2 */}
+                <DropdownMenuItem className="cursor-pointer px-4 py-3 focus:bg-accent/50">
+                  <div className="flex gap-3 w-full">
+                    <div className="shrink-0">
+                      <div className="h-8 w-8 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                        <CheckCircle2 size={16} className="text-green-600 dark:text-green-400" />
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-medium text-sm">Campaign completed</p>
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">1h</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-2">
+                        Summer Sale campaign has finished successfully
+                      </p>
+                    </div>
                   </div>
                 </DropdownMenuItem>
+
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="cursor-pointer flex-col items-start py-3">
-                  <div className="font-medium text-sm">System update</div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    New features are now available
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    3 hours ago
+
+                {/* Notification 3 */}
+                <DropdownMenuItem className="cursor-pointer px-4 py-3 focus:bg-accent/50">
+                  <div className="flex gap-3 w-full">
+                    <div className="shrink-0">
+                      <div className="h-8 w-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                        <Sparkles size={16} className="text-purple-600 dark:text-purple-400" />
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-medium text-sm">System update</p>
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">3h</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-2">
+                        New features are now available in your dashboard
+                      </p>
+                    </div>
                   </div>
                 </DropdownMenuItem>
+              </div>
+
+              <DropdownMenuSeparator />
+              <div className="p-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className="w-full"
+                >
+                  View All
+                </Button>
               </div>
             </DropdownMenuContent>
           </DropdownMenu>

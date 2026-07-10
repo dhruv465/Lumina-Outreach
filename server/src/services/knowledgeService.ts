@@ -8,7 +8,7 @@ import { Tag } from '../models/Tag';
 import { UsageMetric } from '../models/UsageMetric';
 import { logger } from '../index';
 import { DocumentProcessor } from '../utils/documentProcessor';
-import { VectorStore } from '../utils/vectorStore';
+import { getRAGSystem } from './rag/ragSystem';
 
 // Service singleton instance
 let instance: KnowledgeService | null = null;
@@ -45,12 +45,12 @@ export interface ChunkUpdateData {
 
 export class KnowledgeService {
   private documentProcessor: DocumentProcessor;
-  private vectorStore: VectorStore;
+  private vectorStore: any;
   private uploadPath: string;
 
   constructor() {
     this.documentProcessor = new DocumentProcessor();
-    this.vectorStore = new VectorStore();
+    this.vectorStore = getRAGSystem();
     this.uploadPath = path.join(process.cwd(), 'uploads', 'documents');
 
     // Upload directory will be created lazily when first document is uploaded

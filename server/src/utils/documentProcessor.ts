@@ -9,17 +9,10 @@ import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
 import { logger } from '../index';
+import mammoth from 'mammoth';
+import { parse } from 'csv-parse/sync';
 
-// For production, you'd use libraries like:
-// - pdf-parse for PDF files
-// - mammoth for DOCX files 
-// - xlsx for Excel files
-// - etc.
-
-// Mock imports for demonstration
-// import * as pdfParse from 'pdf-parse';
-// import * as mammoth from 'mammoth';
-
+const pdfParse = require('pdf-parse');
 const readFileAsync = promisify(fs.readFile);
 
 export class DocumentProcessor {
@@ -47,7 +40,7 @@ export class DocumentProcessor {
           throw new Error(`Unsupported file type: ${fileExtension}`);
       }
     } catch (error) {
-      logger.error(`Error extracting text: ${error instanceof Error ? error.message : String(error)}`);
+      logger.error(`Error extracting text from ${path.basename(filePath)}: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
   }
@@ -56,85 +49,53 @@ export class DocumentProcessor {
    * Extract text from plain text file
    */
   private async extractFromTextFile(filePath: string): Promise<string> {
-    try {
-      const buffer = await readFileAsync(filePath);
-      return buffer.toString('utf-8');
-    } catch (error) {
-      logger.error(`Error extracting text from text file: ${error instanceof Error ? error.message : String(error)}`);
-      throw error;
-    }
+    const buffer = await readFileAsync(filePath);
+    return buffer.toString('utf-8');
   }
   
   /**
    * Extract text from PDF file
    */
   private async extractFromPdfFile(filePath: string): Promise<string> {
-    try {
-      // In a real implementation, use a PDF parsing library
-      // For now, we'll simulate with a placeholder
-      
-      // Example using pdf-parse:
-      // const buffer = await readFileAsync(filePath);
-      // const data = await pdfParse(buffer);
-      // return data.text;
-      
-      logger.info(`Extracting text from PDF: ${filePath}`);
-      return `This is simulated PDF content from ${path.basename(filePath)}. In a real implementation, use a PDF parsing library.`;
-    } catch (error) {
-      logger.error(`Error extracting text from PDF: ${error instanceof Error ? error.message : String(error)}`);
-      throw error;
-    }
+    const buffer = await readFileAsync(filePath);
+    const data = await pdfParse(buffer);
+    return data.text;
   }
   
   /**
    * Extract text from DOCX file
    */
   private async extractFromDocxFile(filePath: string): Promise<string> {
-    try {
-      // In a real implementation, use a DOCX parsing library
-      // For now, we'll simulate with a placeholder
-      
-      // Example using mammoth:
-      // const buffer = await readFileAsync(filePath);
-      // const result = await mammoth.extractRawText({ buffer });
-      // return result.value;
-      
-      logger.info(`Extracting text from DOCX: ${filePath}`);
-      return `This is simulated DOCX content from ${path.basename(filePath)}. In a real implementation, use a DOCX parsing library.`;
-    } catch (error) {
-      logger.error(`Error extracting text from DOCX: ${error instanceof Error ? error.message : String(error)}`);
-      throw error;
-    }
+    const buffer = await readFileAsync(filePath);
+    const result = await mammoth.extractRawText({ buffer });
+    return result.value;
   }
   
   /**
    * Extract text from JSON file
    */
   private async extractFromJsonFile(filePath: string): Promise<string> {
-    try {
-      const buffer = await readFileAsync(filePath);
-      const jsonData = JSON.parse(buffer.toString('utf-8'));
-      
-      // Convert JSON to string representation
-      return JSON.stringify(jsonData, null, 2);
-    } catch (error) {
-      logger.error(`Error extracting text from JSON: ${error instanceof Error ? error.message : String(error)}`);
-      throw error;
-    }
+    const buffer = await readFileAsync(filePath);
+    const jsonData = JSON.parse(buffer.toString('utf-8'));
+    return JSON.stringify(jsonData, null, 2);
   }
   
   /**
    * Extract text from CSV file
    */
   private async extractFromCsvFile(filePath: string): Promise<string> {
-    try {
-      // In a real implementation, use a CSV parsing library
-      const buffer = await readFileAsync(filePath);
-      return buffer.toString('utf-8');
-    } catch (error) {
-      logger.error(`Error extracting text from CSV: ${error instanceof Error ? error.message : String(error)}`);
-      throw error;
-    }
+    const buffer = await readFileAsync(filePath);
+    const records = parse(buffer, {
+      columns: true,
+      skip_empty_lines: true
+    });
+    
+    // Convert CSV rows to a readable string format for embedding
+    return records.map((row: any) => 
+      Object.entries(row)
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(', ')
+    ).join('\n');
   }
   
   /**
@@ -142,9 +103,12 @@ export class DocumentProcessor {
    */
   splitTextIntoChunks(text: string, chunkSize: number = 1000, overlap: number = 200): string[] {
     try {
-      // Simple chunking by character count with overlap
       const chunks: string[] = [];
       
+      if (!text || text.trim() === '') {
+        return [];
+      }
+
       if (text.length <= chunkSize) {
         chunks.push(text);
         return chunks;
@@ -155,9 +119,7 @@ export class DocumentProcessor {
       while (startIndex < text.length) {
         let endIndex = startIndex + chunkSize;
         
-        // If we're not at the end, try to find a natural break point
         if (endIndex < text.length) {
-          // Look for paragraph breaks, sentence breaks, or spaces
           const paragraphBreak = text.indexOf('\n\n', endIndex - 100);
           const sentenceBreak = text.indexOf('. ', endIndex - 100);
           const spaceBreak = text.indexOf(' ', endIndex - 20);
@@ -173,12 +135,13 @@ export class DocumentProcessor {
           endIndex = text.length;
         }
         
-        chunks.push(text.substring(startIndex, endIndex));
+        const chunk = text.substring(startIndex, endIndex).trim();
+        if (chunk) {
+          chunks.push(chunk);
+        }
         
-        // Move the start index, accounting for overlap
         startIndex = endIndex - overlap;
         
-        // Ensure we don't get stuck in a loop
         if (startIndex >= text.length) {
           break;
         }

@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    restart: always
+    volumes:
+      - redis_data:/data
+
+  server:
+    build: ./server
+    ports:
+      - "8000:8000"
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - PORT=8000
+      - MONGODB_URI=${MONGODB_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      - GOOGLE_APPLICATION_CREDENTIALS=./lumina-outreach-c4082e500293.json
+      - DIALOGFLOW_PROJECT_ID=${DIALOGFLOW_PROJECT_ID}
+      - DIALOGFLOW_LOCATION=${DIALOGFLOW_LOCATION}
+      - DIALOGFLOW_AGENT_ID=${DIALOGFLOW_AGENT_ID}
+      - GOOGLE_SHEET_ID=${GOOGLE_SHEET_ID}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - ENFORCE_TWILIO_AUTH=${ENFORCE_TWILIO_AUTH}
+    depends_on:
+      - redis
+    restart: always
+
+  client:
+    build: ./client
+    ports:
+      - "80:80"
+    environment:
+      - VITE_API_URL=http://localhost:8000/api
+    depends_on:
+      - server
+    restart: always
+
+volumes:
+  redis_data:

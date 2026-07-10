@@ -4,8 +4,7 @@ import Call from '../models/Call';
 import mongoose from 'mongoose';
 import { logger } from '../index';
 import { handleError } from '../utils/errorHandling';
-import { conversationEngine } from '../services';
-import { advancedCampaignService } from '../services/advancedCampaignService';
+import { campaignService } from '../services';
 
 // @desc    Create a new campaign
 // @route   POST /api/campaigns
@@ -408,7 +407,7 @@ export const generateAdvancedScript = async (req: FastifyRequest & { user?: any 
       customVariables
     };
 
-    const result = await advancedCampaignService.generateScript(scriptOptions);
+    const result = await campaignService.generateScript(scriptOptions);
 
     res.send({
       success: true,
@@ -430,7 +429,7 @@ export const generateAdvancedScript = async (req: FastifyRequest & { user?: any 
 // @access  Private
 export const createScriptTemplate = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
-    const template = await advancedCampaignService.createTemplate(req.body, req.user.id);
+    const template = await campaignService.createTemplate(req.body, req.user.id);
     res.status(201).send({
       success: true,
       template
@@ -456,7 +455,7 @@ export const getScriptTemplates = async (req: FastifyRequest & { user?: any }, r
     if (industry) filters.industry = industry;
     if (approved) filters['compliance.approved'] = approved === 'true';
 
-    const templates = await advancedCampaignService.getTemplates(filters);
+    const templates = await campaignService.getTemplates(filters);
     res.send({
       success: true,
       templates
@@ -491,7 +490,7 @@ export const createABTest = async (req: FastifyRequest & { user?: any }, res: Fa
       campaignId
     };
 
-    const abTest = await advancedCampaignService.createABTest(abTestConfig, req.user.id);
+    const abTest = await campaignService.createABTest(abTestConfig, req.user.id);
     
     res.status(201).send({
       success: true,
@@ -512,7 +511,7 @@ export const createABTest = async (req: FastifyRequest & { user?: any }, res: Fa
 export const getCampaignABTests = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     const campaignId = (req.params as any).id;
-    const abTests = await advancedCampaignService.getABTests(campaignId);
+    const abTests = await campaignService.getABTests(campaignId);
     
     res.send({
       success: true,
@@ -533,7 +532,7 @@ export const getCampaignABTests = async (req: FastifyRequest & { user?: any }, r
 export const getABTestResults = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
   try {
     const { testId } = req.params as any;
-    const results = await advancedCampaignService.getABTestResults(testId);
+    const results = await campaignService.getABTestResults(testId);
     
     res.send({
       success: true,
@@ -556,7 +555,7 @@ export const updateABTestMetrics = async (req: FastifyRequest & { user?: any }, 
     const { testId } = req.params as any;
     const { variantId, metrics } = req.body as any;
     
-    const updatedTest = await advancedCampaignService.updateABTestMetrics(testId, variantId, metrics);
+    const updatedTest = await campaignService.updateABTestMetrics(testId, variantId, metrics);
     
     res.send({
       success: true,
@@ -584,9 +583,8 @@ export const validateScriptCompliance = async (req: FastifyRequest & { user?: an
       });
     }
 
-    // Use the compliance validation from advanced campaign service
-    const service = new (advancedCampaignService.constructor as any)();
-    const complianceResult = await service.validateCompliance(script, regions);
+    // Use the compliance validation from campaign service
+    const complianceResult = await campaignService.validateCompliance(script, regions);
     
     res.send({
       success: true,

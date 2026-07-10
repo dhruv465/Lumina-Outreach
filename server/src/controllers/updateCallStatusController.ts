@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import Call from '../models/Call';
+import logger from '../utils/logger';
 
 // @desc    Update call status
 // @route   PUT /api/calls/:id/status
@@ -52,14 +53,14 @@ export const updateCallStatus = async (req: FastifyRequest & { user?: any }, res
     await call.save();
     
     // Notification functionality has been removed
-    console.log('Call status updated:', call._id, 'to', status);
+    logger.info('Call status updated:', call._id, 'to', status);
     
     return res.status(200).send({
       message: `Call status updated to ${status}`,
       call
     });
   } catch (error) {
-    console.error('Error in updateCallStatus:', error);
+    logger.error('Error in updateCallStatus:', error);
     return res.status(500).send({
       message: 'Server error',
       error: (error as Error).message

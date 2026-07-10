@@ -117,36 +117,36 @@ const debugRoutes = async (fastify, opts: Record<string, any>) => {
   // Add debug database endpoint
   fastify.get('/database', async (request, reply) => {
     try {
-      console.log('Debug: Checking database state...');
+      logger.info('Debug: Checking database state...');
       
       // Get total call count
       const totalCalls = await Call.countDocuments();
-      console.log(`Total calls in database: ${totalCalls}`);
+      logger.info(`Total calls in database: ${totalCalls}`);
       
       // Get a sample of calls to see their structure
       const sampleCalls = await Call.find({}).limit(5).lean();
-      console.log('Sample calls:', JSON.stringify(sampleCalls, null, 2));
+      logger.info('Sample calls:', JSON.stringify(sampleCalls, null, 2));
       
       // Check date field usage
       const callsWithStartTime = await Call.countDocuments({ startTime: { $exists: true, $ne: null } });
       const callsWithCreatedAt = await Call.countDocuments({ createdAt: { $exists: true, $ne: null } });
       const callsWithScheduledAt = await Call.countDocuments({ scheduledAt: { $exists: true, $ne: null } });
       
-      console.log(`Calls with startTime: ${callsWithStartTime}`);
-      console.log(`Calls with createdAt: ${callsWithCreatedAt}`);
-      console.log(`Calls with scheduledAt: ${callsWithScheduledAt}`);
+      logger.info(`Calls with startTime: ${callsWithStartTime}`);
+      logger.info(`Calls with createdAt: ${callsWithCreatedAt}`);
+      logger.info(`Calls with scheduledAt: ${callsWithScheduledAt}`);
       
       // Check status distribution
       const statusDistribution = await Call.aggregate([
         { $group: { _id: '$status', count: { $sum: 1 } } }
       ]);
-      console.log('Status distribution:', statusDistribution);
+      logger.info('Status distribution:', statusDistribution);
       
       // Check outcome distribution
       const outcomeDistribution = await Call.aggregate([
         { $group: { _id: '$outcome', count: { $sum: 1 } } }
       ]);
-      console.log('Outcome distribution:', outcomeDistribution);
+      logger.info('Outcome distribution:', outcomeDistribution);
       
       // Check recent calls
       const recentCalls = await Call.find({})
@@ -154,7 +154,7 @@ const debugRoutes = async (fastify, opts: Record<string, any>) => {
         .limit(10)
         .select('status outcome createdAt startTime scheduledAt duration')
         .lean();
-      console.log('Recent calls:', recentCalls);
+      logger.info('Recent calls:', recentCalls);
       
       reply.send({
         totalCalls,
@@ -168,7 +168,7 @@ const debugRoutes = async (fastify, opts: Record<string, any>) => {
       });
       
     } catch (error) {
-      console.error('Debug error:', error);
+      logger.error('Debug error:', error);
       reply.code(500).send({ error: 'Debug failed', details: error.message });
     }
   });

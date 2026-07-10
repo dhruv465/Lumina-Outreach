@@ -82,3 +82,25 @@ export const authenticate = async (
 
 // Export cache stats for monitoring
 export const getAuthCacheStats = () => tokenCache.getStats();
+
+/**
+ * Middleware to check for admin role
+ */
+export const isAdmin = async (request: FastifyRequest, reply: FastifyReply) => {
+  const user = request.user as any;
+  if (!user || user.role !== 'admin') {
+    logger.warn(`Unauthorized access attempt to admin resource by user: ${user?.email || 'unknown'}`);
+    return reply.status(403).send({ message: 'Access denied: Admin role required' });
+  }
+};
+
+/**
+ * Middleware to check for manager or admin role
+ */
+export const isManager = async (request: FastifyRequest, reply: FastifyReply) => {
+  const user = request.user as any;
+  if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
+    logger.warn(`Unauthorized access attempt to manager resource by user: ${user?.email || 'unknown'}`);
+    return reply.status(403).send({ message: 'Access denied: Manager or Admin role required' });
+  }
+};

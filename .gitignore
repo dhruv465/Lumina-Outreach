@@ -5,7 +5,7 @@ yarn-debug.log*
 yarn-error.log*
 package-lock.json
 yarn.lock
-
+*./server/lumina-outreach-c4082e500293.json
 # Production builds
 dist/
 build/
@@ -736,3 +736,14 @@ intent-datasets/
 
 .kiro/test_*.js
 \n# Google Cloud Credentials\n/server/lumina-outreach-c4082e500293.json
+
+# Secrets (never commit)
+server/lumina-outreach-*.json
+**/*service-account*.json
+*.pem
+*.key
+
+# Local agent tooling (not app code)
+.claude/
+.agents/
+.superpowers/

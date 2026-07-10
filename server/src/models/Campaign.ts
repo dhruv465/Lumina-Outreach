@@ -47,7 +47,7 @@ export interface ICampaign extends mongoose.Document {
     clarity?: number;
     style?: number;
   };
-  telephonyProvider: 'twilio' | 'livekit';
+  telephonyProvider: 'livekit';
   transferPhoneNumber?: string;
   metrics: {
     totalCalls: number;
@@ -233,7 +233,7 @@ const CampaignSchema = new mongoose.Schema(
     },
     telephonyProvider: {
       type: String,
-      enum: ['twilio', 'livekit'],
+      enum: ['livekit'],
       default: 'livekit',
     },
     transferPhoneNumber: {
@@ -274,21 +274,6 @@ const CampaignSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
-// Validate voice configuration before saving
-CampaignSchema.pre('save', async function (next) {
-  try {
-    if (this.isModified('voiceConfiguration.voiceId')) {
-      // Import directly to avoid circular dependencies
-      const { EnhancedVoiceAIService } = await import('../services/enhancedVoiceAIService');
-      // Get valid voice ID (will fallback to default if the voice ID is invalid)
-      this.voiceConfiguration.voiceId = await EnhancedVoiceAIService.getValidVoiceId(this.voiceConfiguration.voiceId);
-    }
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
 
 // Index for faster queries
 CampaignSchema.index({ status: 1 });

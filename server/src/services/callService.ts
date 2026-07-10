@@ -1,12 +1,8 @@
 import Call from '../models/Call';
 import Lead from '../models/Lead';
 import Campaign from '../models/Campaign';
-import Configuration from '../models/Configuration';
-import mongoose from 'mongoose';
-import twilio from 'twilio';
 import { unifiedAnalyticsService } from './unifiedAnalyticsService';
-import { twilioRecordingsService } from './twilioRecordingsService';
-import logger, { getErrorMessage } from '../utils/logger';
+import logger from '../utils/logger';
 
 class CallService {
   async initiateCall(leadId: string, campaignId: string, scheduleTime?: Date, notes?: string) {
@@ -138,27 +134,18 @@ class CallService {
     }
   }
 
-  async syncTwilioRecordings(days: number): Promise<any> {
-    try {
-      const result = await twilioRecordingsService.syncAllRecordings(days);
-      return { success: true, ...result };
-    } catch (error) {
-      logger.error(`Error syncing Twilio recordings: ${getErrorMessage(error)}`);
-      return { success: false, error: getErrorMessage(error) };
-    }
-  }
-
   async getCallRecordingDetails(id: string): Promise<any> {
     try {
       const call = await Call.findById(id);
-      if (!call || !call.twilioSid) return null;
+      if (!call || !call.recordingUrl) return null;
 
-      const recordings = await twilioRecordingsService.fetchAllRecordings();
-      const recording = recordings.find(r => r.callSid === call.twilioSid);
-      
-      return recording || null;
+      return {
+        callId: call._id,
+        recordingUrl: call.recordingUrl,
+        provider: 'livekit',
+      };
     } catch (error) {
-      logger.error(`Error getting recording details: ${getErrorMessage(error)}`);
+      logger.error(`Error getting recording details: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }

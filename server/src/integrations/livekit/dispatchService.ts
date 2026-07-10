@@ -4,7 +4,7 @@ import Call, { ICall } from '../../models/Call';
 import Lead from '../../models/Lead';
 import Campaign from '../../models/Campaign';
 import logger, { getErrorMessage } from '../../utils/logger';
-import { LiveKitDispatchMetadata, roomNameForCall } from './types';
+import { LiveKitDispatchMetadata, roomNameForCall, toE164 } from './types';
 import { startCallRecording } from './egressService';
 
 function requireEnv(name: string): string {
@@ -42,10 +42,14 @@ export async function initiateLiveKitCall(params: {
   const activeScript = campaign.script.versions.find((v) => v.isActive);
   if (!activeScript) throw new Error('No active script found for this campaign');
 
+  // Twilio SIP requires E.164; bare local numbers (e.g. "9579813746") fail with
+  // SIP 400/32101. Normalize once and use for both the record and the dial.
+  const dialNumber = toE164(lead.phoneNumber);
+
   const newCall = new Call({
     leadId: new mongoose.Types.ObjectId(leadId),
     campaignId: new mongoose.Types.ObjectId(campaignId),
-    phoneNumber: lead.phoneNumber,
+    phoneNumber: dialNumber,
     status: scheduleTime ? 'scheduled' : 'queued',
     scheduledAt: scheduleTime || new Date(),
     notes: notes || '',
@@ -70,7 +74,7 @@ export async function initiateLiveKitCall(params: {
       call_id: newCall._id.toString(),
       lead_id: leadId,
       campaign_id: campaignId,
-      phone_number: lead.phoneNumber,
+      phone_number: dialNumber,
       script: activeScript.content,
       opening_message: campaign.openingMessage || '',
       voice_id: campaign.voiceConfiguration?.voiceId || '',

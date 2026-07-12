@@ -1,8 +1,34 @@
 # Conversation Review Design
 
 **Date:** 2026-07-12
-**Status:** Proposed
+**Status:** Deferred to post-MVP
 **Replaces:** Legacy Dialogflow-era “AI Training & Feedback” surface
+
+## MVP Decision
+
+Do not build Conversation Review in the MVP. Reliable calling, BYOK setup,
+campaign execution, persisted outcomes, and basic analytics come first.
+
+MVP scope is retirement only:
+
+- Hide and remove the misleading AI Training client surface.
+- Unregister and remove the dead feedback/retraining API code.
+- Remove active Dialogflow and automatic-retraining claims from product docs.
+- Preserve existing `Call` transcripts, outcomes, conversation logs, and
+  recordings. These are the future review system's source data.
+- Leave the historical MongoDB `callfeedbacks` collection untouched.
+
+Do not add `CallReview`, review APIs, `Call.aiContext`, review metrics, or a new
+page during MVP cleanup.
+
+Revisit this design after either threshold is met:
+
+- At least 100 completed calls exist in a representative production dataset; or
+- Managers repeatedly review calls manually and can name the decisions the
+  current Call History page does not support.
+
+Everything below describes the approved post-MVP direction, not current MVP
+implementation scope.
 
 ## Decision
 

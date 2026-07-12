@@ -184,75 +184,6 @@ export const deleteCampaign = async (req: FastifyRequest & { user?: any }, res: 
   }
 };
 
-// @desc    Generate AI script
-// @route   POST /api/campaigns/:id/generate-script
-// @access  Private
-export const generateScript = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
-  try {
-    const { goal } = req.body as any;
-    
-    try {
-      // Get script template from system configuration only
-      const Configuration = require('../models/Configuration').default;
-      const config = await Configuration.findOne();
-      
-      if (!config) {
-        return res.status(500).send({
-          message: 'System configuration not found',
-          error: 'Please configure system settings before generating scripts'
-        });
-      }
-
-      // Check if required configuration fields exist
-      if (!config.generalSettings) {
-        return res.status(500).send({
-          message: 'General settings not configured',
-          error: 'Please configure general settings including default script templates'
-        });
-      }
-
-      // Use ONLY dynamic script generation based on goal and configuration
-      const scriptResponse = {
-        introduction: config.generalSettings.defaultScriptIntroduction?.replace('{goal}', goal) || 
-                     config.generalSettings.companyIntroduction?.replace('{goal}', goal),
-        value: config.generalSettings.defaultValueProposition?.replace('{goal}', goal) || 
-               config.generalSettings.companyValueProposition?.replace('{goal}', goal),
-        questions: config.generalSettings.defaultQuestions || [],
-        objectionHandling: config.generalSettings.defaultObjectionHandling || {},
-        closing: config.generalSettings.defaultClosing?.replace('{goal}', goal) || 
-                config.generalSettings.companyClosing?.replace('{goal}', goal)
-      };
-
-      // Validate that we have all required fields
-      if (!scriptResponse.introduction || !scriptResponse.value) {
-        return res.status(500).send({
-          message: 'Incomplete script configuration',
-          error: 'Please configure all required script templates in system settings (introduction, value proposition, etc.)'
-        });
-      }
-      
-      res.status(200).send({
-        script: scriptResponse
-      });
-    } catch (error) {
-      logger.error('Error generating script:', error);
-      
-      // NO FALLBACKS - force proper configuration
-      return res.status(500).send({
-        message: 'Script generation failed',
-        error: 'Unable to generate script. Please ensure system configuration is complete.',
-        details: error.message
-      });
-    }
-  } catch (error) {
-    logger.error('Error in generateScript:', error);
-    return res.status(500).send({
-      message: 'Server error',
-      error: handleError(error)
-    });
-  }
-};
-
 // @desc    Test script with AI voice
 // @route   POST /api/campaigns/:id/test-script
 // @access  Private
@@ -373,52 +304,6 @@ export const getCampaignAnalytics = async (_req: FastifyRequest & { user?: any }
     logger.error('Error in getCampaignAnalytics:', error);
     return res.status(500).send({
       message: 'Server error',
-      error: handleError(error)
-    });
-  }
-};
-
-// @desc    Generate advanced AI script with compliance
-// @route   POST /api/campaigns/:id/generate-advanced-script
-// @access  Private
-export const generateAdvancedScript = async (req: FastifyRequest & { user?: any }, res: FastifyReply) => {
-  try {
-    const campaign = await Campaign.findById((req.params as any).id);
-    if (!campaign) {
-      return res.status(404).send({ message: 'Campaign not found' });
-    }
-
-    const {
-      industry,
-      targetAudience,
-      tone = 'professional',
-      language = 'en',
-      complianceRegion = ['IN'],
-      customVariables
-    } = req.body as any;
-
-    const scriptOptions = {
-      industry: industry || 'general',
-      targetAudience: targetAudience || campaign.targetAudience || 'business professionals',
-      campaignGoal: campaign.goal,
-      tone,
-      language,
-      complianceRegion,
-      customVariables
-    };
-
-    const result = await campaignService.generateScript(scriptOptions);
-
-    res.send({
-      success: true,
-      script: result.script,
-      compliance: result.compliance,
-      metadata: result.metadata
-    });
-  } catch (error) {
-    logger.error('Error in generateAdvancedScript:', error);
-    res.status(500).send({
-      message: 'Advanced script generation failed',
       error: handleError(error)
     });
   }

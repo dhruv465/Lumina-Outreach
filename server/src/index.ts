@@ -47,6 +47,11 @@ import { cacheOnSendHook } from "./utils/responseCache";
 // Load environment variables
 dotenv.config();
 
+if (process.env.NODE_ENV === "production" && !process.env.CONFIG_ENCRYPTION_KEY) {
+  // BYO keys cannot be decrypted without it; refuse to boot rather than fail per-call.
+  throw new Error("CONFIG_ENCRYPTION_KEY must be set in production");
+}
+
 // Initialize Sentry for Performance Monitoring and Error Tracking
 import * as Sentry from '@sentry/node';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
@@ -386,62 +391,14 @@ const startServer = async () => {
       .then(({ batchCallService }) => batchCallService.resumeInterruptedBatches())
       .catch((e) => logger.error(`batch resume on boot failed: ${e.message}`));
 
-    // Step 2.5: Validate database-loaded configuration (optional)
-    bootstrapLogger.info("Validating database configuration...");
-    let activeProviders: { llm: string[]; optionalMissing: string[] } = {
-      llm: [],
-      optionalMissing: [],
-    };
-
-    try {
-      const { validateDatabaseLoadedConfig } = await import("./config/database-validation");
-      const Configuration = require("./models/Configuration").default;
-      const config = await Configuration.findOne();
-
-      const dbConfigValidation = validateDatabaseLoadedConfig(config);
-      if (!dbConfigValidation.isValid) {
-        bootstrapLogger.warn(
-          "Database configuration has issues:",
-          dbConfigValidation.error
-        );
-        bootstrapLogger.warn(
-          "Services will start with limited functionality. Configure API keys in the Configuration page."
-        );
-      } else {
-        bootstrapLogger.info("Database configuration is valid");
-      }
-
-      if (dbConfigValidation.details?.warnings) {
-        dbConfigValidation.details.warnings.forEach((warning: string) => {
-          bootstrapLogger.warn(`Configuration warning: ${warning}`);
-        });
-      }
-
-      if (config) {
-        if (config.openaiApiKey) activeProviders.llm.push("openai");
-        if (config.anthropicApiKey) activeProviders.llm.push("anthropic");
-        if (config.googleApiKey) activeProviders.llm.push("google");
-
-        if (!config.openaiApiKey) activeProviders.optionalMissing.push("openai");
-        if (!config.anthropicApiKey) activeProviders.optionalMissing.push("anthropic");
-        if (!config.googleApiKey) activeProviders.optionalMissing.push("google");
-      }
-    } catch (error) {
-      bootstrapLogger.warn("Could not validate database configuration:", error);
-      bootstrapLogger.warn(
-        "Services will start with empty credentials - configure via Configuration page"
-      );
-    }
+    // Per-user BYO credentials are validated only in owner-scoped request
+    // flows. Startup must never select an arbitrary tenant configuration.
+    bootstrapLogger.info(
+      "Skipping global provider validation; BYO credentials are owner-scoped"
+    );
 
     // Switch to runtime phase logging after DB and config load
     const runtimeLogger = phaseLogger("RUNTIME");
-
-    // Emit provider summary
-    runtimeLogger.info("Provider configuration summary", {
-      event: "providers.summary",
-      llm: activeProviders.llm,
-      optionalMissing: activeProviders.optionalMissing,
-    });
 
     // Step 3: Initialize services with database-driven configuration
     runtimeLogger.info("Initializing application services...");

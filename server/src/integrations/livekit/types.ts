@@ -3,6 +3,12 @@
  * (livekit-agent/agent.py). Keys are snake_case on the wire.
  * Tested against livekit-server-sdk 2.16.0 + livekit-agents ~=1.5.
  */
+export interface ProviderConfigPayload {
+  stt: { api_key: string; model: string };
+  llm: { provider: string; api_key: string; model: string; temperature: number };
+  tts: { api_key: string; voice: string };
+}
+
 export interface LiveKitDispatchMetadata {
   call_id: string;
   lead_id: string;
@@ -13,6 +19,7 @@ export interface LiveKitDispatchMetadata {
   voice_id: string;
   lead_name: string;
   transfer_to: string;
+  provider_config: ProviderConfigPayload;
 }
 
 export const LIVEKIT_ROOM_PREFIX = 'call-';

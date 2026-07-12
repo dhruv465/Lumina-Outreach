@@ -1,6 +1,8 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import callService from '../services/callService';
 import { handleError } from '../utils/errorHandling';
+import { ProviderConfigError } from '../integrations/livekit/providerConfig';
+import Campaign from '../models/Campaign';
 
 
 import logger from '../utils/logger';
@@ -8,9 +10,31 @@ import logger from '../utils/logger';
 export const initiateCall = async (req: FastifyRequest & { user?: any }, res: FastifyReply): Promise<any> => {
   try {
     const { leadId, campaignId, scheduleTime, notes } = req.body as any;
-    const call = await callService.initiateCall(leadId, campaignId, scheduleTime, notes);
+    const initiatingUserId = req.user?._id?.toString() || req.user?.id;
+    const campaign = await Campaign.findById(campaignId).select('createdBy');
+    const campaignOwnerId = campaign?.createdBy?.toString();
+    if (
+      campaign &&
+      req.user?.role !== 'admin' &&
+      campaignOwnerId &&
+      campaignOwnerId !== initiatingUserId
+    ) {
+      res.status(403).send({ message: 'Access denied: you do not own this campaign' });
+      return;
+    }
+    const call = await callService.initiateCall(
+      leadId,
+      campaignId,
+      scheduleTime,
+      notes,
+      initiatingUserId,
+    );
     res.status(201).send({ message: 'Call initiated successfully', call });
   } catch (error) {
+    if (error instanceof ProviderConfigError) {
+      res.status(400).send({ message: error.message });
+      return;
+    }
     res.status(500).send({ message: 'Failed to initiate call', error: handleError(error) });
   }
 };

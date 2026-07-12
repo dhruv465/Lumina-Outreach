@@ -18,11 +18,11 @@ import logger, { getErrorMessage } from '../../utils/logger';
  * try/catch as defense in depth against unexpected errors, e.g. Mongo being
  * down when reading Configuration.)
  */
-export async function startCallRecording(roomName: string): Promise<void> {
+export async function startCallRecording(roomName: string, ownerId: string): Promise<void> {
   const bucket = process.env.LIVEKIT_RECORDING_GCS_BUCKET;
   if (!bucket) return;
 
-  const configuration = await Configuration.findOne();
+  const configuration = await Configuration.findOne({ ownerId });
   if (!configuration?.complianceSettings?.recordCalls) return;
 
   const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;

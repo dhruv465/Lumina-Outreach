@@ -5,10 +5,8 @@ import {
   getCampaignById,
   updateCampaign,
   deleteCampaign,
-  generateScript,
   testScript,
   getCampaignAnalytics,
-  generateAdvancedScript,
   createScriptTemplate,
   getScriptTemplates,
   createABTest,
@@ -30,8 +28,6 @@ const campaignRoutes = async (fastify, opts: Record<string, any>) => {
   fastify.delete('/:id', deleteCampaign);
 
   // Script generation and testing
-  fastify.post('/:id/generate-script', generateScript);
-  fastify.post('/:id/generate-advanced-script', generateAdvancedScript);
   fastify.post('/:id/test-script', testScript);
 
   // Script templates

@@ -1,8 +1,10 @@
 import BatchCall from '../models/BatchCall';
+import Campaign from '../models/Campaign';
 import { runWithConcurrency } from '../utils/concurrencyPool';
 import { FinancialService } from '../utils/financialService';
 import logger from '../utils/logger';
 import * as Sentry from '@sentry/node';
+import { buildProviderConfig, ProviderConfigError } from '../integrations/livekit/providerConfig';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -15,6 +17,15 @@ class BatchCallService {
     createdBy: string;
     config?: any;
   }) {
+    const campaign = await Campaign.findById(params.campaignId);
+    const ownerId = campaign?.createdBy?.toString() || params.createdBy;
+    if (!ownerId) {
+      throw new ProviderConfigError(
+        'Campaign has no owner and no initiating user; cannot resolve API keys.',
+      );
+    }
+    await buildProviderConfig(ownerId);
+
     const batch = await BatchCall.create({
       name: params.name,
       campaignId: params.campaignId,
@@ -60,6 +71,7 @@ class BatchCallService {
       const delay = batch.config.delayBetweenCalls || 0;
       const retries = batch.config.retryCount || 1;
       const campaignId = batch.campaignId.toString();
+      const initiatingUserId = batch.createdBy.toString();
 
       let budgetDepleted = false;
 
@@ -77,7 +89,7 @@ class BatchCallService {
         let ok = false;
         for (let attempt = 0; attempt < retries && !ok; attempt++) {
           try {
-            await this.processSingleCall({ batchId, leadId, campaignId });
+            await this.processSingleCall({ batchId, leadId, campaignId, initiatingUserId });
             ok = true;
           } catch (err: any) {
             logger.error(`Batch ${batchId} lead ${leadId} attempt ${attempt + 1} failed: ${err.message}`);
@@ -108,11 +120,16 @@ class BatchCallService {
     for (const b of stuck) void this.runBatch(b._id.toString());
   }
 
-  private async processSingleCall(data: { batchId: string; leadId: string; campaignId: string }) {
-    const { leadId, campaignId } = data;
+  private async processSingleCall(data: {
+    batchId: string;
+    leadId: string;
+    campaignId: string;
+    initiatingUserId: string;
+  }) {
+    const { leadId, campaignId, initiatingUserId } = data;
     // LiveKit-only: batch calls dispatch through the LiveKit agent.
     const { initiateLiveKitCall } = await import('../integrations/livekit/dispatchService');
-    await initiateLiveKitCall({ leadId, campaignId });
+    await initiateLiveKitCall({ leadId, campaignId, initiatingUserId });
   }
 
   private async updateBatchStats(batchId: string, status: 'successful' | 'failed') {

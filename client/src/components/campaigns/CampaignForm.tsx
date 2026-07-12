@@ -1434,20 +1434,11 @@ const CampaignForm = ({
                       {systemConfig && (
                         <div className="bg-blue-50 dark:bg-blue-950/30 p-3 rounded-xl text-sm border border-blue-200 dark:border-blue-800">
                           <p className="font-medium">
-                            Using system configuration settings
+                            Using your account configuration
                           </p>
                           <p className="text-muted-foreground text-xs mt-1">
-                            The AI and voice settings shown here are based on
-                            the system-wide configuration.
-                            {systemConfig.llmConfig?.defaultProvider && (
-                              <span>
-                                {" "}
-                                Using {
-                                  systemConfig.llmConfig.defaultProvider
-                                }{" "}
-                                as the LLM provider.
-                              </span>
-                            )}
+                            Your saved LLM and Deepgram settings are used for
+                            this campaign.
                           </p>
                         </div>
                       )}
@@ -1513,7 +1504,7 @@ const CampaignForm = ({
                             </SelectContent>
                           </Select>
                           <p className="text-xs text-muted-foreground mt-1">
-                            Using providers from system configuration
+                            Using Deepgram from your account configuration
                           </p>
                         </div>
                       </div>

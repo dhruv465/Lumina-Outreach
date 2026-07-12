@@ -26,8 +26,9 @@ from livekit.agents import (
     inference,
     room_io,
 )
-from livekit.plugins import deepgram, elevenlabs, noise_cancellation, openai
+from livekit.plugins import noise_cancellation
 
+from providers import build_llm, build_stt, build_tts, parse_provider_config
 from tools.lumina_api import LuminaAPI
 
 if TYPE_CHECKING:
@@ -39,7 +40,6 @@ logger.setLevel(logging.INFO)
 
 AGENT_NAME = "lumina-outbound"
 SIP_OUTBOUND_TRUNK_ID = os.getenv("SIP_OUTBOUND_TRUNK_ID", "")
-DEFAULT_VOICE_ID = os.getenv("ELEVEN_DEFAULT_VOICE_ID", "ODq5zmih8GrVes37Dizd")
 # Krisp BVCTelephony is a LiveKit-Cloud-only model. Set LIVEKIT_BVC_ENABLED=false
 # on self-hosted deploys where the Cloud noise-cancellation models are unavailable.
 BVC_ENABLED = os.getenv("LIVEKIT_BVC_ENABLED", "true").strip().lower() not in ("0", "false", "no")
@@ -213,6 +213,14 @@ async def entrypoint(ctx: JobContext) -> None:
         api_key=os.getenv("LUMINA_SERVICE_API_KEY", ""),
     )
 
+    provider_cfg = parse_provider_config(meta)
+    if provider_cfg is None:
+        logger.error("no provider_config in job metadata; aborting call_id=%s", call_id)
+        if call_id:
+            await lumina.post_outcome(call_id, "failed", "provider config missing")
+        ctx.shutdown("provider config missing")
+        return
+
     agent = SalesAgent(
         call_id=call_id,
         lead_name=meta.get("lead_name", ""),
@@ -228,12 +236,9 @@ async def entrypoint(ctx: JobContext) -> None:
         # especially on speech that overlaps the agent's own TTS. A single-language
         # "en" model emits interim words faster and more reliably during overlap,
         # which is what the min_words interruption gate below now depends on.
-        stt=deepgram.STT(model="nova-3", language="en"),
-        llm=openai.responses.LLM(model="gpt-4.1"),
-        tts=elevenlabs.TTS(
-            voice_id=meta.get("voice_id") or DEFAULT_VOICE_ID,
-            model="eleven_flash_v2_5",
-        ),
+        stt=build_stt(provider_cfg),
+        llm=build_llm(provider_cfg),
+        tts=build_tts(provider_cfg),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(),
             # Explicit barge-in config for telephony, per

@@ -80,10 +80,10 @@ export const reinitializeGlobalLLMService = async () => {
       providers: dbLlmConfig.providers.map((provider) => ({
         name: provider.name.toLowerCase() as LLMProvider,
         apiKey: provider.apiKey,
-        isEnabled: provider.isEnabled,
-        models: provider.availableModels || [],
-        defaultModel: provider.availableModels?.[0],
-        useRealtimeAPI: provider.useRealtimeAPI || false,
+        isEnabled: provider.status === 'verified',
+        defaultModel: provider.name === dbLlmConfig.defaultProvider
+          ? dbLlmConfig.defaultModel
+          : undefined,
       })),
       defaultProvider: (dbLlmConfig.defaultProvider?.toLowerCase() || 'openai') as LLMProvider,
       defaultModel: dbLlmConfig.defaultModel || 'gpt-4',

@@ -61,8 +61,11 @@ export async function checkElevenLabsHealth(): Promise<HealthCheck> {
   try {
     // Get configuration from database instead of environment variables
     const config = await Configuration.findOne();
-    const elevenLabsConfig = config?.elevenLabsConfig;
-    
+    // elevenLabsConfig was removed from the per-user Configuration schema (Task 2 BYO-key
+    // reshape). Cast preserves the existing "not configured" graceful-degradation behavior
+    // below until this health check is redesigned for per-user configuration.
+    const elevenLabsConfig: any = (config as any)?.elevenLabsConfig;
+
     if (!elevenLabsConfig) {
       return {
         service: 'elevenlabs',
@@ -142,17 +145,13 @@ export async function checkOpenAIHealth(): Promise<HealthCheck> {
     }
     
     const hasApiKey = !!openAIProvider.apiKey && openAIProvider.apiKey.trim() !== '';
-    const isEnabled = openAIProvider.isEnabled;
     const status = openAIProvider.status || 'unverified';
     
     // Determine health status based on configuration state
     let healthStatus: 'healthy' | 'unhealthy' | 'degraded';
     let message: string;
     
-    if (!isEnabled) {
-      healthStatus = 'degraded';
-      message = 'OpenAI provider is disabled in configuration';
-    } else if (!hasApiKey) {
+    if (!hasApiKey) {
       healthStatus = 'degraded';
       message = 'OpenAI API key not configured in database';
     } else if (status === 'verified') {
@@ -172,11 +171,9 @@ export async function checkOpenAIHealth(): Promise<HealthCheck> {
       message,
       timestamp: new Date(),
       details: {
-        isEnabled,
         apiKeyConfigured: hasApiKey,
         verificationStatus: status,
-        lastVerified: openAIProvider.lastVerified,
-        availableModels: openAIProvider.availableModels
+        lastVerified: openAIProvider.lastVerified
       }
     };
   } catch (error) {
@@ -208,17 +205,13 @@ export async function checkAnthropicHealth(): Promise<HealthCheck> {
     }
     
     const hasApiKey = !!anthropicProvider.apiKey && anthropicProvider.apiKey.trim() !== '';
-    const isEnabled = anthropicProvider.isEnabled;
     const status = anthropicProvider.status || 'unverified';
     
     // Determine health status based on configuration state
     let healthStatus: 'healthy' | 'unhealthy' | 'degraded';
     let message: string;
     
-    if (!isEnabled) {
-      healthStatus = 'degraded';
-      message = 'Anthropic provider is disabled in configuration';
-    } else if (!hasApiKey) {
+    if (!hasApiKey) {
       healthStatus = 'degraded';
       message = 'Anthropic API key not configured in database';
     } else if (status === 'verified') {
@@ -238,11 +231,9 @@ export async function checkAnthropicHealth(): Promise<HealthCheck> {
       message,
       timestamp: new Date(),
       details: {
-        isEnabled,
         apiKeyConfigured: hasApiKey,
         verificationStatus: status,
-        lastVerified: anthropicProvider.lastVerified,
-        availableModels: anthropicProvider.availableModels
+        lastVerified: anthropicProvider.lastVerified
       }
     };
   } catch (error) {
@@ -262,7 +253,7 @@ export async function checkTwilioHealth(): Promise<HealthCheck> {
   try {
     // Get configuration from database instead of environment variables
     const config = await Configuration.findOne();
-    const twilioConfig = config?.twilioConfig;
+    const twilioConfig: any = (config as any)?.twilioConfig;
     
     if (!twilioConfig) {
       return {
@@ -330,7 +321,7 @@ export async function checkTTSProviderHealth(): Promise<HealthCheck> {
   try {
     // Get configuration from database
     const config = await Configuration.findOne();
-    const ttsConfig = config?.ttsConfig;
+    const ttsConfig: any = (config as any)?.ttsConfig;
     
     if (!ttsConfig) {
       return {
@@ -356,7 +347,7 @@ export async function checkTTSProviderHealth(): Promise<HealthCheck> {
     };
     
     if (primaryProvider === 'elevenlabs') {
-      const elevenLabsConfig = config?.elevenLabsConfig;
+      const elevenLabsConfig: any = (config as any)?.elevenLabsConfig;
       const hasApiKey = !!elevenLabsConfig?.apiKey && elevenLabsConfig.apiKey.trim() !== '';
       const isEnabled = elevenLabsConfig?.isEnabled;
       const status = elevenLabsConfig?.status;
@@ -443,7 +434,7 @@ export async function checkDeepgramSTTHealth(): Promise<HealthCheck> {
     const hasApiKey = !!deepgramConfig.apiKey && deepgramConfig.apiKey.trim() !== '';
     const isEnabled = deepgramConfig.isEnabled;
     const status = deepgramConfig.status || 'unverified';
-    const primaryModel = deepgramConfig.primaryModel;
+    const sttModel = deepgramConfig.sttModel;
     
     // Determine health status based on configuration state
     let healthStatus: 'healthy' | 'unhealthy' | 'degraded';
@@ -461,9 +452,6 @@ export async function checkDeepgramSTTHealth(): Promise<HealthCheck> {
     } else if (status === 'failed') {
       healthStatus = 'unhealthy';
       message = 'Deepgram STT API key verification failed';
-    } else if (status === 'degraded') {
-      healthStatus = 'degraded';
-      message = 'Deepgram STT experiencing degraded performance';
     } else {
       healthStatus = 'degraded';
       message = 'Deepgram STT API key configured but not verified';
@@ -479,11 +467,8 @@ export async function checkDeepgramSTTHealth(): Promise<HealthCheck> {
         apiKeyConfigured: hasApiKey,
         verificationStatus: status,
         lastVerified: deepgramConfig.lastVerified,
-        primaryModel,
-        fallbackModels: deepgramConfig.fallbackModels,
-        autoFallback: deepgramConfig.autoFallback,
-        accountTier: deepgramConfig.accountTier,
-        availableModels: deepgramConfig.availableModels?.length || 0
+        sttModel,
+        ttsVoice: deepgramConfig.ttsVoice
       }
     };
   } catch (error) {

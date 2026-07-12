@@ -44,8 +44,8 @@ const initializeLLMServiceInternal = async (): Promise<void> => {
         providers: dbLlmConfig.providers.map(p => ({
           name: p.name.toLowerCase() as LLMProvider,
           apiKey: p.apiKey,
-          isEnabled: p.isEnabled,
-          models: p.availableModels || []
+          isEnabled: p.status === 'verified',
+          defaultModel: p.name === dbLlmConfig.defaultProvider ? defaultLLMModel : undefined
         })),
         defaultProvider: (dbLlmConfig.defaultProvider?.toLowerCase() || 'openai') as LLMProvider,
         defaultModel: defaultLLMModel,

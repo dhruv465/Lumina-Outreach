@@ -39,7 +39,7 @@ function fakeDoc(overrides: any = {}) {
       ],
       defaultProvider: 'openai', defaultModel: 'gpt-4.1', temperature: 0.7, maxTokens: 150,
     },
-    generalSettings: {}, complianceSettings: {},
+    generalSettings: {}, complianceSettings: {}, webhookConfig: { secret: '' },
     save: jest.fn().mockResolvedValue(undefined),
     getMaskedConfig: jest.fn().mockReturnValue({ masked: true }),
     ...overrides,
@@ -161,6 +161,33 @@ describe('updateSystemConfiguration', () => {
     expect(target.status).toBe('verified');
     expect(target.lastVerified).toBe(lastVerified);
     expect(target.lastError).toBe('');
+  });
+
+  it('updates the per-user webhook secret and saves', async () => {
+    const doc = fakeDoc();
+    doc.webhookConfig.secret = 'old-webhook-secret';
+    mockFindOneAndUpdate.mockResolvedValue(doc);
+
+    await updateSystemConfiguration(
+      reqFor({ webhookConfig: { secret: 'new-webhook-secret' } }),
+      fakeReply(),
+    );
+
+    expect(doc.webhookConfig.secret).toBe('new-webhook-secret');
+    expect(doc.save).toHaveBeenCalled();
+  });
+
+  it.each([
+    ['empty', ''],
+    ['masked', '••••cret'],
+  ])('keeps the existing webhook secret for the %s placeholder', async (_label, secret) => {
+    const doc = fakeDoc();
+    doc.webhookConfig.secret = 'existing-webhook-secret';
+    mockFindOneAndUpdate.mockResolvedValue(doc);
+
+    await updateSystemConfiguration(reqFor({ webhookConfig: { secret } }), fakeReply());
+
+    expect(doc.webhookConfig.secret).toBe('existing-webhook-secret');
   });
 });
 

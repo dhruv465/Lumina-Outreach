@@ -111,6 +111,9 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
 
     if (body.generalSettings) Object.assign(doc.generalSettings, body.generalSettings);
     if (body.complianceSettings) Object.assign(doc.complianceSettings, body.complianceSettings);
+    if (body.webhookConfig && !isPlaceholder(body.webhookConfig.secret)) {
+      doc.webhookConfig.secret = body.webhookConfig.secret;
+    }
     doc.updatedBy = (req.user as any)._id;
 
     await doc.save();

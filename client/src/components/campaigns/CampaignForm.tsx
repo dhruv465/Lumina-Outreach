@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { X, Plus } from "lucide-react";
 import {
   SheetContent,
@@ -86,8 +86,13 @@ const AURA_DEFAULT_VOICE = "aura-2-thalia-en";
 const selectDeepgramVoice = (
   voices: VoiceOption[],
   currentVoiceId?: string,
-  configuredVoiceId?: string
+  configuredVoiceId?: string,
+  preserveCurrentWithoutCatalog = false
 ) => {
+  if (voices.length === 0) {
+    return preserveCurrentWithoutCatalog ? currentVoiceId || "" : "";
+  }
+
   const availableVoiceIds = new Set(voices.map((voice) => voice.voiceId));
 
   if (currentVoiceId && availableVoiceIds.has(currentVoiceId)) {
@@ -102,7 +107,7 @@ const selectDeepgramVoice = (
     return AURA_DEFAULT_VOICE;
   }
 
-  return voices[0]?.voiceId || configuredVoiceId || "";
+  return voices[0]?.voiceId || "";
 };
 
 // Initial form state
@@ -187,6 +192,7 @@ const CampaignForm = ({
   const [loadingVoices, setLoadingVoices] = useState<{
     [key: string]: boolean;
   }>({});
+  const originalVoiceProviderRef = useRef<string | null>(null);
 
   // Toast function for notifications
   const showToast = (
@@ -204,12 +210,15 @@ const CampaignForm = ({
   // Load campaign data if editing
   const loadCampaignData = async () => {
     if (!campaignId) return;
+    originalVoiceProviderRef.current = null;
 
     try {
       setIsLoading(true);
       // Real API call to fetch campaign data
       const response = await api.get(`/campaigns/${campaignId}`);
       const campaignData = response.data;
+      originalVoiceProviderRef.current =
+        campaignData.voiceConfiguration?.provider || null;
 
       // Map API data to form structure
       const formattedData = {
@@ -486,10 +495,15 @@ const CampaignForm = ({
     }
 
     const deepgramVoices = availableVoices.deepgram || [];
+    const originallyUsedDeepgram =
+      originalVoiceProviderRef.current === "deepgram";
     const normalizedVoiceId = selectDeepgramVoice(
       deepgramVoices,
-      formData.voiceConfiguration.voiceId,
-      systemConfig.deepgramConfig?.ttsVoice
+      originallyUsedDeepgram
+        ? formData.voiceConfiguration.voiceId
+        : undefined,
+      systemConfig.deepgramConfig?.ttsVoice,
+      originallyUsedDeepgram
     );
 
     if (
@@ -710,10 +724,15 @@ const CampaignForm = ({
 
     try {
       setIsLoading(true);
+      const originallyUsedDeepgram =
+        !campaignId || originalVoiceProviderRef.current === "deepgram";
       const normalizedVoiceId = selectDeepgramVoice(
         availableVoices.deepgram || [],
-        formData.voiceConfiguration.voiceId,
-        systemConfig?.deepgramConfig?.ttsVoice
+        originallyUsedDeepgram
+          ? formData.voiceConfiguration.voiceId
+          : undefined,
+        systemConfig?.deepgramConfig?.ttsVoice,
+        Boolean(campaignId) && originallyUsedDeepgram
       );
 
       // Validate form data

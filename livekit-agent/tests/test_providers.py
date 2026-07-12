@@ -38,6 +38,18 @@ def test_parse_rejects_bad_metadata(meta):
     assert parse_provider_config(meta) is None
 
 
+@pytest.mark.parametrize("provider", ["azure", "OpenAI", ""])
+def test_parse_rejects_unsupported_llm_provider(provider):
+    meta = {
+        "provider_config": {
+            "stt": {"api_key": "dg-key", "model": "nova-3"},
+            "llm": {"provider": provider, "api_key": "sk", "model": "m", "temperature": 0.7},
+            "tts": {"api_key": "dg-key", "voice": "aura-luna-en"},
+        },
+    }
+    assert parse_provider_config(meta) is None
+
+
 def test_build_stt_and_tts_are_deepgram():
     from livekit.plugins import deepgram
     cfg = cfg_for("openai")

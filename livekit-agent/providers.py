@@ -11,6 +11,8 @@ from livekit.plugins import anthropic, deepgram, google, openai
 
 logger = logging.getLogger("lumina-outbound")
 
+SUPPORTED_LLM_PROVIDERS = ("openai", "anthropic", "google")
+
 
 @dataclass(frozen=True)
 class ProviderConfig:
@@ -45,6 +47,11 @@ def parse_provider_config(meta: dict) -> ProviderConfig | None:
         return None
     if not (cfg.stt_api_key and cfg.llm_api_key and cfg.tts_api_key):
         logger.error("provider_config has empty api keys")
+        return None
+    if cfg.llm_provider not in SUPPORTED_LLM_PROVIDERS:
+        # Fail closed here so the entrypoint gate posts a "failed" outcome and
+        # shuts down instead of build_llm raising mid session construction.
+        logger.error("unsupported llm provider: %s", cfg.llm_provider)
         return None
     return cfg
 

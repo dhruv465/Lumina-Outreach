@@ -47,6 +47,11 @@ import { cacheOnSendHook } from "./utils/responseCache";
 // Load environment variables
 dotenv.config();
 
+if (process.env.NODE_ENV === "production" && !process.env.CONFIG_ENCRYPTION_KEY) {
+  // BYO keys cannot be decrypted without it; refuse to boot rather than fail per-call.
+  throw new Error("CONFIG_ENCRYPTION_KEY must be set in production");
+}
+
 // Initialize Sentry for Performance Monitoring and Error Tracking
 import * as Sentry from '@sentry/node';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';

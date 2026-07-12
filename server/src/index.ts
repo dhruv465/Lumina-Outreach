@@ -15,7 +15,6 @@ import aiOrchestrationRoutes from "./routes/aiOrchestrationRoutes";
 import analyticsRoutes from "./routes/analyticsRoutes";
 import batchCallRoutes from "./routes/batchCallRoutes";
 import callRoutes from "./routes/callRoutes";
-import callFeedbackRoutes from "./routes/callFeedbackRoutes";
 import campaignRoutes from "./routes/campaignRoutes";
 import configurationRoutes from "./routes/configurationRoutes";
 import dashboardRoutes from "./routes/dashboardRoutes";
@@ -235,7 +234,6 @@ app.register(async (apiRouter) => {
   apiRouter.register(campaignRoutes, { prefix: "/campaigns" });
   apiRouter.register(callRoutes, { prefix: "/calls" });
   apiRouter.register(batchCallRoutes, { prefix: "/batch-calls" });
-  apiRouter.register(callFeedbackRoutes, { prefix: "/feedback" });
   apiRouter.register(dashboardRoutes, { prefix: "/dashboard" });
   apiRouter.register(configurationRoutes, { prefix: "/configuration" });
   apiRouter.register(analyticsRoutes, { prefix: "/analytics" });

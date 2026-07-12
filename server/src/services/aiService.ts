@@ -2,7 +2,6 @@ import { getAIOrchestrationService } from './aiOrchestrationAdapter';
 import { getRAGSystem } from './rag/ragSystem';
 import logger from '../utils/logger';
 import { appendToSheet } from '../utils/googleSheetsService';
-import CallFeedback from '../models/CallFeedback';
 import Lead from '../models/Lead';
 
 export interface AIAnalysisResult {
@@ -127,32 +126,6 @@ class AIService {
       }
     } catch (error) {
       logger.error(`Error updating lead status: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  async collectTrainingData(params: {
-    text: string;
-    analysis: AIAnalysisResult;
-    sessionId: string;
-    leadId: string;
-    campaignId: string;
-    actualIntent?: string;
-  }) {
-    try {
-      await CallFeedback.create({
-        callId: params.sessionId,
-        conversationId: params.sessionId,
-        leadId: params.leadId,
-        campaignId: params.campaignId,
-        text: params.text,
-        detectedIntent: params.analysis.intent,
-        detectedConfidence: params.analysis.confidence,
-        actualIntent: params.actualIntent,
-        isCorrect: !params.actualIntent || params.actualIntent === params.analysis.intent,
-        isUsedForTraining: false,
-      });
-    } catch (error) {
-      logger.error(`Error saving training data: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

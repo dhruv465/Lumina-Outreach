@@ -76,6 +76,35 @@ interface CampaignFormData {
   };
 }
 
+interface VoiceOption {
+  voiceId: string;
+  name: string;
+}
+
+const AURA_DEFAULT_VOICE = "aura-2-thalia-en";
+
+const selectDeepgramVoice = (
+  voices: VoiceOption[],
+  currentVoiceId?: string,
+  configuredVoiceId?: string
+) => {
+  const availableVoiceIds = new Set(voices.map((voice) => voice.voiceId));
+
+  if (currentVoiceId && availableVoiceIds.has(currentVoiceId)) {
+    return currentVoiceId;
+  }
+
+  if (configuredVoiceId && availableVoiceIds.has(configuredVoiceId)) {
+    return configuredVoiceId;
+  }
+
+  if (availableVoiceIds.has(AURA_DEFAULT_VOICE)) {
+    return AURA_DEFAULT_VOICE;
+  }
+
+  return voices[0]?.voiceId || configuredVoiceId || "";
+};
+
 // Initial form state
 const initialFormState: CampaignFormData = {
   name: "",
@@ -99,7 +128,7 @@ const initialFormState: CampaignFormData = {
     timeZone: "Asia/Kolkata",
   },
   llmConfiguration: {
-    model: "gpt-4o",
+    model: "",
     systemPrompt:
       "You are an AI assistant making a call on behalf of a company. Be professional, friendly, and helpful.",
     temperature: 0.7,
@@ -138,19 +167,6 @@ const languages = [
   "Gujarati",
 ];
 
-// LLM model options
-const llmModels = [
-  "gpt-4o",
-  "gpt-3.5-turbo",
-  "claude-3-opus",
-  "claude-3-sonnet",
-  "gemini-pro",
-];
-
-// Voice provider options - will be dynamically loaded from system configuration
-// This is just a fallback if API fails
-const defaultVoiceProviders = ["deepgram"];
-
 const CampaignForm = ({
   campaignId,
   onClose,
@@ -163,13 +179,11 @@ const CampaignForm = ({
   >("basic");
   const [systemConfig, setSystemConfig] = useState<any>(null);
   const [availableLLMModels, setAvailableLLMModels] =
-    useState<string[]>(llmModels);
-  const [availableVoiceProviders, setAvailableVoiceProviders] = useState<
-    string[]
-  >(defaultVoiceProviders);
-  const [availableVoices, setAvailableVoices] = useState<{
-    [key: string]: any[];
-  }>({});
+    useState<string[]>([]);
+  const [llmModelsUnavailable, setLLMModelsUnavailable] = useState(false);
+  const [availableVoices, setAvailableVoices] = useState<
+    Record<string, VoiceOption[]>
+  >({});
   const [loadingVoices, setLoadingVoices] = useState<{
     [key: string]: boolean;
   }>({});
@@ -233,7 +247,7 @@ const CampaignForm = ({
           timeZone: campaignData.callTiming?.timeZone || "Asia/Kolkata",
         },
         llmConfiguration: {
-          model: campaignData.llmConfiguration?.model || "gpt-4o",
+          model: campaignData.llmConfiguration?.model || "",
           systemPrompt:
             campaignData.llmConfiguration?.systemPrompt ||
             "You are an AI assistant making a call on behalf of a company. Be professional, friendly, and helpful.",
@@ -241,7 +255,7 @@ const CampaignForm = ({
           maxTokens: campaignData.llmConfiguration?.maxTokens || 500,
         },
         voiceConfiguration: {
-          provider: campaignData.voiceConfiguration?.provider || "deepgram",
+          provider: "deepgram",
           voiceId: campaignData.voiceConfiguration?.voiceId || "",
           speed: campaignData.voiceConfiguration?.speed || 1.0,
           pitch: campaignData.voiceConfiguration?.pitch || 1.0,
@@ -263,96 +277,31 @@ const CampaignForm = ({
 
   // Load system configuration
   // Load voices for a specific TTS provider
-  const loadVoicesForProvider = async (provider: string, _config: any) => {
+  const loadVoicesForProvider = async (provider: string) => {
     console.log(`Loading voices for provider: ${provider}`);
+
+    if (provider !== "deepgram") {
+      return [];
+    }
 
     // Set loading state
     setLoadingVoices((prev) => ({ ...prev, [provider]: true }));
 
     try {
-      let voices: any[] = [];
+      let voices: VoiceOption[] = [];
 
-      // Load voices from the current provider contracts.
-      if (voices.length === 0) {
-        switch (provider) {
-          case "deepgram":
-            try {
-              const result = await configApi.getVoiceOptions();
-              if (Array.isArray(result.voices)) {
-                voices = result.voices.map(
-                  (voice: { value: string; name: string }) => ({
-                    voiceId: voice.value,
-                    name: voice.name,
-                  })
-                );
-              }
-            } catch (error) {
-              console.error("Error loading Deepgram TTS voices:", error);
-            }
-            break;
-
-          case "openai":
-            // OpenAI has predefined voices
-            voices = [
-              { voiceId: "alloy", name: "Alloy" },
-              { voiceId: "echo", name: "Echo" },
-              { voiceId: "fable", name: "Fable" },
-              { voiceId: "onyx", name: "Onyx" },
-              { voiceId: "nova", name: "Nova" },
-              { voiceId: "shimmer", name: "Shimmer" },
-            ];
-            console.log("Using predefined OpenAI TTS voices");
-            break;
-
-          case "google":
-            // Basic Google TTS voices
-            voices = [
-              {
-                voiceId: "en-US-Standard-A",
-                name: "Standard Female A (en-US)",
-              },
-              { voiceId: "en-US-Standard-B", name: "Standard Male B (en-US)" },
-              {
-                voiceId: "en-US-Standard-C",
-                name: "Standard Female C (en-US)",
-              },
-              { voiceId: "en-US-Standard-D", name: "Standard Male D (en-US)" },
-              {
-                voiceId: "en-US-Standard-E",
-                name: "Standard Female E (en-US)",
-              },
-              {
-                voiceId: "en-US-Standard-F",
-                name: "Standard Female F (en-US)",
-              },
-              { voiceId: "en-US-Wavenet-A", name: "Wavenet Female A (en-US)" },
-              { voiceId: "en-US-Wavenet-B", name: "Wavenet Male B (en-US)" },
-              { voiceId: "en-US-Wavenet-C", name: "Wavenet Female C (en-US)" },
-              { voiceId: "en-US-Wavenet-D", name: "Wavenet Male D (en-US)" },
-              { voiceId: "en-US-Wavenet-E", name: "Wavenet Female E (en-US)" },
-              { voiceId: "en-US-Wavenet-F", name: "Wavenet Female F (en-US)" },
-            ];
-            console.log("Using predefined Google TTS voices");
-            break;
-
-          case "aws":
-            // Basic AWS Polly voices
-            voices = [
-              { voiceId: "Joanna", name: "Joanna (en-US)" },
-              { voiceId: "Matthew", name: "Matthew (en-US)" },
-              { voiceId: "Amy", name: "Amy (en-GB)" },
-              { voiceId: "Emma", name: "Emma (en-GB)" },
-              { voiceId: "Brian", name: "Brian (en-GB)" },
-              { voiceId: "Aditi", name: "Aditi (en-IN)" },
-              { voiceId: "Raveena", name: "Raveena (en-IN)" },
-              { voiceId: "Joey", name: "Joey (en-US)" },
-            ];
-            console.log("Using predefined AWS Polly voices");
-            break;
-
-          default:
-            console.warn(`Unknown TTS provider: ${provider}`);
+      try {
+        const result = await configApi.getVoiceOptions();
+        if (Array.isArray(result.voices)) {
+          voices = result.voices.map(
+            (voice: { value: string; name: string }) => ({
+              voiceId: voice.value,
+              name: voice.name,
+            })
+          );
         }
+      } catch (error) {
+        console.error("Error loading Deepgram TTS voices:", error);
       }
 
       // Update the voices map for this provider
@@ -399,7 +348,6 @@ const CampaignForm = ({
             })
           )
         : [];
-      setAvailableVoiceProviders(["deepgram"]);
       setAvailableVoices((current) => ({
         ...current,
         deepgram: deepgramVoices,
@@ -414,15 +362,17 @@ const CampaignForm = ({
             (model: { value?: string }) => model.value ? [model.value] : []
           )
         : [];
-      if (providerModels.length > 0) {
-        setAvailableLLMModels(providerModels);
-      }
+      setAvailableLLMModels(providerModels);
+      setLLMModelsUnavailable(providerModels.length === 0);
 
       // Only update form data if not editing an existing campaign
       if (!campaignId) {
         const bestProvider = "deepgram";
-        const bestVoiceId =
-          config.deepgramConfig?.ttsVoice || "aura-2-thalia-en";
+        const bestVoiceId = selectDeepgramVoice(
+          deepgramVoices,
+          undefined,
+          config.deepgramConfig?.ttsVoice
+        );
 
         // Determine best system prompt
         const bestSystemPrompt =
@@ -431,9 +381,7 @@ const CampaignForm = ({
 
         // Determine best LLM model
         const bestModel =
-          config.llmConfig?.defaultModel ||
-          providerModels[0] ||
-          "gpt-4.1";
+          config.llmConfig?.defaultModel || providerModels[0] || "";
 
         // Ensure we have a valid date
         const today = new Date();
@@ -479,6 +427,8 @@ const CampaignForm = ({
       setIsLoading(false);
     } catch (error) {
       console.error("Error loading system configuration:", error);
+      setAvailableLLMModels([]);
+      setLLMModelsUnavailable(true);
 
       // Set fallback values for required fields even if config loading fails
       if (!campaignId) {
@@ -526,20 +476,59 @@ const CampaignForm = ({
   useEffect(() => {
     const provider = formData.voiceConfiguration.provider;
     if (provider && systemConfig) {
-      loadVoicesForProvider(provider, systemConfig);
+      loadVoicesForProvider(provider);
     }
   }, [formData.voiceConfiguration.provider]);
 
+  useEffect(() => {
+    if (!campaignId || !systemConfig) {
+      return;
+    }
+
+    const deepgramVoices = availableVoices.deepgram || [];
+    const normalizedVoiceId = selectDeepgramVoice(
+      deepgramVoices,
+      formData.voiceConfiguration.voiceId,
+      systemConfig.deepgramConfig?.ttsVoice
+    );
+
+    if (
+      formData.voiceConfiguration.provider === "deepgram" &&
+      formData.voiceConfiguration.voiceId === normalizedVoiceId
+    ) {
+      return;
+    }
+
+    setFormData((previous) => ({
+      ...previous,
+      voiceConfiguration: {
+        ...previous.voiceConfiguration,
+        provider: "deepgram",
+        voiceId: normalizedVoiceId,
+      },
+    }));
+  }, [
+    availableVoices.deepgram,
+    campaignId,
+    formData.voiceConfiguration.provider,
+    formData.voiceConfiguration.voiceId,
+    systemConfig,
+  ]);
+
   // Handle TTS provider change
   const handleTTSProviderChange = async (provider: string) => {
-    console.log("TTS provider changed to:", provider);
+    if (provider !== "deepgram") {
+      return;
+    }
+
+    console.log("TTS provider changed to: deepgram");
 
     // Update form data immediately
     setFormData((prev: CampaignFormData) => ({
       ...prev,
       voiceConfiguration: {
         ...prev.voiceConfiguration,
-        provider: provider,
+        provider: "deepgram",
         voiceId: "", // Reset voice ID when provider changes
       },
     }));
@@ -557,7 +546,7 @@ const CampaignForm = ({
       // Load voices for the new provider
       if (systemConfig) {
         setLoadingVoices((prev) => ({ ...prev, [provider]: true }));
-        const voices = await loadVoicesForProvider(provider, systemConfig);
+        const voices = await loadVoicesForProvider("deepgram");
 
         // Auto-select first voice if available
         if (voices.length > 0) {
@@ -721,6 +710,11 @@ const CampaignForm = ({
 
     try {
       setIsLoading(true);
+      const normalizedVoiceId = selectDeepgramVoice(
+        availableVoices.deepgram || [],
+        formData.voiceConfiguration.voiceId,
+        systemConfig?.deepgramConfig?.ttsVoice
+      );
 
       // Validate form data
       if (
@@ -739,13 +733,21 @@ const CampaignForm = ({
       }
 
       // Additional validation for required fields
-      if (
-        !formData.voiceConfiguration.voiceId ||
-        formData.voiceConfiguration.voiceId === ""
-      ) {
+      if (!normalizedVoiceId) {
         showToast(
           "Voice ID Required",
-          "Please select or enter a Voice ID for the campaign.",
+          "Please select an available Deepgram voice for the campaign.",
+          "destructive"
+        );
+        setCurrentTab("ai");
+        setIsLoading(false);
+        return;
+      }
+
+      if (!formData.llmConfiguration.model) {
+        showToast(
+          "LLM Model Required",
+          "Model options are unavailable. Configure an LLM provider before saving the campaign.",
           "destructive"
         );
         setCurrentTab("ai");
@@ -819,7 +821,7 @@ const CampaignForm = ({
           timeZone: formData.callTiming.timeZone,
         },
         llmConfiguration: {
-          model: formData.llmConfiguration.model || "gpt-4o",
+          model: formData.llmConfiguration.model,
           // Ensure systemPrompt is always provided as a non-empty string
           systemPrompt:
             formData.llmConfiguration.systemPrompt ||
@@ -828,12 +830,8 @@ const CampaignForm = ({
           maxTokens: Number(formData.llmConfiguration.maxTokens) || 500,
         },
         voiceConfiguration: {
-          provider: formData.voiceConfiguration.provider || "deepgram",
-          // Ensure voiceId is always provided as a non-empty string from available voices
-          voiceId:
-            formData.voiceConfiguration.voiceId ||
-            systemConfig?.deepgramConfig?.ttsVoice ||
-            "aura-2-thalia-en",
+          provider: "deepgram",
+          voiceId: normalizedVoiceId,
           speed: Number(formData.voiceConfiguration.speed) || 1.0,
           pitch: Number(formData.voiceConfiguration.pitch) || 1.0,
         },
@@ -865,9 +863,7 @@ const CampaignForm = ({
 
       if (!submissionData.voiceConfiguration.voiceId) {
         console.error("voiceId is still missing after all validations");
-        const fallbackVoiceId =
-          systemConfig?.deepgramConfig?.ttsVoice || "aura-2-thalia-en";
-        submissionData.voiceConfiguration.voiceId = fallbackVoiceId;
+        submissionData.voiceConfiguration.voiceId = normalizedVoiceId;
       }
 
       // Explicitly sanitize the submissionData to ensure it has the three required fields
@@ -890,8 +886,7 @@ const CampaignForm = ({
 
       // 3. Ensure voiceId is a non-empty Deepgram Aura voice.
       if (!submissionData.voiceConfiguration.voiceId) {
-        submissionData.voiceConfiguration.voiceId =
-          systemConfig?.deepgramConfig?.ttsVoice || "aura-2-thalia-en";
+        submissionData.voiceConfiguration.voiceId = normalizedVoiceId;
       }
 
       // Double-check that the required fields are present and log them
@@ -1442,29 +1437,43 @@ const CampaignForm = ({
                           <label className="block text-sm font-medium mb-1">
                             LLM Model
                           </label>
-                          <Select
-                            value={formData.llmConfiguration.model}
-                            onValueChange={(value) =>
-                              setFormData((prev) => ({
-                                ...prev,
-                                llmConfiguration: {
-                                  ...prev.llmConfiguration,
-                                  model: value,
-                                },
-                              }))
-                            }
-                          >
-                            <SelectTrigger className="w-full rounded-xl">
-                              <SelectValue placeholder="Select a model" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {availableLLMModels.map((model: string) => (
-                                <SelectItem key={model} value={model}>
-                                  {model}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          {llmModelsUnavailable ? (
+                            <>
+                              <Input
+                                value={formData.llmConfiguration.model}
+                                disabled
+                                placeholder="Model options unavailable"
+                              />
+                              <p className="text-xs text-red-500 mt-1">
+                                Model options are unavailable. Any saved model
+                                is preserved but cannot be changed here.
+                              </p>
+                            </>
+                          ) : (
+                            <Select
+                              value={formData.llmConfiguration.model}
+                              onValueChange={(value) =>
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  llmConfiguration: {
+                                    ...prev.llmConfiguration,
+                                    model: value,
+                                  },
+                                }))
+                              }
+                            >
+                              <SelectTrigger className="w-full rounded-xl">
+                                <SelectValue placeholder="Select a model" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {availableLLMModels.map((model: string) => (
+                                  <SelectItem key={model} value={model}>
+                                    {model}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
                         </div>
 
                         <div>
@@ -1479,29 +1488,9 @@ const CampaignForm = ({
                               <SelectValue placeholder="Select a voice provider" />
                             </SelectTrigger>
                             <SelectContent>
-                              {availableVoiceProviders.map(
-                                (provider: string) => (
-                                  <SelectItem key={provider} value={provider}>
-                                    {provider === "elevenlabs"
-                                      ? "ElevenLabs"
-                                      : provider === "deepgram"
-                                      ? "Deepgram TTS"
-                                      : provider === "openai"
-                                      ? "OpenAI TTS"
-                                      : provider === "google"
-                                      ? "Google TTS"
-                                      : provider === "aws"
-                                      ? "AWS Polly"
-                                      : provider.charAt(0).toUpperCase() +
-                                        provider.slice(1)}
-                                  </SelectItem>
-                                )
-                              )}
-                              {availableVoiceProviders.length === 0 && (
-                                <SelectItem value="" disabled>
-                                  No TTS providers configured
-                                </SelectItem>
-                              )}
+                              <SelectItem value="deepgram">
+                                Deepgram TTS
+                              </SelectItem>
                             </SelectContent>
                           </Select>
                           <p className="text-xs text-muted-foreground mt-1">
@@ -1581,7 +1570,7 @@ const CampaignForm = ({
                               <SelectContent>
                                 {availableVoices[
                                   formData.voiceConfiguration.provider
-                                ].map((voice: any) => (
+                                ].map((voice: VoiceOption) => (
                                   <SelectItem
                                     key={voice.voiceId}
                                     value={voice.voiceId}
@@ -1594,23 +1583,13 @@ const CampaignForm = ({
                           ) : (
                             <div className="space-y-2">
                               <Input
-                                type="text"
-                                name="voiceConfiguration.voiceId"
                                 value={formData.voiceConfiguration.voiceId}
-                                onChange={handleChange}
-                                className={
-                                  !formData.voiceConfiguration.voiceId
-                                    ? "border-red-500"
-                                    : ""
-                                }
-                                placeholder="Enter voice ID from provider"
-                                required
+                                disabled
+                                placeholder="Voice options unavailable"
                               />
-                              <p className="text-xs text-muted-foreground">
-                                No voices loaded for{" "}
-                                {formData.voiceConfiguration.provider}. Check
-                                provider configuration or enter voice ID
-                                manually.
+                              <p className="text-xs text-red-500">
+                                Deepgram voice options are unavailable. Check
+                                provider configuration and reload the voices.
                               </p>
                               <Button
                                 type="button"
@@ -1618,8 +1597,7 @@ const CampaignForm = ({
                                 size="sm"
                                 onClick={() =>
                                   loadVoicesForProvider(
-                                    formData.voiceConfiguration.provider,
-                                    systemConfig
+                                    formData.voiceConfiguration.provider
                                   )
                                 }
                                 className="text-xs"

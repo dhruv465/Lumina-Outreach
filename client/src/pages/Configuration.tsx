@@ -302,6 +302,7 @@ const Configuration = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [webhookSecretDirty, setWebhookSecretDirty] = useState(false);
   const [verifyingDeepgram, setVerifyingDeepgram] = useState(false);
   const [verifyingProvider, setVerifyingProvider] =
     useState<ProviderName | null>(null);
@@ -375,6 +376,7 @@ const Configuration = () => {
           complianceSettings: { ...(serverConfig.complianceSettings ?? {}) },
           webhookSecret: serverConfig.webhookConfig?.secret || "",
         });
+        setWebhookSecretDirty(false);
       } catch (error) {
         if (!cancelled) {
           const message = getErrorMessage(
@@ -552,17 +554,16 @@ const Configuration = () => {
         },
         generalSettings: config.generalSettings,
         complianceSettings: config.complianceSettings,
-        webhookConfig: {
-          ...(keyForPayload(config.webhookSecret)
-            ? { secret: keyForPayload(config.webhookSecret) }
-            : {}),
-        },
+        ...(webhookSecretDirty
+          ? { webhookConfig: { secret: config.webhookSecret } }
+          : {}),
       };
 
       const saved = (await configApi.updateConfiguration(
         payload,
       )) as ServerConfiguration;
       mergeSavedConfiguration(saved);
+      setWebhookSecretDirty(false);
       toast({
         title: "Configuration Saved",
         description: "Your provider and call settings have been updated.",
@@ -753,7 +754,11 @@ const Configuration = () => {
               </CardTitle>
               <HoverCard>
                 <HoverCardTrigger asChild>
-                  <button className="h-5 w-5 text-muted-foreground hover:text-foreground">
+                  <button
+                    type="button"
+                    aria-label="About Deepgram speech and voice"
+                    className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                  >
                     <Info className="h-4 w-4" />
                   </button>
                 </HoverCardTrigger>
@@ -786,7 +791,11 @@ const Configuration = () => {
               </CardTitle>
               <HoverCard>
                 <HoverCardTrigger asChild>
-                  <button className="h-5 w-5 text-muted-foreground hover:text-foreground">
+                  <button
+                    type="button"
+                    aria-label="About the default LLM provider"
+                    className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                  >
                     <Info className="h-4 w-4" />
                   </button>
                 </HoverCardTrigger>
@@ -1078,7 +1087,11 @@ const Configuration = () => {
             Call Settings
             <HoverCard>
               <HoverCardTrigger asChild>
-                <button className="ml-1 h-5 w-5 text-muted-foreground transition-colors hover:text-foreground">
+                <button
+                  type="button"
+                  aria-label="About call settings"
+                  className="ml-1 h-5 w-5 text-muted-foreground transition-colors hover:text-foreground"
+                >
                   <Info className="h-5 w-5" />
                 </button>
               </HoverCardTrigger>
@@ -1182,15 +1195,16 @@ const Configuration = () => {
               id="webhookSecret"
               type="password"
               value={config.webhookSecret}
-              onChange={(event) =>
+              onChange={(event) => {
+                setWebhookSecretDirty(true);
                 setConfig((current) => ({
                   ...current,
                   webhookSecret: replacementKeyValue(
                     current.webhookSecret,
                     event.target.value,
                   ),
-                }))
-              }
+                }));
+              }}
               onFocus={(event) => {
                 if (isMasked(config.webhookSecret)) {
                   event.currentTarget.select();

@@ -106,7 +106,7 @@ const initialFormState: CampaignFormData = {
     maxTokens: 500,
   },
   voiceConfiguration: {
-    provider: "elevenlabs",
+    provider: "deepgram",
     voiceId: "", // Will be set from system configuration during form load
     speed: 1.0,
     pitch: 1.0,
@@ -149,13 +149,7 @@ const llmModels = [
 
 // Voice provider options - will be dynamically loaded from system configuration
 // This is just a fallback if API fails
-const defaultVoiceProviders = [
-  "elevenlabs",
-  "deepgram",
-  "openai",
-  "google",
-  "aws",
-];
+const defaultVoiceProviders = ["deepgram"];
 
 const CampaignForm = ({
   campaignId,
@@ -247,7 +241,7 @@ const CampaignForm = ({
           maxTokens: campaignData.llmConfiguration?.maxTokens || 500,
         },
         voiceConfiguration: {
-          provider: campaignData.voiceConfiguration?.provider || "elevenlabs",
+          provider: campaignData.voiceConfiguration?.provider || "deepgram",
           voiceId: campaignData.voiceConfiguration?.voiceId || "",
           speed: campaignData.voiceConfiguration?.speed || 1.0,
           pitch: campaignData.voiceConfiguration?.pitch || 1.0,
@@ -269,7 +263,7 @@ const CampaignForm = ({
 
   // Load system configuration
   // Load voices for a specific TTS provider
-  const loadVoicesForProvider = async (provider: string, config: any) => {
+  const loadVoicesForProvider = async (provider: string, _config: any) => {
     console.log(`Loading voices for provider: ${provider}`);
 
     // Set loading state
@@ -278,72 +272,22 @@ const CampaignForm = ({
     try {
       let voices: any[] = [];
 
-      // First try to load from the API endpoint if it's available
-      try {
-        const response = await api.get(
-          `/tts-provider/voices?provider=${provider}`
-        );
-        if (
-          response.data.success &&
-          response.data.voices &&
-          response.data.voices.length > 0
-        ) {
-          voices = response.data.voices;
-          console.log(
-            `Loaded ${voices.length} voices for ${provider} from API endpoint`
-          );
-        }
-      } catch (apiError) {
-        console.warn(
-          `API endpoint for ${provider} voices unavailable:`,
-          apiError
-        );
-        // Continue to provider-specific methods
-      }
-
-      // If API endpoint didn't work, try provider-specific methods
+      // Load voices from the current provider contracts.
       if (voices.length === 0) {
         switch (provider) {
-          case "elevenlabs":
-            if (config.elevenLabsConfig?.apiKey) {
-              try {
-                const result = await configApi.testElevenLabsConnection({
-                  apiKey: config.elevenLabsConfig.apiKey,
-                });
-                if (result.success && result.details?.availableVoices) {
-                  voices = result.details.availableVoices;
-                  console.log(
-                    `Loaded ${voices.length} ElevenLabs voices from test connection`
-                  );
-                }
-              } catch (error) {
-                console.error("Error loading ElevenLabs voices:", error);
-                // Fallback to stored voices if API call fails
-                if (config.elevenLabsConfig?.availableVoices?.length > 0) {
-                  voices = config.elevenLabsConfig.availableVoices;
-                  console.log(
-                    `Using stored ElevenLabs voices: ${voices.length}`
-                  );
-                }
-              }
-            }
-            break;
-
           case "deepgram":
-            if (config.ttsConfig?.deepgramTTS?.apiKey) {
-              try {
-                const result = await configApi.testDeepgramTTSConnection({
-                  apiKey: config.ttsConfig.deepgramTTS.apiKey,
-                });
-                if (result.success && result.details?.availableVoices) {
-                  voices = result.details.availableVoices;
-                  console.log(
-                    `Loaded ${voices.length} Deepgram TTS voices from test connection`
-                  );
-                }
-              } catch (error) {
-                console.error("Error loading Deepgram TTS voices:", error);
+            try {
+              const result = await configApi.getVoiceOptions();
+              if (Array.isArray(result.voices)) {
+                voices = result.voices.map(
+                  (voice: { value: string; name: string }) => ({
+                    voiceId: voice.value,
+                    name: voice.name,
+                  })
+                );
               }
+            } catch (error) {
+              console.error("Error loading Deepgram TTS voices:", error);
             }
             break;
 
@@ -411,27 +355,6 @@ const CampaignForm = ({
         }
       }
 
-      // If we still have no voices but have stored voices in the config, use those
-      if (voices.length === 0) {
-        if (
-          provider === "elevenlabs" &&
-          config.elevenLabsConfig?.availableVoices?.length > 0
-        ) {
-          voices = config.elevenLabsConfig.availableVoices;
-          console.log(
-            `Using stored ElevenLabs voices as last resort: ${voices.length}`
-          );
-        } else if (
-          provider === "deepgram" &&
-          config.ttsConfig?.deepgramTTS?.availableVoices?.length > 0
-        ) {
-          voices = config.ttsConfig.deepgramTTS.availableVoices;
-          console.log(
-            `Using stored Deepgram voices as last resort: ${voices.length}`
-          );
-        }
-      }
-
       // Update the voices map for this provider
       setAvailableVoices((prev) => ({
         ...prev,
@@ -448,237 +371,69 @@ const CampaignForm = ({
     }
   };
 
-  // Load available TTS providers from system configuration
-  const loadTTSProvidersAndVoices = async (config: any) => {
-    const enabledProviders: string[] = [];
-
-    console.log("Loading TTS providers from config:", config);
-
-    // Check ElevenLabs
-    if (config.elevenLabsConfig?.apiKey) {
-      enabledProviders.push("elevenlabs");
-      console.log("ElevenLabs is configured");
-    }
-
-    // Check Deepgram TTS
-    if (config.ttsConfig?.deepgramTTS?.apiKey) {
-      enabledProviders.push("deepgram");
-      console.log("Deepgram TTS is configured");
-    }
-
-    // Check OpenAI TTS
-    if (
-      config.ttsConfig?.openai?.apiKey ||
-      (config.llmConfig?.providers &&
-        config.llmConfig.providers.find(
-          (p: any) => p.name === "openai" && p.apiKey
-        ))
-    ) {
-      enabledProviders.push("openai");
-      console.log("OpenAI TTS is configured");
-    }
-
-    // Check Google TTS
-    if (
-      config.ttsConfig?.google?.apiKey ||
-      (config.llmConfig?.providers &&
-        config.llmConfig.providers.find(
-          (p: any) => p.name === "google" && p.apiKey
-        ))
-    ) {
-      enabledProviders.push("google");
-      console.log("Google TTS is configured");
-    }
-
-    // Check AWS Polly
-    if (config.ttsConfig?.aws?.accessKeyId) {
-      enabledProviders.push("aws");
-      console.log("AWS Polly is configured");
-    }
-
-    // Also check the main TTS provider setting from Configuration page
-    const mainTTSProvider = config.ttsConfig?.provider;
-    if (mainTTSProvider && !enabledProviders.includes(mainTTSProvider)) {
-      console.log(
-        "Adding main TTS provider from configuration:",
-        mainTTSProvider
-      );
-      enabledProviders.push(mainTTSProvider);
-    }
-
-    // Add all providers listed as fallback providers
-    if (
-      config.ttsConfig?.fallbackProviders &&
-      Array.isArray(config.ttsConfig.fallbackProviders)
-    ) {
-      for (const provider of config.ttsConfig.fallbackProviders) {
-        if (!enabledProviders.includes(provider)) {
-          console.log("Adding fallback TTS provider:", provider);
-          enabledProviders.push(provider);
-        }
-      }
-    }
-
-    // Fallback to showing all available providers if none are explicitly enabled
-    if (enabledProviders.length === 0) {
-      console.warn("No TTS providers enabled, showing all available providers");
-      const allProviders = [
-        "elevenlabs",
-        "deepgram",
-        "openai",
-        "google",
-        "aws",
-      ];
-      setAvailableVoiceProviders(allProviders);
-    } else {
-      console.log("Enabled TTS providers:", enabledProviders);
-      setAvailableVoiceProviders(enabledProviders);
-    }
-
-    // Load voices for the main TTS provider if it exists
-    if (mainTTSProvider) {
-      await loadVoicesForProvider(mainTTSProvider, config);
-    }
-
-    // Also load voices for other providers in the background
-    for (const provider of enabledProviders) {
-      if (provider !== mainTTSProvider) {
-        loadVoicesForProvider(provider, config).catch((error) => {
-          console.warn(`Failed to load voices for ${provider}:`, error);
-        });
-      }
-    }
-  };
-
   const loadSystemConfiguration = async () => {
     try {
       setIsLoading(true);
       const config = await configApi.getConfiguration();
+      const [llmOptionsResult, voiceOptionsResult] = await Promise.allSettled([
+        configApi.getLLMOptions(),
+        configApi.getVoiceOptions(),
+      ]);
+      const llmOptions =
+        llmOptionsResult.status === "fulfilled"
+          ? llmOptionsResult.value
+          : { providers: [] };
+      const voiceOptions =
+        voiceOptionsResult.status === "fulfilled"
+          ? voiceOptionsResult.value
+          : { voices: [] };
       setSystemConfig(config);
 
       console.log("Loaded system configuration:", config);
 
-      // Load TTS providers and voices
-      await loadTTSProvidersAndVoices(config);
+      const deepgramVoices = Array.isArray(voiceOptions.voices)
+        ? voiceOptions.voices.map(
+            (voice: { value: string; name: string }) => ({
+              voiceId: voice.value,
+              name: voice.name,
+            })
+          )
+        : [];
+      setAvailableVoiceProviders(["deepgram"]);
+      setAvailableVoices((current) => ({
+        ...current,
+        deepgram: deepgramVoices,
+      }));
 
-      // Filter LLM models based on the configured provider
-      if (config.llmConfig?.providers) {
-        const defaultProvider = config.llmConfig.defaultProvider;
-        const providerInfo = config.llmConfig.providers.find(
-          (p: any) => p.name === defaultProvider
-        );
-
-        if (
-          providerInfo &&
-          providerInfo.availableModels &&
-          providerInfo.availableModels.length > 0
-        ) {
-          setAvailableLLMModels(providerInfo.availableModels);
-        }
+      const providerInfo = llmOptions.providers?.find(
+        (provider: { value?: string }) =>
+          provider.value === config.llmConfig?.defaultProvider
+      );
+      const providerModels = Array.isArray(providerInfo?.models)
+        ? providerInfo.models.flatMap(
+            (model: { value?: string }) => model.value ? [model.value] : []
+          )
+        : [];
+      if (providerModels.length > 0) {
+        setAvailableLLMModels(providerModels);
       }
 
       // Only update form data if not editing an existing campaign
       if (!campaignId) {
-        // Determine the best voice provider and voice ID from available options
-        let bestProvider = "";
-        let bestVoiceId = "";
-
-        // Priority 1: Use the main TTS provider from Configuration page
-        if (config.ttsConfig?.provider) {
-          bestProvider = config.ttsConfig.provider;
-          console.log(
-            "Using main TTS provider from configuration:",
-            bestProvider
-          );
-
-          // Get the voice ID from Configuration page based on provider
-          if (
-            bestProvider === "deepgram" &&
-            config.ttsConfig?.deepgramTTS?.defaultModel
-          ) {
-            bestVoiceId = config.ttsConfig.deepgramTTS.defaultModel;
-            console.log(
-              "Using Deepgram default model from configuration:",
-              bestVoiceId
-            );
-          } else if (
-            bestProvider === "elevenlabs" &&
-            config.elevenLabsConfig?.selectedVoiceId
-          ) {
-            bestVoiceId = config.elevenLabsConfig.selectedVoiceId;
-            console.log(
-              "Using ElevenLabs selected voice from configuration:",
-              bestVoiceId
-            );
-          }
-        }
-
-        // Priority 2: Use the first available provider from our dynamic list
-        if (!bestProvider && availableVoiceProviders.length > 0) {
-          bestProvider = availableVoiceProviders[0];
-          console.log("Using first available provider:", bestProvider);
-        }
-
-        // Priority 3: Get the first voice for the selected provider
-        if (
-          bestProvider &&
-          !bestVoiceId &&
-          availableVoices[bestProvider]?.length > 0
-        ) {
-          bestVoiceId = availableVoices[bestProvider][0].voiceId;
-          console.log(
-            `Using first available voice: ${availableVoices[bestProvider][0].name} (${bestVoiceId}) from ${bestProvider}`
-          );
-        }
-
-        // Fallback to system configuration if still no provider/voice found
-        if (!bestProvider || !bestVoiceId) {
-          // Priority 4: Use provider-appropriate defaults based on configuration
-          if (!bestProvider) {
-            bestProvider = config.ttsConfig?.provider || "elevenlabs";
-          }
-
-          if (!bestVoiceId) {
-            if (bestProvider === "deepgram") {
-              bestVoiceId =
-                config.ttsConfig?.deepgramTTS?.defaultModel ||
-                "aura-2-thalia-en";
-              console.log("Using Deepgram default model:", bestVoiceId);
-            } else if (
-              bestProvider === "elevenlabs" &&
-              config.elevenLabsConfig?.availableVoices?.length > 0
-            ) {
-              bestVoiceId = config.elevenLabsConfig.availableVoices[0].voiceId;
-              console.log("Using first ElevenLabs voice:", bestVoiceId);
-            } else if (config.voiceAIConfig?.conversationalAI?.defaultVoiceId) {
-              bestVoiceId =
-                config.voiceAIConfig.conversationalAI.defaultVoiceId;
-              console.log("Using system default voice ID:", bestVoiceId);
-            } else {
-              console.warn("No voices available in system configuration");
-              if (availableVoiceProviders.length === 0) {
-                showToast(
-                  "Warning",
-                  "No TTS providers configured in system. Please configure TTS providers in the Configuration page.",
-                  "destructive"
-                );
-              }
-              bestVoiceId = "";
-            }
-          }
-        }
+        const bestProvider = "deepgram";
+        const bestVoiceId =
+          config.deepgramConfig?.ttsVoice || "aura-2-thalia-en";
 
         // Determine best system prompt
         const bestSystemPrompt =
-          config.llmConfig?.defaultSystemPrompt ||
           config.generalSettings?.defaultSystemPrompt ||
           "You are an AI assistant making a call on behalf of a company. Be professional, friendly, and helpful.";
 
         // Determine best LLM model
         const bestModel =
           config.llmConfig?.defaultModel ||
-          config.llmConfig?.providers?.[0]?.availableModels?.[0] ||
-          "gpt-4o";
+          providerModels[0] ||
+          "gpt-4.1";
 
         // Ensure we have a valid date
         const today = new Date();
@@ -789,22 +544,11 @@ const CampaignForm = ({
       },
     }));
 
-    // Show toast for missing provider configuration
-    if (provider === "elevenlabs" && !systemConfig?.elevenLabsConfig?.apiKey) {
+    if (provider === "deepgram" && !systemConfig?.deepgramConfig?.apiKey) {
       toast({
         title: "Provider Not Configured",
         description:
-          "ElevenLabs API key is not configured. Please add it in the Configuration page.",
-        variant: "default",
-      });
-    } else if (
-      provider === "deepgram" &&
-      !systemConfig?.ttsConfig?.deepgramTTS?.apiKey
-    ) {
-      toast({
-        title: "Provider Not Configured",
-        description:
-          "Deepgram TTS API key is not configured. Please add it in the Configuration page.",
+          "Deepgram API key is not configured. Please add it in the Configuration page.",
         variant: "default",
       });
     }
@@ -1084,12 +828,12 @@ const CampaignForm = ({
           maxTokens: Number(formData.llmConfiguration.maxTokens) || 500,
         },
         voiceConfiguration: {
-          provider: formData.voiceConfiguration.provider || "elevenlabs",
+          provider: formData.voiceConfiguration.provider || "deepgram",
           // Ensure voiceId is always provided as a non-empty string from available voices
           voiceId:
             formData.voiceConfiguration.voiceId ||
-            systemConfig?.elevenLabsConfig?.availableVoices?.[0]?.voiceId ||
-            "",
+            systemConfig?.deepgramConfig?.ttsVoice ||
+            "aura-2-thalia-en",
           speed: Number(formData.voiceConfiguration.speed) || 1.0,
           pitch: Number(formData.voiceConfiguration.pitch) || 1.0,
         },
@@ -1121,10 +865,8 @@ const CampaignForm = ({
 
       if (!submissionData.voiceConfiguration.voiceId) {
         console.error("voiceId is still missing after all validations");
-        // Try to get a voice ID from any available source
         const fallbackVoiceId =
-          systemConfig?.elevenLabsConfig?.availableVoices?.[0]?.voiceId ||
-          "default-voice-id";
+          systemConfig?.deepgramConfig?.ttsVoice || "aura-2-thalia-en";
         submissionData.voiceConfiguration.voiceId = fallbackVoiceId;
       }
 
@@ -1146,25 +888,10 @@ const CampaignForm = ({
           "You are an AI assistant making a call on behalf of a company.";
       }
 
-      // 3. Ensure voiceId is a non-empty string and is valid
-      if (
-        !submissionData.voiceConfiguration.voiceId ||
-        submissionData.voiceConfiguration.voiceId === "default-voice-id"
-      ) {
-        const availableVoices =
-          systemConfig?.elevenLabsConfig?.availableVoices || [];
-        if (availableVoices.length > 0) {
-          submissionData.voiceConfiguration.voiceId =
-            availableVoices[0].voiceId;
-          console.log(
-            `Using first available voice: ${availableVoices[0].name} (${availableVoices[0].voiceId})`
-          );
-        } else {
-          console.error("No voices available in system configuration");
-          throw new Error(
-            "No voices configured in the system. Please configure ElevenLabs voices in system settings."
-          );
-        }
+      // 3. Ensure voiceId is a non-empty Deepgram Aura voice.
+      if (!submissionData.voiceConfiguration.voiceId) {
+        submissionData.voiceConfiguration.voiceId =
+          systemConfig?.deepgramConfig?.ttsVoice || "aura-2-thalia-en";
       }
 
       // Double-check that the required fields are present and log them

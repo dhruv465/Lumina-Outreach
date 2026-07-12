@@ -1,8 +1,26 @@
 /**
- * Utility functions for checking configuration status
+ * Utility functions for checking whether the current user's BYO providers are
+ * ready for LiveKit calling.
  */
 
-import { configApi } from '../services/configApi';
+import { configApi } from "../services/configApi";
+
+interface ProviderConfiguration {
+  name?: string;
+  apiKey?: string;
+  status?: string;
+}
+
+interface ConfigurationResponse {
+  deepgramConfig?: {
+    apiKey?: string;
+    status?: string;
+  };
+  llmConfig?: {
+    defaultProvider?: string;
+    providers?: ProviderConfiguration[];
+  };
+}
 
 export interface ConfigurationStatus {
   telephonyConfigured: boolean;
@@ -11,70 +29,41 @@ export interface ConfigurationStatus {
   asrConfigured: boolean;
   overallConfigured: boolean;
   details: {
-    twilioAccountSid: boolean;
-    twilioAuthToken: boolean;
-    twilioPhoneNumber: boolean;
-    elevenLabsApiKey: boolean;
+    deepgramApiKey: boolean;
     llmApiKey: boolean;
-    asrApiKey: boolean;
   };
 }
 
-/**
- * Check if telephony services are properly configured
- */
 export async function checkTelephonyConfiguration(): Promise<ConfigurationStatus> {
   try {
-    const config = await configApi.getConfiguration();
-    
-    const twilioAccountSid = !!(config.twilioConfig?.accountSid && !config.twilioConfig.accountSid.includes('••••'));
-    const twilioAuthToken = !!(config.twilioConfig?.authToken && !config.twilioConfig.authToken.includes('••••'));
-    const twilioPhoneNumber = !!(config.twilioConfig?.phoneNumbers?.[0]);
-    
-    // Determine voice configuration based on selected TTS provider
-    const selectedTTSProvider = config.ttsConfig?.provider || 'elevenlabs';
-    let voiceConfigured = false;
-    
-    if (selectedTTSProvider === 'elevenlabs') {
-      voiceConfigured = !!(config.elevenLabsConfig?.isEnabled && config.elevenLabsConfig?.apiKey && !config.elevenLabsConfig.apiKey.includes('••••'));
-    } else if (selectedTTSProvider === 'deepgram') {
-      voiceConfigured = !!(config.ttsConfig?.deepgramTTS?.isEnabled && config.ttsConfig?.deepgramTTS?.apiKey && !config.ttsConfig.deepgramTTS.apiKey.includes('••••'));
-    } else {
-      // For other providers, fall back to ElevenLabs check for backward compatibility
-      voiceConfigured = !!(config.elevenLabsConfig?.apiKey && !config.elevenLabsConfig.apiKey.includes('••••'));
-    }
-    
-    const llmProvider = config.llmConfig?.providers?.find((p: any) => p.name === config.llmConfig?.defaultProvider);
-    const llmApiKey = !!(llmProvider?.apiKey && !llmProvider.apiKey.includes('••••'));
-    
-    // Check ASR configuration (support both asrConfig.apiKey and deepgramConfig.apiKey)
-    const asrApiKey = !!(
-      (config.asrConfig?.apiKey && !config.asrConfig.apiKey.includes('••••')) ||
-      (config.deepgramConfig?.apiKey && !config.deepgramConfig.apiKey.includes('••••'))
+    const config =
+      (await configApi.getConfiguration()) as ConfigurationResponse;
+    const deepgramConfigured = Boolean(
+      config.deepgramConfig?.apiKey &&
+        config.deepgramConfig.status === "verified",
     );
-    
-    const telephonyConfigured = twilioAccountSid && twilioAuthToken && twilioPhoneNumber;
-    const llmConfigured = llmApiKey;
-    const asrConfigured = asrApiKey;
-    const overallConfigured = telephonyConfigured && voiceConfigured && llmConfigured && asrConfigured;
-    
+    const defaultProvider = config.llmConfig?.defaultProvider;
+    const llmProvider = config.llmConfig?.providers?.find(
+      (provider) => provider.name === defaultProvider,
+    );
+    const llmConfigured = Boolean(
+      llmProvider?.apiKey && llmProvider.status === "verified",
+    );
+    const overallConfigured = deepgramConfigured && llmConfigured;
+
     return {
-      telephonyConfigured,
-      voiceConfigured,
+      telephonyConfigured: overallConfigured,
+      voiceConfigured: deepgramConfigured,
       llmConfigured,
-      asrConfigured,
+      asrConfigured: deepgramConfigured,
       overallConfigured,
       details: {
-        twilioAccountSid,
-        twilioAuthToken,
-        twilioPhoneNumber,
-        elevenLabsApiKey: selectedTTSProvider === 'elevenlabs' ? voiceConfigured : !!(config.elevenLabsConfig?.apiKey && !config.elevenLabsConfig.apiKey.includes('••••')),
-        llmApiKey,
-        asrApiKey,
-      }
+        deepgramApiKey: deepgramConfigured,
+        llmApiKey: llmConfigured,
+      },
     };
   } catch (error) {
-    console.error('Error checking configuration:', error);
+    console.error("Error checking configuration:", error);
     return {
       telephonyConfigured: false,
       voiceConfigured: false,
@@ -82,45 +71,9 @@ export async function checkTelephonyConfiguration(): Promise<ConfigurationStatus
       asrConfigured: false,
       overallConfigured: false,
       details: {
-        twilioAccountSid: false,
-        twilioAuthToken: false,
-        twilioPhoneNumber: false,
-        elevenLabsApiKey: false,
+        deepgramApiKey: false,
         llmApiKey: false,
-        asrApiKey: false,
-      }
-    };
-  }
-}
-
-/**
- * Test telephony service connectivity
- */
-export async function testTelephonyConnection(): Promise<{ success: boolean; message: string }> {
-  try {
-    const config = await configApi.getConfiguration();
-    
-    if (!config.twilioConfig?.accountSid || !config.twilioConfig?.authToken) {
-      return {
-        success: false,
-        message: 'Twilio credentials not configured'
-      };
-    }
-    
-    const result = await configApi.testTwilioConnection({
-      accountSid: config.twilioConfig.accountSid,
-      authToken: config.twilioConfig.authToken,
-      phoneNumber: config.twilioConfig.phoneNumbers?.[0]
-    });
-    
-    return {
-      success: result.success,
-      message: result.message || (result.success ? 'Connection successful' : 'Connection failed')
-    };
-  } catch (error: any) {
-    return {
-      success: false,
-      message: error.response?.data?.message || 'Failed to test connection'
+      },
     };
   }
 }

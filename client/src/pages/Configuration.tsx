@@ -1,23 +1,3 @@
-import { PasswordInput } from "@/components/PasswordInput";
-import RealTimeSTT from "@/components/RealTimeSTT";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,1046 +23,557 @@ import {
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/useToast";
-import api from "@/services/api";
 import { configApi } from "@/services/configApi";
-import { sttApi } from "@/services/sttApi";
 import {
   AlertTriangle,
   CheckCircle,
   Info,
   MessageSquare,
   Mic,
-  Phone,
-  PhoneCall,
   Save,
   Settings,
-  Trash2,
   Volume2,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-interface Configuration {
-  // AI Voice Settings
-  voiceProvider: "elevenlabs" | "openai" | "google";
-  voiceId: string;
-  voiceSpeed: number;
-  voiceStability: number;
-  voiceClarity: number;
-  elevenLabsApiKey: string;
-  elevenLabsStatus?: "unverified" | "verified" | "failed";
-  useFlashModel?: boolean;
+type VerifyStatus = "unverified" | "verified" | "failed";
+type ProviderName = "openai" | "anthropic" | "google";
 
-  // TTS Provider Settings
-  ttsProvider: "elevenlabs" | "deepgram" | "openai" | "google" | "aws";
-  ttsPrimaryProvider: string;
-  ttsFallbackProviders: string[];
-  ttsAutoFallback: boolean;
-  deepgramTTSApiKey: string;
-  deepgramTTSStatus?: "unverified" | "verified" | "failed";
+interface DeepgramState {
+  apiKey: string;
+  sttModel: string;
+  ttsVoice: string;
+  status: VerifyStatus;
+}
 
-  // Speech Recognition Settings
-  deepgramApiKey: string;
-  deepgramStatus?: "unverified" | "verified" | "failed";
-  deepgramEnabled?: boolean;
-  deepgramModel?: string;
+interface LlmProviderState {
+  apiKey: string;
+  status: VerifyStatus;
+}
 
-  // Phone Settings
-  twilioAccountSid: string;
-  twilioAuthToken: string;
-  twilioPhoneNumber: string;
-  twilioStatus?: "unverified" | "verified" | "failed";
-
-  // AI Model Settings
-  llmProvider: "openai" | "anthropic" | "google";
-  llmModel: string;
-  llmApiKey: string;
-  llmStatus?: "unverified" | "verified" | "failed";
-  systemPrompt: string;
-  temperature: number;
-  maxTokens: number;
-
-  // Call Settings
+interface GeneralSettings {
+  defaultSystemPrompt: string;
   maxCallDuration: number;
-  retryAttempts: number;
-  retryDelay: number;
-  timeZone: string;
+  callRetryAttempts: number;
+  callRetryDelay: number;
+  defaultTimeZone: string;
+  [key: string]: unknown;
+}
 
-  // Webhook Settings
+interface ConfigurationState {
+  deepgram: DeepgramState;
+  providers: Record<ProviderName, LlmProviderState>;
+  defaultProvider: ProviderName;
+  defaultModel: string;
+  temperature: number;
+  generalSettings: GeneralSettings;
+  complianceSettings: Record<string, unknown>;
   webhookSecret: string;
-  webhookStatus?: "unverified" | "verified" | "failed";
 }
 
-interface ModelInfo {
-  id: string;
+interface ServerProviderConfig {
+  name?: string;
+  apiKey?: string;
+  status?: string;
+}
+
+interface ServerConfiguration {
+  deepgramConfig?: {
+    apiKey?: string;
+    sttModel?: string;
+    ttsVoice?: string;
+    status?: string;
+  };
+  llmConfig?: {
+    providers?: ServerProviderConfig[];
+    defaultProvider?: string;
+    defaultModel?: string;
+    temperature?: number;
+  };
+  generalSettings?: Partial<GeneralSettings>;
+  complianceSettings?: Record<string, unknown>;
+  webhookConfig?: {
+    secret?: string;
+  };
+}
+
+interface LlmModelOption {
   name: string;
-  description?: string;
-  maxTokens?: number;
-  contextWindow?: number;
-  pricing?: {
-    input: number;
-    output: number;
-  };
-  capabilities?: {
-    chat: boolean;
-    completion: boolean;
-    streaming: boolean;
-    functionCalling?: boolean;
-    vision?: boolean;
+  value: string;
+}
+
+interface LlmProviderOption {
+  name: string;
+  value: ProviderName;
+  models: LlmModelOption[];
+}
+
+interface LlmOptionsResponse {
+  providers?: Array<{
+    name?: string;
+    value?: string;
+    models?: Array<{ name?: string; value?: string }>;
+  }>;
+}
+
+interface VoiceOption {
+  name: string;
+  value: string;
+}
+
+interface VoiceOptionsResponse {
+  voices?: Array<{ name?: string; value?: string }>;
+}
+
+interface VerifyResponse {
+  ok?: boolean;
+  status?: string;
+  error?: string;
+}
+
+interface ApiErrorLike {
+  message?: string;
+  response?: {
+    data?: {
+      message?: string;
+      error?: string;
+    };
   };
 }
 
-const Configuration = () => {
-  const { toast } = useToast();
-  const [config, setConfig] = useState<Configuration>({
-    // AI Voice Settings
-    voiceProvider: "elevenlabs",
-    voiceId: "", // Initialize with empty or a sensible default if no API voices yet
-    voiceSpeed: 1.0,
-    voiceStability: 0.8,
-    voiceClarity: 0.9,
-    elevenLabsApiKey: "",
-    elevenLabsStatus: "unverified",
-    useFlashModel: true, // Default to using Flash model
+const PROVIDERS: Array<{ value: ProviderName; label: string }> = [
+  { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "google", label: "Google" },
+];
 
-    // TTS Provider Settings
-    ttsProvider: "elevenlabs",
-    ttsPrimaryProvider: "elevenlabs",
-    ttsFallbackProviders: ["deepgram"],
-    ttsAutoFallback: true,
-    deepgramTTSApiKey: "",
-    deepgramTTSStatus: "unverified",
+const MASK_PREFIX = "••••";
 
-    // Speech Recognition Settings
-    deepgramApiKey: "",
-    deepgramStatus: "unverified",
-    deepgramEnabled: true,
-    deepgramModel: "",
-
-    // Phone Settings
-    twilioAccountSid: "",
-    twilioAuthToken: "",
-    twilioPhoneNumber: "",
-    twilioStatus: "unverified",
-
-    // AI Model Settings
-    llmProvider: "openai",
-    llmModel: "gpt-4",
-    llmApiKey: "",
-    llmStatus: "unverified",
-    systemPrompt: `You are a professional sales representative making cold calls. Be polite, respectful, and helpful. Your goal is to:
+const DEFAULT_SYSTEM_PROMPT = `You are a professional sales representative making cold calls. Be polite, respectful, and helpful. Your goal is to:
 1. Introduce yourself and your company
 2. Understand the prospect's needs
 3. Present relevant solutions
 4. Schedule a follow-up if there's interest
 5. Respect their time and decisions
 
-Keep the conversation natural and engaging. If they're not interested, politely end the call.`,
-    temperature: 0.7,
-    maxTokens: 150,
+Keep the conversation natural and engaging. If they're not interested, politely end the call.`;
 
-    // Call Settings
-    maxCallDuration: 300, // 5 minutes
-    retryAttempts: 3,
-    retryDelay: 60, // 1 minute
-    timeZone: "America/New_York",
+const INITIAL_STATE: ConfigurationState = {
+  deepgram: {
+    apiKey: "",
+    sttModel: "nova-3",
+    ttsVoice: "aura-2-thalia-en",
+    status: "unverified",
+  },
+  providers: {
+    openai: { apiKey: "", status: "unverified" },
+    anthropic: { apiKey: "", status: "unverified" },
+    google: { apiKey: "", status: "unverified" },
+  },
+  defaultProvider: "openai",
+  defaultModel: "gpt-4.1",
+  temperature: 0.7,
+  generalSettings: {
+    defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT,
+    maxCallDuration: 300,
+    callRetryAttempts: 3,
+    callRetryDelay: 60,
+    defaultTimeZone: "America/New_York",
+  },
+  complianceSettings: {},
+  webhookSecret: "",
+};
 
-    // Webhook Settings
-    webhookSecret: "",
-    webhookStatus: "unverified",
-  });
+function isProviderName(value: unknown): value is ProviderName {
+  return value === "openai" || value === "anthropic" || value === "google";
+}
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [testingVoice, setTestingVoice] = useState(false);
-  const [testingCall, setTestingCall] = useState(false);
-  const [openTestCallDialog, setOpenTestCallDialog] = useState(false);
-  const [openSTTDialog, setOpenSTTDialog] = useState(false);
-  const [testCallNumber, setTestCallNumber] = useState("");
-  const [testCallMessage, setTestCallMessage] = useState("");
-  const [testingLLMChat, setTestingLLMChat] = useState(false);
-  const [openTestLLMChatDialog, setOpenTestLLMChatDialog] = useState(false);
-  const [testLLMResponse, setTestLLMResponse] = useState("");
-  const [availableVoices, setAvailableVoices] = useState<
-    { voiceId: string; name: string; previewUrl?: string }[]
-  >([]);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState<{
-    type: string;
-    name?: string;
-  } | null>(null);
-  const [availableModels, setAvailableModels] = useState<{
-    [provider: string]: ModelInfo[];
-  }>({});
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [availableSTTModels, setAvailableSTTModels] = useState<string[]>([]);
-  const [loadingSTTModels, setLoadingSTTModels] = useState(false);
-  const [sttTier, setSTTTier] = useState<'free' | 'basic' | 'premium'>('free');
-  const [apiKeyDebounceTimer, setApiKeyDebounceTimer] =
-    useState<NodeJS.Timeout | null>(null);
-  const [elevenLabsDebounceTimer, setElevenLabsDebounceTimer] =
-    useState<NodeJS.Timeout | null>(null);
-  const [deepgramTTSDebounceTimer, setDeepgramTTSDebounceTimer] =
-    useState<NodeJS.Timeout | null>(null);
+function toVerifyStatus(value: unknown): VerifyStatus {
+  if (value === "verified" || value === "failed") return value;
+  return "unverified";
+}
 
-  // Load available voices based on selected TTS provider
-  const loadVoices = useCallback(async () => {
-    console.log("🔄 loadVoices called with config:", {
-      ttsProvider: config.ttsProvider,
-      elevenLabsApiKey: config.elevenLabsApiKey ? "SET" : "NOT SET",
-      deepgramTTSApiKey: config.deepgramTTSApiKey ? "SET" : "NOT SET",
-    });
+function isMasked(value: string): boolean {
+  return value.startsWith(MASK_PREFIX);
+}
 
-    try {
-      let currentVoices: {
-        voiceId: string;
-        name: string;
-        previewUrl?: string;
-      }[] = []; // Initialize as empty
+function keyForPayload(value: string): string | undefined {
+  return value && !isMasked(value) ? value : undefined;
+}
 
-      console.log(`Loading voices for TTS provider: ${config.ttsProvider}`);
+function replacementKeyValue(currentValue: string, nextValue: string): string {
+  if (!isMasked(currentValue) || nextValue === currentValue) return nextValue;
+  if (nextValue.includes(currentValue)) {
+    return nextValue.replace(currentValue, "");
+  }
+  return nextValue.includes("•") ? "" : nextValue;
+}
 
-      if (config.ttsProvider === "elevenlabs") {
-        const currentApiKey = config.elevenLabsApiKey;
-
-        // Check if API key is set
-        console.log("ElevenLabs API key status:", {
-          key: currentApiKey ? "SET" : "NOT SET",
-          length: currentApiKey?.length,
-        });
-
-        // Try to fetch custom voices if API key is set
-        if (currentApiKey) {
-          console.log("Fetching available voices from ElevenLabs...");
-          try {
-            const result = await configApi.testElevenLabsConnection({
-              apiKey: currentApiKey,
-            });
-
-            if (result.success && result.details?.availableVoices) {
-              console.log(
-                `Received ${result.details.availableVoices.length} voices from ElevenLabs`
-              );
-              currentVoices = result.details.availableVoices; // Use only API voices
-            }
-          } catch (error) {
-            console.error("Error loading voices from ElevenLabs API:", error);
-            // Keep currentVoices empty if API call fails
-          }
-        }
-      } else if (config.ttsProvider === "deepgram") {
-        const currentApiKey = config.deepgramTTSApiKey;
-
-        console.log("Deepgram TTS API key status:", {
-          key: currentApiKey ? "SET" : "NOT SET",
-          length: currentApiKey?.length,
-        });
-
-        // Only fetch Deepgram voices if API key is set
-        if (currentApiKey) {
-          try {
-            console.log("Fetching available voices from Deepgram TTS...");
-            const result = await configApi.testDeepgramTTSConnection({
-              apiKey: currentApiKey,
-            });
-
-            if (result.success && result.details?.availableVoices) {
-              console.log(
-                `Received ${result.details.availableVoices.length} voices from Deepgram TTS`
-              );
-              currentVoices = result.details.availableVoices; // Use the voices directly from the test response
-            }
-          } catch (error) {
-            console.error("Error loading voices from Deepgram TTS API:", error);
-            // Keep currentVoices empty if API call fails
-          }
-        } else {
-          console.log("No Deepgram API key set, skipping voice fetch");
-        }
-      } else {
-        console.log(
-          `Voice loading not implemented for provider: ${config.ttsProvider}`
-        );
-      }
-
-      console.log("🎤 Setting available voices:", {
-        provider: config.ttsProvider,
-        voiceCount: currentVoices.length,
-        voices: currentVoices.slice(0, 3).map((v) => v.name),
-      });
-
-      setAvailableVoices(currentVoices);
-      // Only update voiceId if it's empty or if no voices are available at all
-      if (currentVoices.length === 0) {
-        // Clear voiceId if no voices are available
-        setConfig((prevConfig) => ({ ...prevConfig, voiceId: "" }));
-      } else if (!config.voiceId) {
-        // Set to first voice only if no voice is currently selected
-        setConfig((prevConfig) => ({
-          ...prevConfig,
-          voiceId: currentVoices[0].voiceId,
-        }));
-      }
-      // Note: We intentionally don't override the user's selection even if
-      // their selected voice isn't in the current available voices list,
-      // as this could be temporary (API issues, etc.)
-    } catch (error) {
-      console.error("Error in loadVoices function:", error);
-      setAvailableVoices([]); // Ensure availableVoices is empty on error
-      setConfig((prevConfig) => ({ ...prevConfig, voiceId: "" }));
-    }
-  }, [
-    config.ttsProvider,
-    config.elevenLabsApiKey,
-    config.deepgramTTSApiKey,
-    setConfig,
-  ]); // Updated dependencies for TTS provider
-
-  // Fetch available models from the API (for saved configurations)
-  // This function fetches a general list of models, possibly for all configured providers.
-  const fetchAvailableModels = useCallback(async () => {
-    try {
-      setLoadingModels(true);
-      // This API call is expected to return models based on the overall server-side configuration
-      // or for all providers, not necessarily tied to the live-typed config.llmApiKey.
-      const response = await api.get("/configuration/llm-models");
-
-      if (response.data.success) {
-        setAvailableModels(response.data.models);
-      }
-    } catch (error) {
-      console.error("Failed to fetch available models:", error);
-    } finally {
-      setLoadingModels(false);
-    }
-    // }, [config.llmApiKey]); // Removed config.llmApiKey from dependencies
-  }, [api, setLoadingModels, setAvailableModels]); // Assuming 'api' is stable or memoized
-
-  // Dynamically fetch models when user enters an API key
-  const fetchModelsWithApiKey = useCallback(
-    async (provider: string, apiKey: string) => {
-      if (!apiKey || apiKey.length < 10) {
-        // Clear models for the provider if API key is invalid
-        setAvailableModels((prev) => ({
-          ...prev,
-          [provider]: [],
-        }));
-        return;
-      }
-
-      try {
-        setLoadingModels(true);
-        console.log(`Fetching models for provider: ${provider}`);
-
-        // Use provider name as is - we no longer need to map 'gemini' to 'google'
-        const response = await configApi.fetchModelsWithApiKey(
-          provider,
-          apiKey
-        );
-
-        console.log(`Models fetched for ${provider}:`, response);
-
-        if (response.success && response.models && response.models.length > 0) {
-          // Store models under the original provider name requested
-          setAvailableModels((prev) => {
-            const updated = {
-              ...prev,
-              [provider]: response.models,
-            };
-            console.log(`Updated availableModels:`, updated);
-            return updated;
-          });
-
-          // If no model is currently selected and models are available, select the first one
-          // Use a separate function to avoid circular dependencies
-          setConfig((prevConfig) => {
-            if (!prevConfig.llmModel && response.models.length > 0) {
-              console.log(`Auto-selecting first model: ${response.models[0].id}`);
-              return { ...prevConfig, llmModel: response.models[0].id };
-            }
-            return prevConfig;
-          });
-        } else {
-          console.warn(`No models returned for ${provider}:`, response);
-        }
-      } catch (error) {
-        console.error(`Failed to fetch models for ${provider}:`, error);
-        // Clear models on error
-        setAvailableModels((prev) => ({
-          ...prev,
-          [provider]: [],
-        }));
-
-        // Show toast error
-        toast({
-          title: "Failed to fetch models",
-          description:
-            error instanceof Error
-              ? error.message
-              : "Please check your API key and try again.",
-          variant: "destructive",
-        });
-      } finally {
-        setLoadingModels(false);
-      }
-    },
-    [toast, setConfig, setAvailableModels, setLoadingModels]
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (!error || typeof error !== "object") return fallback;
+  const apiError = error as ApiErrorLike;
+  return (
+    apiError.response?.data?.message ||
+    apiError.response?.data?.error ||
+    apiError.message ||
+    fallback
   );
+}
 
-  // Fetch available STT models from Deepgram based on configured API key
-  const fetchSTTModels = useCallback(async () => {
-    if (!config.deepgramApiKey || config.deepgramApiKey.length < 10) {
-      setAvailableSTTModels([]);
-      return;
-    }
+function normalizeLlmOptions(response: LlmOptionsResponse): LlmProviderOption[] {
+  return (response.providers ?? []).flatMap((provider) => {
+    if (!isProviderName(provider.value)) return [];
+    return [
+      {
+        name: provider.name || provider.value,
+        value: provider.value,
+        models: (provider.models ?? []).flatMap((model) =>
+          model.name && model.value
+            ? [{ name: model.name, value: model.value }]
+            : [],
+        ),
+      },
+    ];
+  });
+}
 
-    try {
-      setLoadingSTTModels(true);
-      const response = await sttApi.getAvailableModels();
-      
-      if (response.success && response.models && response.models.length > 0) {
-        setAvailableSTTModels(response.models);
-        setSTTTier(response.tier);
-        
-        // If current model is not in available models, select the first one
-        // Use a ref to the current model to avoid dependency loop
-        setConfig((prev) => {
-          if (!response.models.includes(prev.deepgramModel || '')) {
-            return {
-              ...prev,
-              deepgramModel: response.models[0]
-            };
-          }
-          return prev;
-        });
-      } else {
-        console.warn('Failed to fetch STT models:', response.message);
-        setAvailableSTTModels([]);
-        toast({
-          title: "No Models Available",
-          description: response.message || "Unable to fetch available models for this API key. Please check your API key permissions.",
-          variant: "destructive",
-        });
-      }
-    } catch (error) {
-      console.error('Error fetching STT models:', error);
-      setAvailableSTTModels([]);
-      toast({
-        title: "Error Fetching Models",
-        description: "Failed to fetch available models. Please check your API key and try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoadingSTTModels(false);
-    }
-  }, [config.deepgramApiKey, toast]);
+function normalizeVoiceOptions(response: VoiceOptionsResponse): VoiceOption[] {
+  return (response.voices ?? []).flatMap((voice) =>
+    voice.name && voice.value ? [{ name: voice.name, value: voice.value }] : [],
+  );
+}
 
-  // Clean up debounce timer on unmount
-  useEffect(() => {
-    return () => {
-      if (apiKeyDebounceTimer) {
-        clearTimeout(apiKeyDebounceTimer);
-      }
-      if (elevenLabsDebounceTimer) {
-        // Clean up elevenLabsDebounceTimer as well
-        clearTimeout(elevenLabsDebounceTimer);
-      }
-      if (deepgramTTSDebounceTimer) {
-        // Clean up deepgramTTSDebounceTimer as well
-        clearTimeout(deepgramTTSDebounceTimer);
-      }
-    };
-    // }, [apiKeyDebounceTimer]);
-  }, [apiKeyDebounceTimer, elevenLabsDebounceTimer, deepgramTTSDebounceTimer]);
+function buildProviders(
+  serverProviders: ServerProviderConfig[] | undefined,
+): Record<ProviderName, LlmProviderState> {
+  return PROVIDERS.reduce(
+    (providers, provider) => {
+      const savedProvider = serverProviders?.find(
+        (candidate) => candidate.name === provider.value,
+      );
+      providers[provider.value] = {
+        apiKey: savedProvider?.apiKey || "",
+        status: toVerifyStatus(savedProvider?.status),
+      };
+      return providers;
+    },
+    {} as Record<ProviderName, LlmProviderState>,
+  );
+}
 
-  useEffect(() => {
-    // Load voices only on component mount or when elevenLabsApiKey changes, with debounce
-    if (elevenLabsDebounceTimer) {
-      clearTimeout(elevenLabsDebounceTimer);
-    }
+function statusLabel(status: VerifyStatus, configured: boolean): string {
+  if (status === "verified") return "Connected";
+  if (status === "failed") return "Failed";
+  return configured ? "Unverified" : "Not Set";
+}
 
-    // loadVoices will use the latest config.elevenLabsApiKey due to its own useCallback dependency.
-    const newTimer = setTimeout(() => {
-      console.log("Debounced: Calling loadVoices for ElevenLabs API key.");
-      loadVoices();
-    }, 1000); // 1-second debounce
+function StatusBadge({
+  status,
+  configured,
+}: {
+  status: VerifyStatus;
+  configured: boolean;
+}) {
+  const verified = status === "verified";
+  return (
+    <Badge variant="outline" className="gap-1">
+      {verified ? (
+        <CheckCircle className="h-3 w-3" />
+      ) : (
+        <AlertTriangle
+          className={`h-3 w-3 ${status === "failed" ? "text-red-500" : "text-yellow-500"}`}
+        />
+      )}
+      {statusLabel(status, configured)}
+    </Badge>
+  );
+}
 
-    setElevenLabsDebounceTimer(newTimer);
-
-    return () => {
-      clearTimeout(newTimer);
-    };
-  }, [config.elevenLabsApiKey, loadVoices]); // Keep loadVoices in deps
-
-  // Load voices when Deepgram TTS API key changes, with debounce
-  useEffect(() => {
-    if (deepgramTTSDebounceTimer) {
-      clearTimeout(deepgramTTSDebounceTimer);
-    }
-
-    const newTimer = setTimeout(() => {
-      console.log("Debounced: Calling loadVoices for Deepgram TTS API key.");
-      loadVoices();
-    }, 1000); // 1-second debounce
-
-    setDeepgramTTSDebounceTimer(newTimer);
-
-    return () => {
-      clearTimeout(newTimer);
-    };
-  }, [config.deepgramTTSApiKey, loadVoices]);
-
-  // Load voices when TTS provider changes
-  useEffect(() => {
-    console.log(
-      "TTS provider changed, loading voices for:",
-      config.ttsProvider
-    );
-    console.log("Current config state:", {
-      ttsProvider: config.ttsProvider,
-      elevenLabsApiKey: config.elevenLabsApiKey ? "SET" : "NOT SET",
-      deepgramTTSApiKey: config.deepgramTTSApiKey ? "SET" : "NOT SET",
-    });
-    loadVoices();
-  }, [config.ttsProvider, loadVoices]);
-
-  // Fetch STT models when Deepgram API key changes
-  useEffect(() => {
-    if (config.deepgramApiKey && config.deepgramApiKey.length >= 10) {
-      const timer = setTimeout(() => {
-        fetchSTTModels();
-      }, 1000); // Debounce for 1 second
-      
-      return () => clearTimeout(timer);
-    } else {
-      // Clear models if API key is removed or too short
-      setAvailableSTTModels([]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.deepgramApiKey]);
-
-  // Fetch available models (general list) when component mounts or when the LLM provider changes.
-  // This should not run on every keystroke of the llmApiKey.
-  useEffect(() => {
-    console.log(
-      "Effect: Calling fetchAvailableModels (general list) due to mount or provider change."
-    );
-    fetchAvailableModels();
-    // }, [config.llmApiKey, fetchAvailableModels]); // Old dependencies
-  }, [fetchAvailableModels, config.llmProvider]); // New dependencies
+const Configuration = () => {
+  const { toast } = useToast();
+  const toastRef = useRef(toast);
+  const [config, setConfig] = useState<ConfigurationState>(INITIAL_STATE);
+  const [llmOptions, setLlmOptions] = useState<LlmProviderOption[]>([]);
+  const [llmOptionsAvailable, setLlmOptionsAvailable] = useState(false);
+  const [voiceOptions, setVoiceOptions] = useState<VoiceOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [verifyingDeepgram, setVerifyingDeepgram] = useState(false);
+  const [verifyingProvider, setVerifyingProvider] =
+    useState<ProviderName | null>(null);
 
   useEffect(() => {
-    // Fetch configuration from API
-    const fetchConfiguration = async () => {
+    toastRef.current = toast;
+  }, [toast]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadConfiguration = async () => {
       try {
         setLoading(true);
-        const data = await configApi.getConfiguration();
-        console.log("Fetched configuration from server:", {
-          elevenLabsConfig: {
-            voiceSpeed: data.elevenLabsConfig?.voiceSpeed,
-            voiceStability: data.elevenLabsConfig?.voiceStability,
-            voiceClarity: data.elevenLabsConfig?.voiceClarity,
-            selectedVoiceId: data.elevenLabsConfig?.selectedVoiceId,
-            isEnabled: data.elevenLabsConfig?.isEnabled,
-          },
-          llmConfig: {
-            defaultProvider: data.llmConfig?.defaultProvider,
-            defaultModel: data.llmConfig?.defaultModel,
-            temperature: data.llmConfig?.temperature,
-            maxTokens: data.llmConfig?.maxTokens,
-          },
-          generalSettings: {
-            maxCallDuration: data.generalSettings?.maxCallDuration,
-            defaultSystemPrompt: data.generalSettings?.defaultSystemPrompt
-              ? "SET"
-              : "NOT SET",
-            defaultTimeZone: data.generalSettings?.defaultTimeZone,
-          },
-          webhookConfig: {
-            // URL is now environment-only, only show secret status
-            secret: data.webhookConfig?.secret ? "SET" : "NOT SET",
-          },
-        });
+        setLoadError(null);
+        const configurationResult = await configApi.getConfiguration();
+        const [llmOptionsResult, voiceOptionsResult] = await Promise.allSettled([
+          configApi.getLLMOptions(),
+          configApi.getVoiceOptions(),
+        ]);
 
-        const llmProvider = data.llmConfig?.defaultProvider || "openai";
-        const llmApiKey = data.llmConfig?.providers.find(
-          (p: any) => p.name === llmProvider
-        )?.apiKey || "";
+        if (cancelled) return;
 
+        const serverConfig = configurationResult as ServerConfiguration;
+        const normalizedLlmOptions = normalizeLlmOptions(
+          llmOptionsResult.status === "fulfilled"
+            ? (llmOptionsResult.value as LlmOptionsResponse)
+            : {},
+        );
+        const normalizedVoiceOptions = normalizeVoiceOptions(
+          voiceOptionsResult.status === "fulfilled"
+            ? (voiceOptionsResult.value as VoiceOptionsResponse)
+            : {},
+        );
+        const defaultProvider = isProviderName(
+          serverConfig.llmConfig?.defaultProvider,
+        )
+          ? serverConfig.llmConfig.defaultProvider
+          : "openai";
+        const providerModels =
+          normalizedLlmOptions.find(
+            (provider) => provider.value === defaultProvider,
+          )?.models ?? [];
+        const savedModel = serverConfig.llmConfig?.defaultModel;
+        const defaultModel = savedModel || providerModels[0]?.value || "";
+
+        setLlmOptions(normalizedLlmOptions);
+        setLlmOptionsAvailable(normalizedLlmOptions.length > 0);
+        setVoiceOptions(normalizedVoiceOptions);
         setConfig({
-          // Set defaults for any missing properties
-          voiceProvider: data.elevenLabsConfig?.isEnabled
-            ? "elevenlabs"
-            : data.llmConfig?.providers.find(
-                (p: any) => p.name === "openai" && p.isEnabled
-              )
-            ? "openai"
-            : "google",
-          voiceId:
-            data.elevenLabsConfig?.selectedVoiceId ||
-            data.elevenLabsConfig?.availableVoices?.[0]?.voiceId ||
-            "rachel",
-          voiceSpeed: data.elevenLabsConfig?.voiceSpeed || 1.0,
-          voiceStability: data.elevenLabsConfig?.voiceStability || 0.8,
-          voiceClarity: data.elevenLabsConfig?.voiceClarity || 0.9,
-          elevenLabsApiKey: data.elevenLabsConfig?.apiKey || "",
-          elevenLabsStatus: data.elevenLabsConfig?.status || "unverified",
-          useFlashModel: data.elevenLabsConfig?.useFlashModel !== false, // Default to true if not specified
-
-          // TTS Provider Settings
-          ttsProvider: data.ttsConfig?.provider || "elevenlabs",
-          ttsPrimaryProvider:
-            data.ttsConfig?.primaryProvider ||
-            data.ttsConfig?.provider ||
-            "elevenlabs",
-          ttsFallbackProviders: data.ttsConfig?.fallbackProviders || [
-            "deepgram",
-          ],
-          ttsAutoFallback: data.ttsConfig?.autoFallback !== false, // Default to true
-          deepgramTTSApiKey: data.ttsConfig?.deepgramTTS?.apiKey || "",
-          deepgramTTSStatus:
-            data.ttsConfig?.deepgramTTS?.status || "unverified",
-
-          deepgramApiKey: data.deepgramConfig?.apiKey || "",
-          deepgramStatus: data.deepgramConfig?.status || "unverified",
-          deepgramEnabled: data.deepgramConfig?.isEnabled !== false, // Default to true if not specified
-          deepgramModel: data.deepgramConfig?.primaryModel || "",
-
-          twilioAccountSid: data.twilioConfig?.accountSid || "",
-          twilioAuthToken: data.twilioConfig?.authToken || "",
-          twilioPhoneNumber: data.twilioConfig?.phoneNumbers?.[0] || "",
-          twilioStatus: data.twilioConfig?.status || "unverified",
-
-          llmProvider: llmProvider,
-          llmModel: data.llmConfig?.defaultModel || "gpt-4",
-          llmApiKey: llmApiKey,
-          llmStatus:
-            data.llmConfig?.providers.find(
-              (p: any) => p.name === llmProvider
-            )?.status || "unverified",
-          systemPrompt:
-            data.generalSettings?.defaultSystemPrompt ||
-            `You are a professional sales representative making cold calls. Be polite, respectful, and helpful.`,
-          temperature: data.llmConfig?.temperature || 0.7,
-          maxTokens: data.llmConfig?.maxTokens || 150,
-
-          maxCallDuration: data.generalSettings?.maxCallDuration || 300,
-          retryAttempts: data.generalSettings?.callRetryAttempts || 3,
-          retryDelay: 60,
-          timeZone:
-            data.generalSettings?.defaultTimeZone ||
-            data.generalSettings?.workingHours?.timeZone ||
-            "America/New_York",
-
-          webhookSecret: data.webhookConfig?.secret || "",
-          webhookStatus: data.webhookConfig?.status || "unverified",
+          deepgram: {
+            apiKey: serverConfig.deepgramConfig?.apiKey || "",
+            sttModel: serverConfig.deepgramConfig?.sttModel || "nova-3",
+            ttsVoice:
+              serverConfig.deepgramConfig?.ttsVoice ||
+              normalizedVoiceOptions[0]?.value ||
+              "aura-2-thalia-en",
+            status: toVerifyStatus(serverConfig.deepgramConfig?.status),
+          },
+          providers: buildProviders(serverConfig.llmConfig?.providers),
+          defaultProvider,
+          defaultModel,
+          temperature:
+            typeof serverConfig.llmConfig?.temperature === "number"
+              ? serverConfig.llmConfig.temperature
+              : 0.7,
+          generalSettings: {
+            ...INITIAL_STATE.generalSettings,
+            ...(serverConfig.generalSettings ?? {}),
+          },
+          complianceSettings: { ...(serverConfig.complianceSettings ?? {}) },
+          webhookSecret: serverConfig.webhookConfig?.secret || "",
         });
-
-        // Fetch LLM models if API key exists
-        if (llmApiKey && llmApiKey.length >= 10) {
-          console.log(`Fetching models on page load for provider: ${llmProvider}`);
-          setTimeout(() => {
-            fetchModelsWithApiKey(llmProvider, llmApiKey);
-          }, 500);
-        }
-
-        // Fetch STT models if Deepgram API key exists
-        if (data.deepgramConfig?.apiKey && data.deepgramConfig.apiKey.length >= 10) {
-          console.log('Fetching STT models on page load');
-          setTimeout(() => {
-            fetchSTTModels();
-          }, 500);
-        }
       } catch (error) {
-        console.error("Error fetching configuration:", error);
-        toast({
-          title: "Error",
-          description: "Failed to load configuration. Using default settings.",
-          variant: "destructive",
-        });
-        // Keep the default state
+        if (!cancelled) {
+          const message = getErrorMessage(
+            error,
+            "Configuration settings could not be loaded.",
+          );
+          setLoadError(message);
+          toastRef.current({
+            title: "Unable to load configuration",
+            description: message,
+            variant: "destructive",
+          });
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    fetchConfiguration();
-  }, []); // Keep toast out of dependencies for now, assuming useToast provides a stable function
+    void loadConfiguration();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAttempt]);
+
+  const modelsForProvider = (provider: ProviderName) =>
+    llmOptions.find((option) => option.value === provider)?.models ?? [];
+
+  const updateDeepgram = <Key extends keyof DeepgramState>(
+    key: Key,
+    value: DeepgramState[Key],
+  ) => {
+    setConfig((current) => ({
+      ...current,
+      deepgram: {
+        ...current.deepgram,
+        [key]: value,
+        ...(key === "apiKey" ? { status: "unverified" as const } : {}),
+      },
+    }));
+  };
+
+  const updateProviderKey = (provider: ProviderName, apiKey: string) => {
+    setConfig((current) => ({
+      ...current,
+      providers: {
+        ...current.providers,
+        [provider]: {
+          ...current.providers[provider],
+          apiKey,
+          status: "unverified",
+        },
+      },
+    }));
+  };
+
+  const updateGeneralSetting = <Key extends keyof GeneralSettings>(
+    key: Key,
+    value: GeneralSettings[Key],
+  ) => {
+    setConfig((current) => ({
+      ...current,
+      generalSettings: { ...current.generalSettings, [key]: value },
+    }));
+  };
+
+  const handleDefaultProviderChange = (value: string) => {
+    if (!isProviderName(value)) return;
+    setConfig((current) => {
+      const models = modelsForProvider(value);
+      const currentModelStillApplies = models.some(
+        (model) => model.value === current.defaultModel,
+      );
+      return {
+        ...current,
+        defaultProvider: value,
+        defaultModel: currentModelStillApplies
+          ? current.defaultModel
+          : models[0]?.value || "",
+      };
+    });
+  };
+
+  const mergeSavedConfiguration = (saved: ServerConfiguration) => {
+    setConfig((current) => ({
+      ...current,
+      deepgram: {
+        ...current.deepgram,
+        apiKey: saved.deepgramConfig?.apiKey || current.deepgram.apiKey,
+        sttModel: saved.deepgramConfig?.sttModel || current.deepgram.sttModel,
+        ttsVoice: saved.deepgramConfig?.ttsVoice || current.deepgram.ttsVoice,
+        status: toVerifyStatus(
+          saved.deepgramConfig?.status ?? current.deepgram.status,
+        ),
+      },
+      providers: PROVIDERS.reduce(
+        (providers, provider) => {
+          const savedProvider = saved.llmConfig?.providers?.find(
+            (candidate) => candidate.name === provider.value,
+          );
+          providers[provider.value] = savedProvider
+            ? {
+                apiKey:
+                  savedProvider.apiKey || current.providers[provider.value].apiKey,
+                status: toVerifyStatus(savedProvider.status),
+              }
+            : current.providers[provider.value];
+          return providers;
+        },
+        {} as Record<ProviderName, LlmProviderState>,
+      ),
+      defaultProvider: isProviderName(saved.llmConfig?.defaultProvider)
+        ? saved.llmConfig.defaultProvider
+        : current.defaultProvider,
+      defaultModel: saved.llmConfig?.defaultModel || current.defaultModel,
+      temperature:
+        typeof saved.llmConfig?.temperature === "number"
+          ? saved.llmConfig.temperature
+          : current.temperature,
+      generalSettings: {
+        ...current.generalSettings,
+        ...(saved.generalSettings ?? {}),
+      },
+      complianceSettings: {
+        ...current.complianceSettings,
+        ...(saved.complianceSettings ?? {}),
+      },
+      webhookSecret: saved.webhookConfig?.secret || current.webhookSecret,
+    }));
+  };
 
   const handleSave = async () => {
+    if (verifyingDeepgram || verifyingProvider) return;
+    const { maxCallDuration, callRetryAttempts, callRetryDelay } =
+      config.generalSettings;
+    if (
+      !Number.isFinite(maxCallDuration) ||
+      !Number.isFinite(callRetryAttempts) ||
+      !Number.isFinite(callRetryDelay) ||
+      maxCallDuration < 30 ||
+      maxCallDuration > 3600 ||
+      callRetryAttempts < 0 ||
+      callRetryAttempts > 10 ||
+      callRetryDelay < 15 ||
+      callRetryDelay > 1440
+    ) {
+      toast({
+        title: "Invalid call settings",
+        description:
+          "Duration must be 30–3600 seconds, retries 0–10, and retry delay 15–1440 seconds.",
+        variant: "destructive",
+      });
+      return;
+    }
     setSaving(true);
     try {
-      // Debug log before save
-      console.log("Saving configuration with LLM provider status:", {
-        provider: config.llmProvider,
-        model: config.llmModel,
-        status: config.llmStatus,
+      const deepgramApiKey = keyForPayload(config.deepgram.apiKey);
+      const providers = PROVIDERS.map(({ value }) => {
+        const apiKey = keyForPayload(config.providers[value].apiKey);
+        return {
+          name: value,
+          ...(apiKey ? { apiKey } : {}),
+        };
       });
-
-      // Debug log before save
-      console.log("Saving configuration with voice settings:", {
-        voiceProvider: config.voiceProvider,
-        voiceId: config.voiceId,
-        voiceSpeed: config.voiceSpeed,
-        voiceStability: config.voiceStability,
-        voiceClarity: config.voiceClarity,
-        useFlashModel: config.useFlashModel,
-        elevenLabsApiKey: config.elevenLabsApiKey
-          ? `${config.elevenLabsApiKey.slice(
-              0,
-              4
-            )}...${config.elevenLabsApiKey.slice(-4)}`
-          : "NOT SET",
-      });
-
-      console.log("Saving configuration with speech recognition settings:", {
-        deepgramApiKey: config.deepgramApiKey
-          ? `${config.deepgramApiKey.slice(
-              0,
-              4
-            )}...${config.deepgramApiKey.slice(-4)}`
-          : "NOT SET",
-        deepgramEnabled: config.deepgramEnabled,
-        deepgramModel: config.deepgramModel,
-      });
-
-      console.log("Saving configuration with LLM settings:", {
-        llmProvider: config.llmProvider,
-        llmModel: config.llmModel,
-        temperature: config.temperature,
-        maxTokens: config.maxTokens,
-        llmApiKey: config.llmApiKey ? "SET" : "NOT SET",
-      });
-
-      // Transform the flat config object into the structured API format
-      const apiConfig = {
-        twilioConfig: {
-          accountSid: config.twilioAccountSid,
-          authToken: config.twilioAuthToken,
-          phoneNumbers: config.twilioPhoneNumber
-            ? [config.twilioPhoneNumber]
-            : [],
-          isEnabled: !!config.twilioAccountSid && !!config.twilioAuthToken,
-          status: config.twilioStatus,
-        },
-        elevenLabsConfig: {
-          apiKey: config.elevenLabsApiKey,
-          selectedVoiceId: config.voiceId,
-          isEnabled:
-            config.voiceProvider === "elevenlabs" && !!config.elevenLabsApiKey,
-          voiceSpeed: config.voiceSpeed,
-          voiceStability: config.voiceStability,
-          voiceClarity: config.voiceClarity,
-          status: config.elevenLabsStatus,
-          availableVoices: availableVoices.length > 0 ? availableVoices : [],
-          useFlashModel: config.useFlashModel,
-        },
+      const payload = {
         deepgramConfig: {
-          apiKey: config.deepgramApiKey,
-          isEnabled: config.deepgramEnabled,
-          primaryModel: config.deepgramModel || "",
-          tier: "enhanced",
-          status: config.deepgramStatus,
-        },
-        ttsConfig: {
-          provider: config.ttsProvider,
-          primaryProvider: config.ttsPrimaryProvider || config.ttsProvider,
-          fallbackProviders: config.ttsFallbackProviders,
-          autoFallback: config.ttsAutoFallback,
-          deepgramTTS: {
-            apiKey: config.deepgramTTSApiKey,
-            isEnabled:
-              config.ttsProvider === "deepgram" && !!config.deepgramTTSApiKey,
-            defaultModel:
-              config.ttsProvider === "deepgram"
-                ? config.voiceId
-                : "aura-2-thalia-en",
-            voiceSettings: {
-              encoding: "mp3",
-              sampleRate: 24000,
-            },
-            status: config.deepgramTTSStatus,
-          },
+          ...(deepgramApiKey ? { apiKey: deepgramApiKey } : {}),
+          sttModel: config.deepgram.sttModel,
+          ttsVoice: config.deepgram.ttsVoice,
         },
         llmConfig: {
-          defaultProvider: config.llmProvider,
-          defaultModel: config.llmModel,
+          providers,
+          defaultProvider: config.defaultProvider,
+          defaultModel: config.defaultModel,
           temperature: config.temperature,
-          maxTokens: config.maxTokens,
-          providers: [
-            {
-              name: "openai",
-              apiKey: config.llmProvider === "openai" ? config.llmApiKey : "",
-              availableModels:
-                availableModels["openai"]?.length > 0
-                  ? availableModels["openai"].map((m) => m.id)
-                  : [],
-              isEnabled: config.llmProvider === "openai",
-              status:
-                config.llmProvider === "openai"
-                  ? config.llmStatus
-                  : "unverified",
-            },
-            {
-              name: "anthropic",
-              apiKey:
-                config.llmProvider === "anthropic" ? config.llmApiKey : "",
-              availableModels:
-                availableModels["anthropic"]?.length > 0
-                  ? availableModels["anthropic"].map((m) => m.id)
-                  : [],
-              isEnabled: config.llmProvider === "anthropic",
-              status:
-                config.llmProvider === "anthropic"
-                  ? config.llmStatus
-                  : "unverified",
-            },
-            {
-              name: "google",
-              apiKey: config.llmProvider === "google" ? config.llmApiKey : "",
-              availableModels:
-                availableModels[config.llmProvider]?.length > 0
-                  ? availableModels[config.llmProvider].map((m) => m.id)
-                  : [],
-              isEnabled: config.llmProvider === "google",
-              status:
-                config.llmProvider === "google"
-                  ? config.llmStatus
-                  : "unverified",
-            },
-          ],
         },
-        generalSettings: {
-          maxCallDuration: config.maxCallDuration,
-          callRetryAttempts: config.retryAttempts,
-          defaultTimeZone: config.timeZone,
-          defaultSystemPrompt: config.systemPrompt,
-        },
+        generalSettings: config.generalSettings,
+        complianceSettings: config.complianceSettings,
         webhookConfig: {
-          secret: config.webhookSecret,
-          status: config.webhookStatus,
-        },
-        voiceAIConfig: {
-          conversationalAI: {
-            defaultVoiceId: config.voiceId,
-          },
+          ...(keyForPayload(config.webhookSecret)
+            ? { secret: keyForPayload(config.webhookSecret) }
+            : {}),
         },
       };
 
-      // Log what we're sending to server
-      console.log("LLM Provider config being sent to server:", {
-        defaultProvider: config.llmProvider,
-        providers: [
-          {
-            name: "openai",
-            status:
-              config.llmProvider === "openai" ? config.llmStatus : "unverified",
-            isEnabled: config.llmProvider === "openai",
-          },
-          {
-            name: "anthropic",
-            status:
-              config.llmProvider === "anthropic"
-                ? config.llmStatus
-                : "unverified",
-            isEnabled: config.llmProvider === "anthropic",
-          },
-          {
-            name: "google",
-            status:
-              config.llmProvider === "google" ? config.llmStatus : "unverified",
-            isEnabled: config.llmProvider === "google",
-          },
-        ],
-      });
-
-      await configApi.updateConfiguration(apiConfig);
-
-      // Debug log - check what was sent to server
-      console.log("API Config sent to server:", {
-        twilioConfig: {
-          accountSid: apiConfig.twilioConfig.accountSid ? "SET" : "NOT SET",
-          authToken: apiConfig.twilioConfig.authToken ? "SET" : "NOT SET",
-          phoneNumbers: apiConfig.twilioConfig.phoneNumbers || [],
-          isEnabled: apiConfig.twilioConfig.isEnabled,
-        },
-        elevenLabsConfig: {
-          apiKey: apiConfig.elevenLabsConfig.apiKey ? "SET" : "NOT SET",
-          selectedVoiceId:
-            apiConfig.elevenLabsConfig.selectedVoiceId || "NOT SET",
-          voiceSpeed: apiConfig.elevenLabsConfig.voiceSpeed,
-          voiceStability: apiConfig.elevenLabsConfig.voiceStability,
-          voiceClarity: apiConfig.elevenLabsConfig.voiceClarity,
-          isEnabled: apiConfig.elevenLabsConfig.isEnabled,
-        },
-        llmConfig: {
-          providers: apiConfig.llmConfig.providers.map((p: any) => ({
-            name: p.name,
-            apiKey: p.apiKey ? "SET" : "NOT SET",
-            isEnabled: p.isEnabled,
-          })),
-          defaultProvider: apiConfig.llmConfig.defaultProvider,
-          temperature: apiConfig.llmConfig.temperature,
-          maxTokens: apiConfig.llmConfig.maxTokens,
-        },
-        voiceAIConfig: {
-          conversationalAI: {
-            defaultVoiceId:
-              apiConfig.voiceAIConfig?.conversationalAI?.defaultVoiceId ||
-              "NOT SET",
-          },
-        },
-      });
-
-      // Fetch the updated configuration to ensure we have the latest data
-      const updatedConfigData = await configApi.getConfiguration();
-
-      // Update the local state with the fresh data
-      setConfig((prevConfig) => {
-        // Log what we're receiving from the server
-        console.log("Received updated configuration from server:", {
-          elevenLabsConfig: {
-            voiceSpeed: updatedConfigData.elevenLabsConfig?.voiceSpeed,
-            voiceStability: updatedConfigData.elevenLabsConfig?.voiceStability,
-            voiceClarity: updatedConfigData.elevenLabsConfig?.voiceClarity,
-          },
-          llmConfig: {
-            temperature: updatedConfigData.llmConfig?.temperature,
-            maxTokens: updatedConfigData.llmConfig?.maxTokens,
-          },
-          generalSettings: {
-            maxCallDuration: updatedConfigData.generalSettings?.maxCallDuration,
-            defaultSystemPrompt: updatedConfigData.generalSettings
-              ?.defaultSystemPrompt
-              ? "SET"
-              : "NOT SET",
-            defaultTimeZone: updatedConfigData.generalSettings?.defaultTimeZone,
-          },
-          webhookConfig: {
-            // URL is now environment-only, only show secret status
-            secret: updatedConfigData.webhookConfig?.secret ? "SET" : "NOT SET",
-          },
-        }); // Get the LLM API key - preserve the one we have if the server returns a masked key
-        const currentProvider =
-          updatedConfigData.llmConfig?.defaultProvider ||
-          prevConfig.llmProvider;
-        const serverProviderKey = updatedConfigData.llmConfig?.providers?.find(
-          (p: any) => p.name === currentProvider
-        )?.apiKey;
-
-        // Get current provider status from server, but preserve local verified status
-        const serverProviderStatus =
-          updatedConfigData.llmConfig?.providers?.find(
-            (p: any) => p.name === currentProvider
-          )?.status || "unverified";
-
-        // Preserve verification status if it was just verified locally
-        const llmStatus =
-          prevConfig.llmStatus === "verified"
-            ? "verified"
-            : serverProviderStatus;
-
-        const llmApiKey = serverProviderKey || prevConfig.llmApiKey;
-
-        return {
-          ...prevConfig,
-          // Update ElevenLabs API key and status
-          elevenLabsApiKey:
-            updatedConfigData.elevenLabsConfig?.apiKey ||
-            prevConfig.elevenLabsApiKey,
-
-          // Update status values from server
-          elevenLabsStatus:
-            updatedConfigData.elevenLabsConfig?.status ||
-            prevConfig.elevenLabsStatus,
-
-          // Always take the updated voice settings, even if they're 0
-          voiceSpeed:
-            updatedConfigData.elevenLabsConfig?.voiceSpeed !== undefined
-              ? updatedConfigData.elevenLabsConfig.voiceSpeed
-              : prevConfig.voiceSpeed,
-
-          voiceStability:
-            updatedConfigData.elevenLabsConfig?.voiceStability !== undefined
-              ? updatedConfigData.elevenLabsConfig.voiceStability
-              : prevConfig.voiceStability,
-
-          voiceClarity:
-            updatedConfigData.elevenLabsConfig?.voiceClarity !== undefined
-              ? updatedConfigData.elevenLabsConfig.voiceClarity
-              : prevConfig.voiceClarity,
-
-          // Twilio config
-          twilioAccountSid:
-            updatedConfigData.twilioConfig?.accountSid ||
-            prevConfig.twilioAccountSid,
-          twilioAuthToken:
-            updatedConfigData.twilioConfig?.authToken ||
-            prevConfig.twilioAuthToken,
-          twilioPhoneNumber:
-            updatedConfigData.twilioConfig?.phoneNumbers?.[0] ||
-            prevConfig.twilioPhoneNumber,
-          twilioStatus:
-            updatedConfigData.twilioConfig?.status || prevConfig.twilioStatus,
-
-          // LLM config
-          llmProvider:
-            updatedConfigData.llmConfig?.defaultProvider ||
-            prevConfig.llmProvider,
-          llmModel:
-            updatedConfigData.llmConfig?.defaultModel || prevConfig.llmModel,
-          llmApiKey,
-          llmStatus: llmStatus,
-          temperature:
-            updatedConfigData.llmConfig?.temperature !== undefined
-              ? updatedConfigData.llmConfig.temperature
-              : prevConfig.temperature,
-          maxTokens:
-            updatedConfigData.llmConfig?.maxTokens !== undefined
-              ? updatedConfigData.llmConfig.maxTokens
-              : prevConfig.maxTokens,
-
-          // General settings
-          maxCallDuration:
-            updatedConfigData.generalSettings?.maxCallDuration ??
-            prevConfig.maxCallDuration,
-          systemPrompt:
-            updatedConfigData.generalSettings?.defaultSystemPrompt ||
-            prevConfig.systemPrompt,
-          timeZone:
-            updatedConfigData.generalSettings?.defaultTimeZone ||
-            prevConfig.timeZone,
-
-          // TTS Provider Settings
-          ttsProvider: updatedConfigData.ttsConfig?.provider || prevConfig.ttsProvider,
-          ttsPrimaryProvider: updatedConfigData.ttsConfig?.primaryProvider || prevConfig.ttsPrimaryProvider,
-          ttsFallbackProviders: updatedConfigData.ttsConfig?.fallbackProviders || prevConfig.ttsFallbackProviders,
-          ttsAutoFallback: updatedConfigData.ttsConfig?.autoFallback ?? prevConfig.ttsAutoFallback,
-          deepgramTTSApiKey: updatedConfigData.ttsConfig?.deepgramTTS?.apiKey || prevConfig.deepgramTTSApiKey,
-          deepgramTTSStatus: updatedConfigData.ttsConfig?.deepgramTTS?.status || prevConfig.deepgramTTSStatus,
-
-          // Webhook config
-          webhookSecret:
-            updatedConfigData.webhookConfig?.secret || prevConfig.webhookSecret,
-          webhookStatus:
-            updatedConfigData.webhookConfig?.status || prevConfig.webhookStatus,
-        };
-      });
-
-      // Show success toast
+      const saved = (await configApi.updateConfiguration(
+        payload,
+      )) as ServerConfiguration;
+      mergeSavedConfiguration(saved);
       toast({
         title: "Configuration Saved",
-        description:
-          "Your settings have been successfully updated and applied.",
-        variant: "default",
+        description: "Your provider and call settings have been updated.",
       });
     } catch (error) {
-      console.error("Error saving configuration:", error);
       toast({
-        title: "Error",
-        description: "Failed to save configuration. Please try again.",
+        title: "Unable to save configuration",
+        description: getErrorMessage(
+          error,
+          "Configuration settings could not be saved.",
+        ),
         variant: "destructive",
       });
     } finally {
@@ -1090,776 +581,175 @@ Keep the conversation natural and engaging. If they're not interested, politely 
     }
   };
 
-  const handleTestVoice = async () => {
-    setTestingVoice(true);
-    try {
-      const testText = `Hello! This is a test of ${config.ttsProvider} TTS. The voice sounds clear and natural.`;
-      console.log(`Testing ${config.ttsProvider} TTS with voice: ${config.voiceId}`);
-
-      // Check if we have the required API key for the selected provider
-      const apiKey = config.ttsProvider === "elevenlabs" 
-        ? config.elevenLabsApiKey 
-        : config.ttsProvider === "deepgram" 
-        ? config.deepgramTTSApiKey 
-        : "";
-
-      if (!apiKey) {
-        throw new Error(`Please enter a valid ${config.ttsProvider} API key.`);
-      }
-
-      if (!config.voiceId) {
-        throw new Error(`Please select a voice for ${config.ttsProvider} TTS.`);
-      }
-
-      if (config.ttsProvider === "elevenlabs") {
-
-        try {
-          // Test using the TTS provider API with authentication
-          const response = await api.post(
-            "/tts-provider/synthesize",
-            {
-              text: testText,
-              voiceId: config.voiceId,
-              provider: "elevenlabs",
-              language: "en",
-            },
-            {
-              responseType: "blob",
-            }
-          );
-
-          if (!response.data) {
-            throw new Error("TTS test failed: No audio data received");
-          }
-
-          // Update status to verified on successful test
-          setConfig((prev) => ({
-            ...prev,
-            elevenLabsStatus: "verified",
-          }));
-
-          // Play the synthesized audio
-          const audioBlob = response.data;
-          const audioUrl = URL.createObjectURL(audioBlob);
-          const audio = new Audio(audioUrl);
-          await audio.play();
-
-          toast({
-            title: "Voice Test Successful",
-            description:
-              "Voice synthesis is working correctly and audio is playing.",
-          });
-
-          // Clean up the object URL
-          URL.revokeObjectURL(audioUrl);
-        } catch (error: any) {
-          console.error("Voice synthesis test error:", error);
-
-          // Update status to failed
-          setConfig((prev) => ({
-            ...prev,
-            elevenLabsStatus: "failed",
-          }));
-
-          // Check for voice limit reached error
-          const errorDetails = error.response?.data?.details;
-          if (errorDetails && errorDetails.includes("voice_limit_reached")) {
-            toast({
-              title: "Voice Limit Reached",
-              description:
-                "You've reached your custom voice limit on ElevenLabs. Try using pre-built voices instead.",
-              variant: "destructive",
-            });
-          } else {
-            throw error;
-          }
-        }
-      } else if (config.ttsProvider === "deepgram") {
-        const testText =
-          "Hello! This is a test of Deepgram TTS. The voice sounds clear and natural.";
-        console.log(`Testing Deepgram TTS with model: ${config.deepgramModel}`);
-
-        // Make sure we have a valid API key
-        const apiKey = config.deepgramTTSApiKey;
-        if (!apiKey) {
-          throw new Error("Please enter a valid Deepgram API key.");
-        }
-
-        if (!config.voiceId) {
-          throw new Error("Please select a Deepgram voice model to test.");
-        }
-
-        try {
-          // Test using the TTS provider API with authentication
-          const response = await api.post(
-            "/tts-provider/synthesize",
-            {
-              text: testText,
-              voiceId: config.voiceId,
-              provider: "deepgram",
-              language: "en",
-            },
-            {
-              responseType: "blob",
-            }
-          );
-
-          if (!response.data) {
-            throw new Error("TTS test failed: No audio data received");
-          }
-
-          // Update status to verified on successful test
-          setConfig((prev) => ({
-            ...prev,
-            deepgramTTSStatus: "verified",
-          }));
-
-          // Play the synthesized audio
-          const audioBlob = response.data;
-          const audioUrl = URL.createObjectURL(audioBlob);
-          const audio = new Audio(audioUrl);
-          await audio.play();
-
-          toast({
-            title: "Deepgram TTS Test Successful",
-            description:
-              "Deepgram TTS is working correctly and audio is playing.",
-          });
-
-          // Clean up the object URL
-          URL.revokeObjectURL(audioUrl);
-        } catch (error: any) {
-          console.error("Deepgram TTS test error:", error);
-
-          // Update status to failed
-          setConfig((prev) => ({
-            ...prev,
-            deepgramTTSStatus: "failed",
-          }));
-
-          throw error;
-        }
-      } else {
-        throw new Error(
-          `TTS provider ${config.ttsProvider} testing not yet implemented.`
-        );
-      }
-    } catch (error: any) {
-      console.error("Voice test error:", error);
-
-      // Update status to failed on any error based on the selected provider
-      setConfig((prev) => ({
-        ...prev,
-        ...(config.ttsProvider === "elevenlabs" && {
-          elevenLabsStatus: "failed",
-        }),
-        ...(config.ttsProvider === "deepgram" && {
-          deepgramTTSStatus: "failed",
-        }),
-      }));
-
+  const handleVerifyDeepgram = async () => {
+    if (!config.deepgram.apiKey) {
       toast({
-        title: "TTS Test Failed",
-        description:
-          error.message ||
-          `Please check your ${config.ttsProvider} API key and settings.`,
+        title: "Deepgram key required",
+        description: "Enter and save a Deepgram API key before verifying it.",
         variant: "destructive",
       });
-    } finally {
-      setTestingVoice(false);
+      return;
     }
-  };
-
-  // Updates the API key and resets verification status
-  const updateApiKey = useCallback(
-    (field: keyof Configuration, value: string) => {
-      console.log(`Updating API key for ${field}`);
-
-      // Reset verification status when API key changes
-      let statusField: keyof Configuration | null = null;
-
-      if (field === "elevenLabsApiKey") {
-        statusField = "elevenLabsStatus";
-      } else if (field === "deepgramTTSApiKey") {
-        statusField = "deepgramTTSStatus";
-      } else if (field === "twilioAuthToken") {
-        statusField = "twilioStatus";
-      } else if (field === "llmApiKey") {
-        statusField = "llmStatus";
-      } else if (field === "webhookSecret") {
-        statusField = "webhookStatus";
-      }
-
-      setConfig((prev) => {
-        const updates: Partial<Configuration> = { [field]: value };
-
-        // Reset status to unverified when API key changes
-        if (statusField) {
-          updates[statusField] = "unverified";
-        }
-
-        return { ...prev, ...updates };
+    if (!isMasked(config.deepgram.apiKey)) {
+      toast({
+        title: "Save before verifying",
+        description: "Save the new Deepgram key, then run verification.",
       });
-    },
-    []
-  );
+      return;
+    }
 
-  // Updates a single field in the config state
-  const updateConfig = useCallback(
-    (field: keyof Configuration, value: any) => {
-      console.log(
-        `Updating configuration field: ${field} with value:`,
-        field.includes("ApiKey") || field.includes("AuthToken")
-          ? "[MASKED]"
-          : value
-      );
-
-      // Special handling for API keys to reset verification status
-      if (
-        field === "elevenLabsApiKey" ||
-        field === "deepgramTTSApiKey" ||
-        field === "twilioAuthToken" ||
-        field === "llmApiKey" ||
-        field === "webhookSecret"
-      ) {
-        updateApiKey(field, value);
-        return;
-      }
-
-      setConfig((prev: Configuration) => {
-        const newConfig = { ...prev, [field]: value };
-
-        // Add additional logging for voice settings specifically
-        if (
-          field === "voiceSpeed" ||
-          field === "voiceStability" ||
-          field === "voiceClarity"
-        ) {
-          console.log(
-            `Voice setting updated - ${field}: ${value} (previous: ${prev[field]})`
-          );
-        }
-
-        // Special handling for LLM provider changes
-        if (field === "llmProvider" && prev.llmProvider !== value) {
-          console.log(
-            `LLM provider changed from ${prev.llmProvider} to ${value}`
-          );
-        }
-
-        // Special handling for TTS provider changes
-        if (field === "ttsProvider" && prev.ttsProvider !== value) {
-          console.log(
-            `TTS provider changed from ${prev.ttsProvider} to ${value}`
-          );
-        }
-
-        return newConfig;
-      });
-    },
-    [updateApiKey]
-  );
-
-  // Handle LLM provider changes
-  const handleProviderChange = useCallback(
-    (newProvider: "openai" | "anthropic" | "google") => {
-      // Update the provider and reset related state
-      setConfig((prevConfig) => {
-        const newConfig = {
-          ...prevConfig,
-          llmProvider: newProvider,
-          llmModel: "", // Reset model when provider changes
-          llmStatus: "unverified" as const, // Reset status
-        };
-        
-        // Fetch models for the new provider if API key exists
-        if (prevConfig.llmApiKey && prevConfig.llmApiKey.length >= 10) {
-          setTimeout(() => {
-            fetchModelsWithApiKey(newProvider, prevConfig.llmApiKey);
-          }, 100);
-        }
-        
-        return newConfig;
-      });
-
-      // Clear current models for the new provider temporarily
-      setAvailableModels((prev) => ({
-        ...prev,
-        [newProvider]: [],
-      }));
-    },
-    [setConfig, setAvailableModels, fetchModelsWithApiKey]
-  );
-
-  // Handler for API key changes with debouncing
-  const handleApiKeyChange = useCallback(
-    (value: string) => {
-      // Update the config immediately for UI responsiveness
-      updateConfig("llmApiKey", value);
-
-      // Clear any existing timer
-      if (apiKeyDebounceTimer) {
-        clearTimeout(apiKeyDebounceTimer);
-      }
-
-      // Set a new timer to fetch models after user stops typing
-      const timer = setTimeout(() => {
-        if (value && value.length >= 10) {
-          // Access the current provider without causing dependency issues
-          const currentProvider = config.llmProvider;
-          fetchModelsWithApiKey(currentProvider, value);
-        }
-      }, 1000); // 1 second delay
-
-      setApiKeyDebounceTimer(timer);
-    },
-    [
-      apiKeyDebounceTimer,
-      config.llmProvider,
-      fetchModelsWithApiKey,
-      updateConfig,
-    ]
-  );
-
-  const handleDeleteItem = (type: string, name?: string) => {
-    setItemToDelete({ type, name });
-    setDeleteDialogOpen(true);
-  };
-
-  const confirmDelete = async () => {
-    if (!itemToDelete) return;
-
-    setDeleteDialogOpen(false);
+    setVerifyingDeepgram(true);
     try {
-      // Perform delete action based on the type
-      if (itemToDelete.type === "twilio") {
-        await configApi.deleteApiKey({ provider: "twilio" });
-        toast({
-          title: "Twilio Configuration Deleted",
-          description: "Your Twilio settings have been removed.",
-          variant: "destructive",
-        });
-      } else if (itemToDelete.type === "elevenlabs") {
-        await configApi.deleteApiKey({ provider: "elevenlabs" });
-        toast({
-          title: "ElevenLabs Configuration Deleted",
-          description: "Your ElevenLabs settings have been removed.",
-          variant: "destructive",
-        });
-      } else if (itemToDelete.type === "deepgram") {
-        await configApi.deleteApiKey({ provider: "deepgram" });
-        toast({
-          title: "Deepgram Configuration Deleted",
-          description: "Your Deepgram API key has been removed.",
-          variant: "destructive",
-        });
-      } else if (itemToDelete.type === "deepgramTTS") {
-        await configApi.deleteApiKey({ provider: "deepgram" });
-        toast({
-          title: "Deepgram TTS Configuration Deleted",
-          description: "Your Deepgram TTS API key has been removed.",
-          variant: "destructive",
-        });
-      } else if (itemToDelete.type === "llm" && itemToDelete.name) {
-        await configApi.deleteApiKey({
-          provider: "llm",
-          name: itemToDelete.name,
-        });
-        toast({
-          title: `${itemToDelete.name} API Key Deleted`,
-          description: `Your ${itemToDelete.name} API key has been removed.`,
-          variant: "destructive",
-        });
-      } else if (itemToDelete.type === "webhook") {
-        await configApi.deleteApiKey({ provider: "webhook" });
-        toast({
-          title: "Webhook Secret Deleted",
-          description: "Your webhook secret has been removed.",
-          variant: "destructive",
-        });
-      }
-
-      // Refresh configuration to get updated state after deletion
-      await configApi.getConfiguration();
-
-      // Update local state with updated configuration
-      setConfig((prevConfig) => {
-        // Reset API keys based on the type deleted
-        if (itemToDelete.type === "twilio") {
-          return {
-            ...prevConfig,
-            twilioAccountSid: "",
-            twilioAuthToken: "",
-            twilioPhoneNumber: "",
-            twilioStatus: "unverified",
-          };
-        } else if (itemToDelete.type === "elevenlabs") {
-          return {
-            ...prevConfig,
-            elevenLabsApiKey: "",
-            elevenLabsStatus: "unverified",
-          };
-        } else if (itemToDelete.type === "deepgram") {
-          return {
-            ...prevConfig,
-            deepgramApiKey: "",
-            deepgramStatus: "unverified",
-          };
-        } else if (itemToDelete.type === "deepgramTTS") {
-          return {
-            ...prevConfig,
-            deepgramTTSApiKey: "",
-            deepgramTTSStatus: "unverified",
-          };
-        } else if (itemToDelete.type === "llm" && itemToDelete.name) {
-          return {
-            ...prevConfig,
-            ...(prevConfig.llmProvider === itemToDelete.name
-              ? {
-                  llmApiKey: "",
-                  llmStatus: "unverified",
-                }
-              : {}),
-          };
-        } else if (itemToDelete.type === "webhook") {
-          return {
-            ...prevConfig,
-            webhookSecret: "",
-            webhookStatus: "unverified",
-          };
-        }
-        return prevConfig;
+      const result = (await configApi.verifyDeepgram()) as VerifyResponse;
+      const verified = result.ok ?? result.status === "verified";
+      const status = toVerifyStatus(
+        result.status ?? (verified ? "verified" : "failed"),
+      );
+      setConfig((current) => ({
+        ...current,
+        deepgram: { ...current.deepgram, status },
+      }));
+      toast({
+        title: verified ? "Deepgram verified" : "Deepgram verification failed",
+        description: verified
+          ? "The saved key works for speech recognition and voice synthesis."
+          : result.error || "Deepgram rejected the saved key.",
+        variant: verified ? "default" : "destructive",
       });
-
-      setItemToDelete(null);
     } catch (error) {
-      console.error("Error deleting configuration:", error);
-      toast({
-        title: "Error Deleting Configuration",
-        description: "Failed to delete the configuration. Please try again.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleTestCall = async () => {
-    // Validate inputs
-    if (!testCallNumber) {
-      toast({
-        title: "Missing Phone Number",
-        description: "Please enter a phone number to receive the test call.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Validate that Twilio credentials are set
-    if (
-      !config.twilioAccountSid ||
-      !config.twilioAuthToken ||
-      !config.twilioPhoneNumber
-    ) {
-      toast({
-        title: "Missing Twilio Configuration",
-        description:
-          "Please configure your Twilio credentials and phone number first.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setTestingCall(true);
-    try {
-      const result = await configApi.makeTestCall({
-        accountSid: config.twilioAccountSid,
-        authToken: config.twilioAuthToken,
-        fromNumber: config.twilioPhoneNumber,
-        toNumber: testCallNumber,
-        message: testCallMessage,
-      });
-
-      if (result.success) {
-        toast({
-          title: "Test Call Initiated",
-          description: `A test call is being made to ${testCallNumber}. Status: ${result.status}`,
-        });
-
-        // Update Twilio status to verified if successful
-        setConfig((prev) => ({
-          ...prev,
-          twilioStatus: "verified",
-        }));
-      } else {
-        toast({
-          title: "Test Call Failed",
-          description:
-            result.message ||
-            "Failed to make test call. Please check your Twilio configuration.",
-          variant: "destructive",
-        });
-
-        // Update Twilio status to failed
-        setConfig((prev) => ({
-          ...prev,
-          twilioStatus: "failed",
-        }));
-      }
-    } catch (error: any) {
-      console.error("Test call error:", error);
-      toast({
-        title: "Test Call Error",
-        description:
-          error.message || "An error occurred while making the test call.",
-        variant: "destructive",
-      });
-
-      // Update Twilio status to failed
-      setConfig((prev) => ({
-        ...prev,
-        twilioStatus: "failed",
+      setConfig((current) => ({
+        ...current,
+        deepgram: { ...current.deepgram, status: "failed" },
       }));
+      toast({
+        title: "Deepgram verification failed",
+        description: getErrorMessage(error, "Unable to verify the saved key."),
+        variant: "destructive",
+      });
     } finally {
-      setTestingCall(false);
-      setOpenTestCallDialog(false);
+      setVerifyingDeepgram(false);
     }
   };
 
-  const handleTestLLMChat = async () => {
-    // Use a predefined test message instead of requiring user input
-    const testMessage =
-      "Hello, how are you today? Can you tell me about your product or service?";
-
-    // Validate that system prompt is set
-    if (!config.systemPrompt.trim()) {
+  const handleVerifyProvider = async (provider: ProviderName) => {
+    const providerConfig = config.providers[provider];
+    if (!providerConfig.apiKey) {
       toast({
-        title: "System Prompt Required",
-        description: "Please enter a system prompt before testing the AI chat.",
+        title: `${PROVIDERS.find((item) => item.value === provider)?.label} key required`,
+        description: "Enter and save an API key before verifying it.",
         variant: "destructive",
       });
       return;
     }
-
-    // Validate that LLM credentials are set
-    if (!config.llmApiKey) {
+    if (!isMasked(providerConfig.apiKey)) {
       toast({
-        title: "Missing API Key",
-        description: "Please enter a valid LLM API key first.",
-        variant: "destructive",
+        title: "Save before verifying",
+        description: "Save the new provider key, then run verification.",
       });
       return;
     }
 
-    setTestingLLMChat(true);
-    setTestLLMResponse("");
-
+    setVerifyingProvider(provider);
     try {
-      // Use provider name as is - we no longer need to map 'gemini' to 'google'
-      const providerName = config.llmProvider.toLowerCase();
-
-      console.log(`Testing LLM chat with provider: ${providerName}`);
-      console.log(
-        `Using system prompt: ${config.systemPrompt.substring(0, 100)}...`
+      const result = (await configApi.verifyLlm(provider)) as VerifyResponse;
+      const verified = result.ok ?? result.status === "verified";
+      const status = toVerifyStatus(
+        result.status ?? (verified ? "verified" : "failed"),
       );
-      console.log(`Test message: ${testMessage}`);
-
-      const result = await configApi.testLLMChat({
-        provider: providerName,
-        model: config.llmModel,
-        prompt: `${config.systemPrompt}\n\nCustomer: ${testMessage}\nAI:`,
-        temperature: config.temperature,
-        apiKey: config.llmApiKey, // Pass the current API key from the input
-      });
-
-      if (result.success) {
-        setTestLLMResponse(result.response.content);
-
-        toast({
-          title: "Test Successful",
-          description:
-            "The LLM responded successfully with your system prompt configuration.",
-        });
-
-        // Update LLM status to verified if successful
-        setConfig((prev) => ({
-          ...prev,
-          llmStatus: "verified",
-        }));
-
-        // Persist the verification status to the server immediately
-        try {
-          // Get current configuration to preserve all providers
-          const currentConfig = await configApi.getConfiguration();
-
-          // Update only the tested provider's status while preserving others
-          const updatedProviders = currentConfig.llmConfig.providers.map(
-            (provider: any) => {
-              if (provider.name === config.llmProvider) {
-                return {
-                  ...provider,
-                  status: "verified",
-                  lastVerified: new Date().toISOString(),
-                  apiKey: config.llmApiKey,
-                };
-              }
-              return provider;
-            }
-          );
-
-          const quickUpdateConfig = {
-            llmConfig: {
-              ...currentConfig.llmConfig,
-              providers: updatedProviders,
-            },
-          };
-
-          await configApi.updateConfiguration(quickUpdateConfig);
-          console.log("Verification status saved to server successfully");
-        } catch (saveError) {
-          console.warn(
-            "Failed to save verification status to server:",
-            saveError
-          );
-          // Don't show error to user as the test was successful
-        }
-      } else {
-        toast({
-          title: "Test Failed",
-          description:
-            result.message ||
-            "Failed to get a response from the LLM. Please check your configuration.",
-          variant: "destructive",
-        });
-
-        // Update LLM status to failed
-        setConfig((prev) => ({
-          ...prev,
-          llmStatus: "failed",
-        }));
-
-        // Persist the failed status to the server
-        try {
-          // Get current configuration to preserve all providers
-          const currentConfig = await configApi.getConfiguration();
-
-          // Update only the tested provider's status while preserving others
-          const updatedProviders = currentConfig.llmConfig.providers.map(
-            (provider: any) => {
-              if (provider.name === config.llmProvider) {
-                return {
-                  ...provider,
-                  status: "failed",
-                  apiKey: config.llmApiKey,
-                };
-              }
-              return provider;
-            }
-          );
-
-          const quickUpdateConfig = {
-            llmConfig: {
-              ...currentConfig.llmConfig,
-              providers: updatedProviders,
-            },
-          };
-
-          await configApi.updateConfiguration(quickUpdateConfig);
-        } catch (saveError) {
-          console.warn("Failed to save failed status to server:", saveError);
-        }
-      }
-    } catch (error: any) {
-      console.error("LLM chat test error:", error);
-      setTestLLMResponse("");
+      setConfig((current) => ({
+        ...current,
+        providers: {
+          ...current.providers,
+          [provider]: { ...current.providers[provider], status },
+        },
+      }));
+      const label = PROVIDERS.find((item) => item.value === provider)?.label;
       toast({
-        title: "Test Error",
-        description:
-          error.message || "An error occurred while testing the LLM.",
+        title: verified ? `${label} verified` : `${label} verification failed`,
+        description: verified
+          ? "The saved provider key is ready to use."
+          : result.error || `${label} rejected the saved key.`,
+        variant: verified ? "default" : "destructive",
+      });
+    } catch (error) {
+      setConfig((current) => ({
+        ...current,
+        providers: {
+          ...current.providers,
+          [provider]: { ...current.providers[provider], status: "failed" },
+        },
+      }));
+      toast({
+        title: "Provider verification failed",
+        description: getErrorMessage(error, "Unable to verify the saved key."),
         variant: "destructive",
       });
-
-      // Update LLM status to failed
-      setConfig((prev) => ({
-        ...prev,
-        llmStatus: "failed",
-      }));
-
-      // Persist the failed status to the server
-      try {
-        // Get current configuration to preserve all providers
-        const currentConfig = await configApi.getConfiguration();
-
-        // Update only the tested provider's status while preserving others
-        const updatedProviders = currentConfig.llmConfig.providers.map(
-          (provider: any) => {
-            if (provider.name === config.llmProvider) {
-              return {
-                ...provider,
-                status: "failed",
-                apiKey: config.llmApiKey,
-              };
-            }
-            return provider;
-          }
-        );
-
-        const quickUpdateConfig = {
-          llmConfig: {
-            ...currentConfig.llmConfig,
-            providers: updatedProviders,
-          },
-        };
-
-        await configApi.updateConfiguration(quickUpdateConfig);
-      } catch (saveError) {
-        console.warn("Failed to save failed status to server:", saveError);
-      }
     } finally {
-      setTestingLLMChat(false);
+      setVerifyingProvider(null);
     }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
+      <div className="flex min-h-[400px] items-center justify-center">
         <div className="text-center">
-          <Settings className="h-8 w-8 animate-spin mx-auto mb-2" />
+          <Settings className="mx-auto mb-2 h-8 w-8 animate-spin" />
           <p>Loading configuration...</p>
         </div>
       </div>
     );
   }
 
+  if (loadError) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Configuration unavailable</CardTitle>
+          <CardDescription>{loadError}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const selectedModels = modelsForProvider(config.defaultProvider);
+  const selectedProvider = config.providers[config.defaultProvider];
+
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div className="flex flex-col space-y-4 sm:flex-row sm:justify-between sm:items-center sm:space-y-0">
+      <div className="flex flex-col space-y-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
         <div className="min-w-0 flex-shrink-0">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight truncate">
+          <h1 className="truncate text-2xl font-bold tracking-tight sm:text-3xl">
             Configuration
           </h1>
-          <p className="text-muted-foreground text-sm sm:text-base">
+          <p className="text-sm text-muted-foreground sm:text-base">
             Configure your AI calling system settings
           </p>
         </div>
-        <div className="flex flex-row gap-2 flex-wrap">
-          <Button size="sm" onClick={handleSave} disabled={saving}>
-            {saving ? (
-              <Save className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4 mr-2" />
-            )}
-            Save Configuration
-          </Button>
-        </div>
+        <Button
+          size="sm"
+          onClick={handleSave}
+          disabled={saving || verifyingDeepgram || Boolean(verifyingProvider)}
+        >
+          <Save className={`mr-2 h-4 w-4 ${saving ? "animate-spin" : ""}`} />
+          {saving ? "Saving..." : "Save Configuration"}
+        </Button>
       </div>
 
-      {/* Status Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <fieldset
+        disabled={saving || verifyingDeepgram || Boolean(verifyingProvider)}
+        className="min-w-0 space-y-4 sm:space-y-6"
+      >
+      <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <div className="flex items-center gap-2">
               <CardTitle className="text-sm font-medium">
-                TTS Provider
+                Speech & Voice
               </CardTitle>
               <HoverCard>
                 <HoverCardTrigger asChild>
@@ -1868,135 +758,26 @@ Keep the conversation natural and engaging. If they're not interested, politely 
                   </button>
                 </HoverCardTrigger>
                 <HoverCardContent className="w-80">
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-semibold">TTS Provider</h4>
-                    <p className="text-sm text-muted-foreground">
-                      The Text-to-Speech service used to generate
-                      natural-sounding speech for phone calls. Choose from
-                      ElevenLabs, Deepgram, or other providers with automatic
-                      fallback support.
-                    </p>
-                  </div>
-                </HoverCardContent>
-              </HoverCard>
-            </div>
-            <Volume2 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold capitalize">
-              {config.ttsProvider}
-            </div>
-            <Badge variant="outline" className="mt-1">
-              {(() => {
-                const status =
-                  config.ttsProvider === "elevenlabs"
-                    ? config.elevenLabsStatus
-                    : config.ttsProvider === "deepgram"
-                    ? config.deepgramTTSStatus
-                    : "unverified";
-                const apiKey =
-                  config.ttsProvider === "elevenlabs"
-                    ? config.elevenLabsApiKey
-                    : config.ttsProvider === "deepgram"
-                    ? config.deepgramTTSApiKey
-                    : "";
-
-                if (status === "verified") {
-                  return (
-                    <>
-                      <CheckCircle className="h-3 w-3 mr-1" />
-                      Connected
-                    </>
-                  );
-                } else if (status === "failed") {
-                  return (
-                    <>
-                      <AlertTriangle className="h-3 w-3 mr-1 text-red-500" />
-                      Failed
-                    </>
-                  );
-                } else if (apiKey) {
-                  return (
-                    <>
-                      <AlertTriangle className="h-3 w-3 mr-1 text-yellow-500" />
-                      Unverified
-                    </>
-                  );
-                } else {
-                  return (
-                    <>
-                      <AlertTriangle className="h-3 w-3 mr-1" />
-                      Not Set
-                    </>
-                  );
-                }
-              })()}
-            </Badge>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-sm font-medium">
-                STT Provider
-              </CardTitle>
-              <HoverCard>
-                <HoverCardTrigger asChild>
-                  <button className="h-5 w-5 text-muted-foreground hover:text-foreground">
-                    <Info className="h-4 w-4" />
-                  </button>
-                </HoverCardTrigger>
-                <HoverCardContent className="w-80">
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-semibold">STT Provider</h4>
-                    <p className="text-sm text-muted-foreground">
-                      The Speech-to-Text service used to transcribe customer
-                      speech during phone calls. Deepgram provides
-                      high-accuracy, low-latency transcription with advanced
-                      noise handling capabilities for real-time conversations.
-                    </p>
-                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    One Deepgram key powers both real-time transcription and
+                    Aura voice synthesis for calls.
+                  </p>
                 </HoverCardContent>
               </HoverCard>
             </div>
             <Mic className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {config.deepgramEnabled ? "Deepgram" : "OpenAI Whisper"}
+            <div className="text-2xl font-bold">Deepgram</div>
+            <div className="mt-1">
+              <StatusBadge
+                status={config.deepgram.status}
+                configured={Boolean(config.deepgram.apiKey)}
+              />
             </div>
-            <Badge variant="outline" className="mt-1">
-              {config.deepgramEnabled ? (
-                config.deepgramStatus === "verified" ? (
-                  <>
-                    <CheckCircle className="h-3 w-3 mr-1" />
-                    Connected
-                  </>
-                ) : config.deepgramStatus === "failed" ? (
-                  <>
-                    <AlertTriangle className="h-3 w-3 mr-1 text-red-500" />
-                    Failed
-                  </>
-                ) : config.deepgramApiKey ? (
-                  <>
-                    <AlertTriangle className="h-3 w-3 mr-1 text-yellow-500" />
-                    Unverified
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="h-3 w-3 mr-1" />
-                    Not Set
-                  </>
-                )
-              ) : (
-                <>
-                  <CheckCircle className="h-3 w-3 mr-1" />
-                  Fallback Active
-                </>
-              )}
-            </Badge>
           </CardContent>
         </Card>
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <div className="flex items-center gap-2">
@@ -2010,842 +791,252 @@ Keep the conversation natural and engaging. If they're not interested, politely 
                   </button>
                 </HoverCardTrigger>
                 <HoverCardContent className="w-80">
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-semibold">LLM Provider</h4>
-                    <p className="text-sm text-muted-foreground">
-                      The Large Language Model provider that powers the AI's
-                      conversation abilities. This includes understanding
-                      customer responses, generating appropriate replies, and
-                      handling objections during calls.
-                    </p>
-                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    The selected language model powers conversation reasoning
+                    and response generation during calls.
+                  </p>
                 </HoverCardContent>
               </HoverCard>
             </div>
-            <Zap className="h-4 w-4 text-muted-foreground" />
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold capitalize">
-              {config.llmProvider}
+              {config.defaultProvider}
             </div>
-            <Badge variant="outline" className="mt-1">
-              {config.llmStatus === "verified" ? (
-                <>
-                  <CheckCircle className="h-3 w-3 mr-1" />
-                  Connected
-                </>
-              ) : config.llmStatus === "failed" ? (
-                <>
-                  <AlertTriangle className="h-3 w-3 mr-1 text-red-500" />
-                  Failed
-                </>
-              ) : config.llmApiKey ? (
-                <>
-                  <AlertTriangle className="h-3 w-3 mr-1 text-yellow-500" />
-                  Unverified
-                </>
-              ) : (
-                <>
-                  <AlertTriangle className="h-3 w-3 mr-1" />
-                  Not Set
-                </>
-              )}
-            </Badge>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-sm font-medium">
-                Phone Service
-              </CardTitle>
-              <HoverCard>
-                <HoverCardTrigger asChild>
-                  <button className="h-5 w-5 text-muted-foreground hover:text-foreground">
-                    <Info className="h-4 w-4" />
-                  </button>
-                </HoverCardTrigger>
-                <HoverCardContent className="w-80">
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-semibold">Phone Service</h4>
-                    <p className="text-sm text-muted-foreground">
-                      The telephony service used to make outbound phone calls.
-                      Twilio provides reliable call connectivity, call routing,
-                      and phone number management for the AI calling system.
-                    </p>
-                  </div>
-                </HoverCardContent>
-              </HoverCard>
+            <div className="mt-1">
+              <StatusBadge
+                status={selectedProvider.status}
+                configured={Boolean(selectedProvider.apiKey)}
+              />
             </div>
-            <Phone className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">Twilio</div>
-            <Badge variant="outline" className="mt-1">
-              {config.twilioStatus === "verified" ? (
-                <>
-                  <CheckCircle className="h-3 w-3 mr-1" />
-                  Connected
-                </>
-              ) : config.twilioStatus === "failed" ? (
-                <>
-                  <AlertTriangle className="h-3 w-3 mr-1 text-red-500" />
-                  Failed
-                </>
-              ) : config.twilioAccountSid ? (
-                <>
-                  <AlertTriangle className="h-3 w-3 mr-1 text-yellow-500" />
-                  Unverified
-                </>
-              ) : (
-                <>
-                  <AlertTriangle className="h-3 w-3 mr-1" />
-                  Not Set
-                </>
-              )}
-            </Badge>
           </CardContent>
         </Card>
       </div>
 
-      {/* AI Voice Settings */}
       <Card>
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <CardTitle className="flex items-center gap-2">
-              <Volume2 className="h-5 w-5" />
-              AI Voice Settings
-            </CardTitle>
-            <HoverCard>
-              <HoverCardTrigger asChild>
-                <button className="h-5 w-5 text-muted-foreground hover:text-foreground">
-                  <Info className="h-4 w-4" />
-                </button>
-              </HoverCardTrigger>
-              <HoverCardContent className="w-80">
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold">AI Voice Settings</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Configure voice synthesis parameters including provider,
-                    voice selection, speed, stability, and clarity. These
-                    settings control how natural and expressive the AI voice
-                    sounds during phone conversations.
-                  </p>
-                </div>
-              </HoverCardContent>
-            </HoverCard>
-          </div>
+          <CardTitle className="flex items-center gap-2">
+            <Volume2 className="h-5 w-5" />
+            Deepgram Speech & Voice
+          </CardTitle>
           <CardDescription>
-            Configure the voice synthesis for your AI calls
+            Configure one Deepgram key for speech-to-text and text-to-speech
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="voiceProvider">TTS Provider</Label>
-              <Select
-                value={config.ttsProvider}
-                onValueChange={(value) => updateConfig("ttsProvider", value)}
-              >
-                <SelectTrigger
-                  id="voiceProvider"
-                  className="w-full h-10 rounded-xl"
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="space-y-2 lg:col-span-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="deepgramApiKey">Deepgram API Key</Label>
+                <StatusBadge
+                  status={config.deepgram.status}
+                  configured={Boolean(config.deepgram.apiKey)}
+                />
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="deepgramApiKey"
+                  type="password"
+                  value={config.deepgram.apiKey}
+                  onChange={(event) =>
+                    updateDeepgram(
+                      "apiKey",
+                      replacementKeyValue(
+                        config.deepgram.apiKey,
+                        event.target.value,
+                      ),
+                    )
+                  }
+                  onFocus={(event) => {
+                    if (isMasked(config.deepgram.apiKey)) {
+                      event.currentTarget.select();
+                    }
+                  }}
+                  placeholder="Enter your Deepgram API key"
+                  autoComplete="off"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleVerifyDeepgram}
+                  disabled={verifyingDeepgram}
                 >
-                  <SelectValue placeholder="Select TTS provider" />
+                  {verifyingDeepgram ? "Verifying..." : "Verify"}
+                </Button>
+              </div>
+              {config.deepgram.apiKey && !isMasked(config.deepgram.apiKey) && (
+                <p className="text-xs text-muted-foreground">
+                  Save the new key before verifying it.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="deepgramSttModel">STT Model</Label>
+              <Select
+                value={config.deepgram.sttModel}
+                onValueChange={(value) => updateDeepgram("sttModel", value)}
+              >
+                <SelectTrigger id="deepgramSttModel" className="h-10 w-full rounded-xl">
+                  <SelectValue placeholder="Select an STT model" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
-                  <SelectItem value="deepgram">Deepgram</SelectItem>
-                  <SelectItem value="openai">OpenAI</SelectItem>
-                  <SelectItem value="google">Google Cloud</SelectItem>
-                  <SelectItem value="aws">AWS Polly</SelectItem>
+                  <SelectItem value="nova-3">Nova-3 (Recommended)</SelectItem>
+                  <SelectItem value="nova-2">Nova-2</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-2">
-              <Label htmlFor="voiceId">Voice</Label>
+              <Label htmlFor="deepgramTtsVoice">TTS Voice</Label>
               <Select
-                value={config.voiceId}
-                onValueChange={(value) => updateConfig("voiceId", value)}
+                value={config.deepgram.ttsVoice}
+                onValueChange={(value) => updateDeepgram("ttsVoice", value)}
               >
-                <SelectTrigger id="voiceId" className="w-full h-10 rounded-xl">
-                  <SelectValue placeholder="Select a voice" />
+                <SelectTrigger id="deepgramTtsVoice" className="h-10 w-full rounded-xl">
+                  <SelectValue placeholder="Select an Aura voice" />
                 </SelectTrigger>
                 <SelectContent>
-                  {availableVoices && availableVoices.length > 0 ? (
-                    availableVoices.map((voice) => (
-                      <SelectItem key={voice.voiceId} value={voice.voiceId}>
+                  {voiceOptions.length > 0 ? (
+                    voiceOptions.map((voice) => (
+                      <SelectItem key={voice.value} value={voice.value}>
                         {voice.name}
                       </SelectItem>
                     ))
                   ) : (
-                    <p className="p-2 text-sm text-muted-foreground text-center">
-                      No voices available. Check provider & API key.
-                    </p>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            {/* Unified Test Voice Button - works for all TTS providers */}
-            {((config.ttsProvider === "elevenlabs" && config.elevenLabsApiKey) ||
-              (config.ttsProvider === "deepgram" && config.deepgramTTSApiKey)) && 
-              config.voiceId && (
-              <div className="mt-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleTestVoice}
-                  disabled={testingVoice}
-                  className="w-full"
-                >
-                  {testingVoice ? (
-                    <Mic className="h-4 w-4 mr-2 animate-pulse" />
-                  ) : (
-                    <Mic className="h-4 w-4 mr-2" />
-                  )}
-                  {testingVoice ? "Testing..." : `Test Voice (${config.ttsProvider})`}
-                </Button>
-                <div className="text-xs text-muted-foreground mt-2 text-center">
-                  {config.ttsProvider === "elevenlabs" 
-                    ? "Testing with ElevenLabs TTS - make sure you have a valid API key and voice selected"
-                    : config.ttsProvider === "deepgram"
-                    ? "Testing with Deepgram TTS - make sure you have a valid API key and voice model selected"
-                    : "Make sure you have a valid API key and voice selected"}
-                </div>
-              </div>
-            )}
-            
-            {config.ttsProvider === "elevenlabs" && (
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <Label htmlFor="elevenLabsApiKey">ElevenLabs API Key</Label>
-                  {config.elevenLabsApiKey && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDeleteItem("elevenlabs")}
-                      className="text-red-500 hover:text-red-700"
-                    >
-                      <Trash2 className="h-4 w-4 mr-1" />
-                      Delete Key
-                    </Button>
-                  )}
-                </div>
-                <PasswordInput
-                  id="elevenLabsApiKey"
-                  value={config.elevenLabsApiKey}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    updateConfig("elevenLabsApiKey", e.target.value)
-                  }
-                  placeholder="Enter your ElevenLabs API key"
-                />
-              </div>
-            )}
-            {config.ttsProvider === "deepgram" && (
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <Label htmlFor="deepgramTTSApiKey">
-                    Deepgram TTS API Key
-                  </Label>
-                  {config.deepgramTTSApiKey && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDeleteItem("deepgramTTS")}
-                      className="text-red-500 hover:text-red-700"
-                    >
-                      <Trash2 className="h-4 w-4 mr-1" />
-                      Delete Key
-                    </Button>
-                  )}
-                </div>
-                <PasswordInput
-                  id="deepgramTTSApiKey"
-                  value={config.deepgramTTSApiKey}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    updateConfig("deepgramTTSApiKey", e.target.value)
-                  }
-                  placeholder="Enter your Deepgram API key"
-                />
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="voiceSpeed">
-                Voice Speed ({config.voiceSpeed}x)
-              </Label>
-              <Slider
-                id="voiceSpeed"
-                min={0.5}
-                max={2.0}
-                step={0.1}
-                value={[config.voiceSpeed]}
-                onValueChange={(value) => updateConfig("voiceSpeed", value[0])}
-                className="py-4"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="voiceStability">
-                Voice Stability ({Math.round(config.voiceStability * 100)}%)
-              </Label>
-              <Slider
-                id="voiceStability"
-                min={0}
-                max={1}
-                step={0.1}
-                value={[config.voiceStability]}
-                onValueChange={(value) =>
-                  updateConfig("voiceStability", value[0])
-                }
-                className="py-4"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="voiceClarity">
-                Voice Clarity ({Math.round(config.voiceClarity * 100)}%)
-              </Label>
-              <Slider
-                id="voiceClarity"
-                min={0}
-                max={1}
-                step={0.1}
-                value={[config.voiceClarity]}
-                onValueChange={(value) =>
-                  updateConfig("voiceClarity", value[0])
-                }
-                className="py-4"
-              />
-            </div>
-          </div>
-
-          {/* TTS Provider Fallback Configuration */}
-          <div className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="ttsAutoFallback"
-                checked={config.ttsAutoFallback}
-                onCheckedChange={(checked) => updateConfig("ttsAutoFallback", checked)}
-                className="rounded"
-              />
-              <Label htmlFor="ttsAutoFallback">
-                Enable automatic TTS provider fallback
-              </Label>
-            </div>
-            {config.ttsAutoFallback && (
-              <div className="space-y-2">
-                <Label>Fallback Providers (in order of preference)</Label>
-                <div className="text-sm text-muted-foreground">
-                  If the primary TTS provider fails, these providers will be
-                  tried in order:
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {config.ttsFallbackProviders.map((provider, index) => (
-                    <div
-                      key={provider}
-                      className="flex items-center space-x-2 bg-muted px-3 py-1 rounded-md"
-                    >
-                      <span className="text-sm">
-                        {index + 1}. {provider}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          const newFallbacks =
-                            config.ttsFallbackProviders.filter(
-                              (_, i) => i !== index
-                            );
-                          updateConfig("ttsFallbackProviders", newFallbacks);
-                        }}
-                        className="h-4 w-4 p-0 text-muted-foreground hover:text-red-500"
-                      >
-                        ×
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-                <Select
-                  onValueChange={(value) => {
-                    if (
-                      !config.ttsFallbackProviders.includes(value) &&
-                      value !== config.ttsProvider
-                    ) {
-                      updateConfig("ttsFallbackProviders", [
-                        ...config.ttsFallbackProviders,
-                        value,
-                      ]);
-                    }
-                  }}
-                >
-                  <SelectTrigger className="w-full h-10 rounded-xl">
-                    <SelectValue placeholder="Add fallback provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["elevenlabs", "deepgram", "openai", "google", "aws"]
-                      .filter(
-                        (provider) =>
-                          provider !== config.ttsProvider &&
-                          !config.ttsFallbackProviders.includes(provider)
-                      )
-                      .map((provider) => (
-                        <SelectItem key={provider} value={provider}>
-                          {provider.charAt(0).toUpperCase() + provider.slice(1)}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-
-          {config.ttsProvider === "elevenlabs" && (
-            <div className="flex items-center space-x-2 mt-4">
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="useFlashModel"
-                  checked={config.useFlashModel}
-                  onCheckedChange={(checked) =>
-                    updateConfig("useFlashModel", checked)
-                  }
-                />
-                <Label htmlFor="useFlashModel" className="cursor-pointer">
-                  Use ElevenLabs Flash v2.5 for ultra-low latency (~75ms)
-                </Label>
-              </div>
-              <HoverCard>
-                <HoverCardTrigger asChild>
-                  <button className="h-5 w-5 text-muted-foreground hover:text-foreground">
-                    <Info className="h-4 w-4" />
-                  </button>
-                </HoverCardTrigger>
-                <HoverCardContent className="w-80">
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-semibold">Flash v2.5 Model</h4>
-                    <p className="text-sm text-muted-foreground">
-                      ElevenLabs Flash v2.5 (eleven_turbo_v2) is an ultra-low
-                      latency model optimized for real-time conversations. It
-                      provides much faster response times (around 75ms) compared
-                      to standard models, which significantly improves the
-                      natural flow of conversations.
-                    </p>
-                  </div>
-                </HoverCardContent>
-              </HoverCard>
-            </div>
-          )}
-
-
-        </CardContent>
-      </Card>
-
-      {/* Speech Recognition Settings */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Mic className="h-5 w-5" />
-            Speech Recognition
-            <HoverCard>
-              <HoverCardTrigger asChild>
-                <button className="ml-1 h-5 w-5 text-muted-foreground hover:text-foreground transition-colors">
-                  <Info className="h-5 w-5" />
-                </button>
-              </HoverCardTrigger>
-              <HoverCardContent className="w-80">
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold">Speech Recognition</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Configure Deepgram Nova-2 for high-accuracy, low-latency
-                    speech-to-text services. Nova-2 provides significantly
-                    better transcription quality and reduced latency compared to
-                    other STT services.
-                  </p>
-                </div>
-              </HoverCardContent>
-            </HoverCard>
-          </CardTitle>
-          <CardDescription>
-            Configure speech-to-text services for your AI calls
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="space-y-2 lg:col-span-1">
-              <div className="flex justify-between items-center">
-                <Label htmlFor="deepgramApiKey">Deepgram API Key</Label>
-                {config.deepgramApiKey && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDeleteItem("deepgram")}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Delete Key
-                  </Button>
-                )}
-              </div>
-              <PasswordInput
-                id="deepgramApiKey"
-                value={config.deepgramApiKey}
-                onChange={(e) => updateConfig("deepgramApiKey", e.target.value)}
-                placeholder="Enter your Deepgram API key"
-              />
-            </div>
-            <div className="space-y-2 lg:col-span-1">
-              <Label htmlFor="deepgramModel">Model</Label>
-              <Select
-                value={config.deepgramModel}
-                onValueChange={(value) => updateConfig("deepgramModel", value)}
-                disabled={loadingSTTModels || !config.deepgramApiKey}
-              >
-                <SelectTrigger
-                  id="deepgramModel"
-                  className="w-full h-10 rounded-xl"
-                >
-                  <SelectValue placeholder={loadingSTTModels ? "Loading models..." : "Select a model"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {loadingSTTModels ? (
-                    <SelectItem value="loading" disabled>
-                      Loading models...
-                    </SelectItem>
-                  ) : availableSTTModels.length > 0 ? (
-                    availableSTTModels.map((model) => (
-                      <SelectItem key={model} value={model}>
-                        {model}
-                        {model.includes('nova-2') && ' (Recommended)'}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem value="none" disabled>
-                      {config.deepgramApiKey ? 'No models available' : 'Enter API key to load models'}
+                    <SelectItem value="voice-options-unavailable" disabled>
+                      No voice options available
                     </SelectItem>
                   )}
                 </SelectContent>
               </Select>
-              {sttTier && availableSTTModels.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Account tier: <span className="font-medium capitalize">{sttTier}</span> • {availableSTTModels.length} model{availableSTTModels.length !== 1 ? 's' : ''} available
-                </p>
-              )}
             </div>
-          </div>
-
-          <div className="flex items-center space-x-2 mt-4">
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="deepgramEnabled"
-                checked={config.deepgramEnabled}
-                onCheckedChange={(checked) =>
-                  updateConfig("deepgramEnabled", checked)
-                }
-              />
-              <Label htmlFor="deepgramEnabled" className="cursor-pointer">
-                Enable Deepgram for speech recognition (falls back to OpenAI
-                Whisper if disabled)
-              </Label>
-            </div>
-          </div>
-
-          <div className="text-xs text-muted-foreground mt-2">
-            Deepgram Nova-2 provides higher accuracy and lower latency than
-            OpenAI Whisper for speech recognition.
-          </div>
-          
-          <div className="mt-4 mb-4">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (!config.deepgramApiKey) {
-                  toast({
-                    title: "API Key Required",
-                    description: "Please enter a valid Deepgram API key before testing.",
-                    variant: "destructive",
-                  });
-                  return;
-                }
-                
-                setOpenSTTDialog(true);
-              }}
-              className="w-full"
-            >
-              <Mic className="h-4 w-4 mr-2" />
-              Test STT Configuration
-            </Button>
-            <div className="text-xs text-muted-foreground mt-2 text-center">
-              Test your Deepgram Speech-to-Text configuration with live transcription
-            </div>
-          </div>
-          
-          {/* STT Dialog for verification and testing */}
-          <Dialog open={openSTTDialog} onOpenChange={setOpenSTTDialog}>
-            <DialogContent className="sm:max-w-xl">
-              <DialogHeader>
-                <DialogTitle>Deepgram Speech-to-Text Test</DialogTitle>
-                <DialogDescription>
-                  Verify your Deepgram API connection and test real-time voice transcription
-                </DialogDescription>
-              </DialogHeader>
-              <div className="py-4">
-                <RealTimeSTT 
-                  apiKey={config.deepgramApiKey} 
-                  autoStart={true}
-                  onVerificationComplete={(success) => {
-                    if (success) {
-                      setConfig(prev => ({
-                        ...prev,
-                        deepgramStatus: "verified"
-                      }));
-                    }
-                  }}
-                />
-              </div>
-              <DialogFooter>
-                <Button onClick={() => setOpenSTTDialog(false)}>Close</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </CardContent>
-      </Card>
-
-      {/* Phone Settings */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Phone className="h-5 w-5" />
-            Phone Integration
-            <HoverCard>
-              <HoverCardTrigger asChild>
-                <button className="ml-1 h-5 w-5 text-muted-foreground hover:text-foreground transition-colors">
-                  <Info className="h-5 w-5" />
-                </button>
-              </HoverCardTrigger>
-              <HoverCardContent className="w-80">
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold">Phone Integration</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Configure Twilio telephony service for making outbound
-                    calls. This includes account credentials and phone number
-                    settings for call routing and delivery.
-                  </p>
-                </div>
-              </HoverCardContent>
-            </HoverCard>
-          </CardTitle>
-          <CardDescription>
-            Configure Twilio settings for making calls
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <Label htmlFor="twilioAccountSid">Twilio Account SID</Label>
-                {config.twilioAccountSid && config.twilioAuthToken && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDeleteItem("twilio")}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Delete Keys
-                  </Button>
-                )}
-              </div>
-              <PasswordInput
-                id="twilioAccountSid"
-                value={config.twilioAccountSid}
-                onChange={(e) =>
-                  updateConfig("twilioAccountSid", e.target.value)
-                }
-                placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="twilioAuthToken">Twilio Auth Token</Label>
-              <PasswordInput
-                id="twilioAuthToken"
-                value={config.twilioAuthToken}
-                onChange={(e) =>
-                  updateConfig("twilioAuthToken", e.target.value)
-                }
-                placeholder="your-auth-token"
-              />
-            </div>
-            <div className="space-y-2 lg:col-span-1">
-              <Label htmlFor="twilioPhoneNumber">Twilio Phone Number</Label>
-              <Input
-                id="twilioPhoneNumber"
-                value={config.twilioPhoneNumber}
-                onChange={(e) =>
-                  updateConfig("twilioPhoneNumber", e.target.value)
-                }
-                placeholder="+1234567890"
-              />
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setOpenTestCallDialog(true)}
-              disabled={
-                !config.twilioAccountSid ||
-                !config.twilioAuthToken ||
-                !config.twilioPhoneNumber ||
-                testingCall
-              }
-            >
-              {testingCall ? (
-                <PhoneCall className="h-4 w-4 mr-2 animate-pulse" />
-              ) : (
-                <PhoneCall className="h-4 w-4 mr-2" />
-              )}
-              {testingCall ? "Making Call..." : "Test Call"}
-            </Button>
-          </div>
-          <div className="text-xs text-muted-foreground mt-2">
-            Make sure you've entered valid Twilio credentials and a phone number
-            before testing.
           </div>
         </CardContent>
       </Card>
 
-      {/* AI Model Settings */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <MessageSquare className="h-5 w-5" />
             AI Model Configuration
-            <HoverCard>
-              <HoverCardTrigger asChild>
-                <button className="ml-1 h-5 w-5 text-muted-foreground hover:text-foreground transition-colors">
-                  <Info className="h-5 w-5" />
-                </button>
-              </HoverCardTrigger>
-              <HoverCardContent className="w-80">
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold">
-                    AI Model Configuration
-                  </h4>
-                  <p className="text-sm text-muted-foreground">
-                    Configure the Large Language Model (LLM) provider and
-                    settings that power conversation intelligence. Includes
-                    model selection, response parameters, and system prompts.
-                  </p>
-                </div>
-              </HoverCardContent>
-            </HoverCard>
           </CardTitle>
           <CardDescription>
-            Configure the language model for conversations
+            Configure provider keys and the default language model for conversations
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="llmProvider">LLM Provider</Label>
-              <Select
-                value={config.llmProvider}
-                onValueChange={(value) =>
-                  handleProviderChange(
-                    value as "openai" | "anthropic" | "google"
-                  )
-                }
-              >
-                <SelectTrigger
-                  id="llmProvider"
-                  className="w-full h-10 rounded-xl"
+        <CardContent className="space-y-6">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            {PROVIDERS.map((provider) => {
+              const providerConfig = config.providers[provider.value];
+              const isVerifying = verifyingProvider === provider.value;
+              return (
+                <div
+                  key={provider.value}
+                  className="space-y-3 rounded-xl border p-4"
                 >
-                  <SelectValue placeholder="Select LLM provider" />
+                  <div className="flex items-center justify-between gap-2">
+                    <Label htmlFor={`${provider.value}ApiKey`}>
+                      {provider.label} API Key
+                    </Label>
+                    <StatusBadge
+                      status={providerConfig.status}
+                      configured={Boolean(providerConfig.apiKey)}
+                    />
+                  </div>
+                  <Input
+                    id={`${provider.value}ApiKey`}
+                    type="password"
+                    value={providerConfig.apiKey}
+                    onChange={(event) =>
+                      updateProviderKey(
+                        provider.value,
+                        replacementKeyValue(
+                          providerConfig.apiKey,
+                          event.target.value,
+                        ),
+                      )
+                    }
+                    onFocus={(event) => {
+                      if (isMasked(providerConfig.apiKey)) {
+                        event.currentTarget.select();
+                      }
+                    }}
+                    placeholder={`Enter your ${provider.label} API key`}
+                    autoComplete="off"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleVerifyProvider(provider.value)}
+                    disabled={Boolean(verifyingProvider)}
+                  >
+                    {isVerifying ? "Verifying..." : "Verify"}
+                  </Button>
+                  {providerConfig.apiKey && !isMasked(providerConfig.apiKey) && (
+                    <p className="text-xs text-muted-foreground">
+                      Save the new key before verifying it.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="llmProvider">Default LLM Provider</Label>
+              <Select
+                value={config.defaultProvider}
+                onValueChange={handleDefaultProviderChange}
+                disabled={!llmOptionsAvailable}
+              >
+                <SelectTrigger id="llmProvider" className="h-10 w-full rounded-xl">
+                  <SelectValue placeholder="Select an LLM provider" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="openai">OpenAI</SelectItem>
-                  <SelectItem value="anthropic">Anthropic</SelectItem>
-                  <SelectItem value="google">Google AI</SelectItem>
+                  {PROVIDERS.map((provider) => (
+                    <SelectItem key={provider.value} value={provider.value}>
+                      {provider.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-2">
-              <Label htmlFor="llmModel">Model</Label>
+              <Label htmlFor="llmModel">Default Model</Label>
               <Select
-                value={config.llmModel}
-                onValueChange={(value) => updateConfig("llmModel", value)}
+                value={config.defaultModel}
+                onValueChange={(value) =>
+                  setConfig((current) => ({ ...current, defaultModel: value }))
+                }
+                disabled={!llmOptionsAvailable}
               >
-                <SelectTrigger id="llmModel" className="w-full h-10 rounded-xl">
-                  <SelectValue placeholder="Select a model">
-                    {config.llmModel && availableModels[config.llmProvider] ? (
-                      <span className="font-medium">
-                        {availableModels[config.llmProvider].find(
-                          (model) => model.id === config.llmModel
-                        )?.name || config.llmModel}
-                      </span>
-                    ) : (
-                      "Select a model"
-                    )}
-                  </SelectValue>
+                <SelectTrigger id="llmModel" className="h-10 w-full rounded-xl">
+                  <SelectValue placeholder="Select a model" />
                 </SelectTrigger>
                 <SelectContent>
-                  {loadingModels ? (
-                    <SelectItem value="" disabled>
-                      Loading models...
-                    </SelectItem>
-                  ) : availableModels[config.llmProvider]?.length > 0 ? (
-                    availableModels[config.llmProvider].map((model) => (
-                      <SelectItem key={model.id} value={model.id}>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{model.name}</span>
-                          {model.description && (
-                            <span className="text-xs text-muted-foreground truncate max-w-[300px]">
-                              {model.description}
-                            </span>
-                          )}
-                          {model.pricing && (
-                            <span className="text-xs text-muted-foreground">
-                              Input: ${model.pricing.input}/1K tokens, Output: $
-                              {model.pricing.output}/1K tokens
-                            </span>
-                          )}
-                        </div>
+                  {selectedModels.length > 0 ? (
+                    selectedModels.map((model) => (
+                      <SelectItem key={model.value} value={model.value}>
+                        {model.name}
                       </SelectItem>
                     ))
                   ) : (
-                    <SelectItem value="" disabled>
-                      {config.llmApiKey
-                        ? "No models available"
-                        : "Enter API key to see available models"}
+                    <SelectItem value="model-options-unavailable" disabled>
+                      No models available
                     </SelectItem>
                   )}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <Label htmlFor="llmApiKey">API Key</Label>
-                {config.llmApiKey && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDeleteItem("llm", config.llmProvider)}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Delete Key
-                  </Button>
-                )}
-              </div>
-              <PasswordInput
-                id="llmApiKey"
-                value={config.llmApiKey}
-                onChange={(e) => handleApiKeyChange(e.target.value)}
-                placeholder="sk-..."
-              />
-            </div>
-            <div className="space-y-2">
+
+            <div className="space-y-2 lg:col-span-2">
               <Label htmlFor="temperature">
-                Temperature ({config.temperature})
+                Temperature ({config.temperature.toFixed(1)})
               </Label>
               <Slider
                 id="temperature"
@@ -2853,45 +1044,33 @@ Keep the conversation natural and engaging. If they're not interested, politely 
                 max={1}
                 step={0.1}
                 value={[config.temperature]}
-                onValueChange={(value) => updateConfig("temperature", value[0])}
+                onValueChange={(value) =>
+                  setConfig((current) => ({
+                    ...current,
+                    temperature: value[0],
+                  }))
+                }
                 className="py-4"
               />
             </div>
           </div>
+
           <div className="space-y-2">
             <Label htmlFor="systemPrompt">System Prompt</Label>
             <Textarea
               id="systemPrompt"
-              value={config.systemPrompt}
-              onChange={(e) => updateConfig("systemPrompt", e.target.value)}
+              value={config.generalSettings.defaultSystemPrompt}
+              onChange={(event) =>
+                updateGeneralSetting("defaultSystemPrompt", event.target.value)
+              }
               rows={8}
               placeholder="Enter the system prompt for your AI assistant..."
               className="min-h-[120px] sm:min-h-[200px]"
             />
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setOpenTestLLMChatDialog(true)}
-              disabled={!config.llmApiKey || testingLLMChat}
-            >
-              {testingLLMChat ? (
-                <MessageSquare className="h-4 w-4 mr-2 animate-pulse" />
-              ) : (
-                <MessageSquare className="h-4 w-4 mr-2" />
-              )}
-              {testingLLMChat ? "Testing..." : "Test AI Chat"}
-            </Button>
-          </div>
-          <div className="text-xs text-muted-foreground mt-2">
-            Test your LLM configuration with a sample prompt to ensure it's
-            working correctly.
-          </div>
         </CardContent>
       </Card>
 
-      {/* Call Settings */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -2899,19 +1078,14 @@ Keep the conversation natural and engaging. If they're not interested, politely 
             Call Settings
             <HoverCard>
               <HoverCardTrigger asChild>
-                <button className="ml-1 h-5 w-5 text-muted-foreground hover:text-foreground transition-colors">
+                <button className="ml-1 h-5 w-5 text-muted-foreground transition-colors hover:text-foreground">
                   <Info className="h-5 w-5" />
                 </button>
               </HoverCardTrigger>
               <HoverCardContent className="w-80">
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold">Call Settings</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Configure call behavior parameters including maximum
-                    duration, retry logic, and timezone settings for optimal
-                    call management and scheduling.
-                  </p>
-                </div>
+                <p className="text-sm text-muted-foreground">
+                  Configure call duration, retry behavior, and scheduling time zone.
+                </p>
               </HoverCardContent>
             </HoverCard>
           </CardTitle>
@@ -2920,17 +1094,20 @@ Keep the conversation natural and engaging. If they're not interested, politely 
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="maxCallDuration">
-                Max Call Duration (seconds)
-              </Label>
+              <Label htmlFor="maxCallDuration">Max Call Duration (seconds)</Label>
               <Input
                 id="maxCallDuration"
                 type="number"
-                value={config.maxCallDuration}
-                onChange={(e) =>
-                  updateConfig("maxCallDuration", parseInt(e.target.value))
+                min={30}
+                max={3600}
+                value={config.generalSettings.maxCallDuration}
+                onChange={(event) =>
+                  updateGeneralSetting(
+                    "maxCallDuration",
+                    Number(event.target.value),
+                  )
                 }
               />
             </div>
@@ -2939,9 +1116,14 @@ Keep the conversation natural and engaging. If they're not interested, politely 
               <Input
                 id="retryAttempts"
                 type="number"
-                value={config.retryAttempts}
-                onChange={(e) =>
-                  updateConfig("retryAttempts", parseInt(e.target.value))
+                min={0}
+                max={10}
+                value={config.generalSettings.callRetryAttempts}
+                onChange={(event) =>
+                  updateGeneralSetting(
+                    "callRetryAttempts",
+                    Number(event.target.value),
+                  )
                 }
               />
             </div>
@@ -2950,28 +1132,31 @@ Keep the conversation natural and engaging. If they're not interested, politely 
               <Input
                 id="retryDelay"
                 type="number"
-                value={config.retryDelay}
-                onChange={(e) =>
-                  updateConfig("retryDelay", parseInt(e.target.value))
+                min={15}
+                max={1440}
+                value={config.generalSettings.callRetryDelay}
+                onChange={(event) =>
+                  updateGeneralSetting("callRetryDelay", Number(event.target.value))
                 }
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="timeZone">Time Zone</Label>
               <Select
-                value={config.timeZone}
-                onValueChange={(value) => updateConfig("timeZone", value)}
+                value={config.generalSettings.defaultTimeZone}
+                onValueChange={(value) =>
+                  updateGeneralSetting("defaultTimeZone", value)
+                }
               >
-                <SelectTrigger id="timeZone" className="w-full h-10 rounded-xl">
+                <SelectTrigger id="timeZone" className="h-10 w-full rounded-xl">
                   <SelectValue placeholder="Select time zone" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="America/New_York">Eastern Time</SelectItem>
                   <SelectItem value="America/Chicago">Central Time</SelectItem>
                   <SelectItem value="America/Denver">Mountain Time</SelectItem>
-                  <SelectItem value="America/Los_Angeles">
-                    Pacific Time
-                  </SelectItem>
+                  <SelectItem value="America/Los_Angeles">Pacific Time</SelectItem>
+                  <SelectItem value="Asia/Kolkata">India Standard Time</SelectItem>
                   <SelectItem value="UTC">UTC</SelectItem>
                 </SelectContent>
               </Select>
@@ -2980,198 +1165,47 @@ Keep the conversation natural and engaging. If they're not interested, politely 
         </CardContent>
       </Card>
 
-      {/* Webhook Settings */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Zap className="h-5 w-5" />
             Webhook Integration
-            <HoverCard>
-              <HoverCardTrigger asChild>
-                <button className="ml-1 h-5 w-5 text-muted-foreground hover:text-foreground transition-colors">
-                  <Info className="h-5 w-5" />
-                </button>
-              </HoverCardTrigger>
-              <HoverCardContent className="w-80">
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold">Webhook Integration</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Configure webhook endpoints to receive real-time
-                    notifications about call events, status updates, and
-                    completion data for external system integration.
-                  </p>
-                </div>
-              </HoverCardContent>
-            </HoverCard>
           </CardTitle>
           <CardDescription>
-            Configure webhook secret for receiving call events. The webhook base
-            URL is configured via the WEBHOOK_BASE_URL environment variable in
-            the server.
+            Configure the secret used to verify incoming call-event webhooks
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="space-y-2 lg:col-span-2">
-              <div className="flex justify-between items-center">
-                <Label htmlFor="webhookSecret">Webhook Secret</Label>
-                {config.webhookSecret && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDeleteItem("webhook")}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Delete Secret
-                  </Button>
-                )}
-              </div>
-              <PasswordInput
-                id="webhookSecret"
-                value={config.webhookSecret}
-                onChange={(e) => updateConfig("webhookSecret", e.target.value)}
-                placeholder="Enter your webhook secret key"
-              />
-              <div className="text-xs text-muted-foreground mt-2">
-                The webhook secret is used to verify that requests are coming
-                from our service.
-              </div>
-            </div>
+        <CardContent>
+          <div className="space-y-2">
+            <Label htmlFor="webhookSecret">Webhook Secret</Label>
+            <Input
+              id="webhookSecret"
+              type="password"
+              value={config.webhookSecret}
+              onChange={(event) =>
+                setConfig((current) => ({
+                  ...current,
+                  webhookSecret: replacementKeyValue(
+                    current.webhookSecret,
+                    event.target.value,
+                  ),
+                }))
+              }
+              onFocus={(event) => {
+                if (isMasked(config.webhookSecret)) {
+                  event.currentTarget.select();
+                }
+              }}
+              placeholder="Enter your webhook secret"
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">
+              The webhook base URL is configured by the server environment.
+            </p>
           </div>
         </CardContent>
       </Card>
-
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
-            <AlertDialogDescription>
-              {itemToDelete?.type === "twilio" &&
-                "Are you sure you want to delete your Twilio configuration?"}
-              {itemToDelete?.type === "elevenlabs" &&
-                "Are you sure you want to delete your ElevenLabs configuration?"}
-              {itemToDelete?.type === "deepgram" &&
-                "Are you sure you want to delete your Deepgram API key?"}
-              {itemToDelete?.type === "llm" &&
-                `Are you sure you want to delete your ${itemToDelete.name} API key?`}
-              {itemToDelete?.type === "webhook" &&
-                "Are you sure you want to delete your Webhook secret?"}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteDialogOpen(false)}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDelete}
-              className="bg-red-500 hover:bg-red-600 text-white"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Test Call Dialog */}
-      <AlertDialog
-        open={openTestCallDialog}
-        onOpenChange={setOpenTestCallDialog}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Make Test Call</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will make a test call using your Twilio configuration. Enter
-              the phone number that should receive the test call.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="testCallNumber">Phone Number to Call</Label>
-              <Input
-                id="testCallNumber"
-                placeholder="+1234567890"
-                value={testCallNumber}
-                onChange={(e) => setTestCallNumber(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Enter a phone number in E.164 format (e.g., +1234567890)
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="testCallMessage">Test Message (Optional)</Label>
-              <Textarea
-                id="testCallMessage"
-                placeholder="This is a test call from your AI calling system."
-                value={testCallMessage}
-                onChange={(e) => setTestCallMessage(e.target.value)}
-                rows={3}
-              />
-            </div>
-          </div>
-
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleTestCall} disabled={testingCall}>
-              {testingCall ? "Making Call..." : "Make Test Call"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Test LLM Chat Dialog */}
-      <AlertDialog
-        open={openTestLLMChatDialog}
-        onOpenChange={setOpenTestLLMChatDialog}
-      >
-        <AlertDialogContent className="max-w-3xl">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Test AI Chat</AlertDialogTitle>
-            <AlertDialogDescription>
-              Test your AI model with your current system prompt configuration.
-              This will send a sample customer message to see how the AI
-              responds with your configured personality.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Test Scenario</Label>
-              <div className="border rounded-md p-3 bg-muted/50 text-sm">
-                <strong>Customer Message:</strong> "Hello, how are you today?
-                Can you tell me about your product or service?"
-              </div>
-              <p className="text-xs text-muted-foreground">
-                The AI will respond to this customer message using your
-                configured system prompt and personality settings.
-              </p>
-            </div>
-
-            {testLLMResponse && (
-              <div className="space-y-2 mt-4">
-                <Label>AI Response</Label>
-                <div className="border rounded-md p-3 bg-background text-foreground whitespace-pre-wrap">
-                  {testLLMResponse}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <AlertDialogFooter>
-            <AlertDialogCancel>Close</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleTestLLMChat}
-              disabled={testingLLMChat}
-            >
-              {testingLLMChat ? "Testing..." : "Test AI Response"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      </fieldset>
     </div>
   );
 };

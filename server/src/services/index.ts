@@ -1,5 +1,4 @@
 // Export the LiveKit-era service surface from a central file for easier imports.
-import Configuration from '../models/Configuration';
 import { logger } from '../index';
 import {
   CampaignService,
@@ -65,53 +64,11 @@ export const conversationEngine: any = new Proxy({}, {
 export const getConversationEngine = () => conversationEngine;
 
 export const reinitializeGlobalLLMService = async () => {
-  try {
-    const config = await Configuration.findOne();
-    const dbLlmConfig = config?.llmConfig;
-
-    if (!dbLlmConfig?.providers) {
-      logger.warn('No LLM configuration found in database for global service');
-      _llmService = createFallbackLLMService();
-      (global as any).llmService = _llmService;
-      return;
-    }
-
-    const llmConfig: LLMConfig = {
-      providers: dbLlmConfig.providers.map((provider) => ({
-        name: provider.name.toLowerCase() as LLMProvider,
-        apiKey: provider.apiKey,
-        isEnabled: provider.status === 'verified',
-        defaultModel: provider.name === dbLlmConfig.defaultProvider
-          ? dbLlmConfig.defaultModel
-          : undefined,
-      })),
-      defaultProvider: (dbLlmConfig.defaultProvider?.toLowerCase() || 'openai') as LLMProvider,
-      defaultModel: dbLlmConfig.defaultModel || 'gpt-4',
-      timeoutMs: 30000,
-      retryConfig: {
-        maxRetries: 2,
-        initialDelayMs: 1000,
-        maxDelayMs: 5000,
-      },
-    };
-
-    if (!_llmService) {
-      _llmService = new LLMService(llmConfig);
-    } else {
-      _llmService.updateConfig(llmConfig);
-    }
-
-    (global as any).llmService = _llmService;
-    (config as any).llmConfig.llmService = _llmService;
-
-    logger.info('Global LLM service reinitialized with database configuration');
-  } catch (error) {
-    logger.error('Failed to reinitialize global LLM service:', error);
-    if (!_llmService) {
-      _llmService = createFallbackLLMService();
-      (global as any).llmService = _llmService;
-    }
-  }
+  _llmService = createFallbackLLMService();
+  (global as any).llmService = _llmService;
+  logger.warn(
+    'Global database-key initialization disabled; BYO credentials require an owner-scoped request path.',
+  );
 };
 
 export const initializeServicesAfterDB = async () => {

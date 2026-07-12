@@ -135,75 +135,55 @@ export function validateDatabaseLoadedConfig(config: any): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  // Validate LLM providers if they exist
+  // Per-user providers are usable only after successful verification. Lazy
+  // defaults intentionally contain empty, unverified keys and remain valid.
   if (config.llmConfig?.providers) {
-    const enabledProviders = config.llmConfig.providers.filter((p: any) => p.isEnabled);
-    
-    enabledProviders.forEach((provider: any) => {
-      if (provider.name === 'google' && (!provider.apiKey || provider.apiKey.trim() === '')) {
-        errors.push(`Google LLM provider is enabled but API key is missing`);
-      }
-      if (provider.name === 'openai' && (!provider.apiKey || provider.apiKey.trim() === '')) {
-        errors.push(`OpenAI LLM provider is enabled but API key is missing`);
-      }
-      if (provider.name === 'anthropic' && (!provider.apiKey || provider.apiKey.trim() === '')) {
-        errors.push(`Anthropic LLM provider is enabled but API key is missing`);
+    config.llmConfig.providers.forEach((provider: any) => {
+      const providerLabel = provider.name === 'openai'
+        ? 'OpenAI'
+        : provider.name === 'anthropic'
+          ? 'Anthropic'
+          : provider.name === 'google'
+            ? 'Google'
+            : String(provider.name);
+      const hasApiKey = typeof provider.apiKey === 'string' && provider.apiKey.trim() !== '';
+
+      if (provider.status === 'verified' && !hasApiKey) {
+        errors.push(`${providerLabel} LLM provider is verified but API key is missing`);
+      } else if (provider.status === 'failed') {
+        warnings.push(
+          `${providerLabel} LLM verification failed: ${provider.lastError || 'Unknown error'}`,
+        );
+      } else if (provider.status === 'unverified' && hasApiKey) {
+        warnings.push(`${providerLabel} LLM provider has not been verified`);
       }
     });
   }
 
-  // Validate ElevenLabs if enabled
-  if (config.elevenLabsConfig?.isEnabled && (!config.elevenLabsConfig.apiKey || config.elevenLabsConfig.apiKey.trim() === '')) {
-    errors.push('ElevenLabs is enabled but API key is missing');
-  }
-
-  // Validate Deepgram configuration
+  // Validate the current per-user Deepgram shape. Empty unverified defaults
+  // are valid so a configuration can be created lazily.
   if (config.deepgramConfig) {
     if (config.deepgramConfig.isEnabled) {
-      if (!config.deepgramConfig.apiKey || config.deepgramConfig.apiKey.trim() === '') {
-        errors.push('Deepgram is enabled but API key is missing');
-      } else {
-        // Check for model configuration issues
-        if (!config.deepgramConfig.primaryModel) {
-          warnings.push('Deepgram primary model not configured - will use default');
-        }
-        
-        // Check validation status
-        if (config.deepgramConfig.status === 'failed') {
-          warnings.push(`Deepgram model validation failed: ${config.deepgramConfig.lastError || 'Unknown error'}`);
-        } else if (config.deepgramConfig.status === 'unverified') {
-          warnings.push('Deepgram configuration has not been validated');
-        }
-        
-        // Check for account tier limitations
-        if (config.deepgramConfig.accountTier === 'free') {
-          warnings.push('Deepgram free tier detected - limited model access and features');
-        }
-        
-        // Check for outdated validation
-        if (config.deepgramConfig.lastModelValidation) {
-          const lastValidation = new Date(config.deepgramConfig.lastModelValidation);
-          const daysSinceValidation = (Date.now() - lastValidation.getTime()) / (1000 * 60 * 60 * 24);
-          if (daysSinceValidation > 7) {
-            warnings.push(`Deepgram model validation is ${Math.floor(daysSinceValidation)} days old - consider re-validation`);
-          }
-        }
+      const hasApiKey = typeof config.deepgramConfig.apiKey === 'string'
+        && config.deepgramConfig.apiKey.trim() !== '';
+
+      if (config.deepgramConfig.status === 'verified' && !hasApiKey) {
+        errors.push('Deepgram is verified but API key is missing');
+      }
+      if (config.deepgramConfig.status === 'verified' && !config.deepgramConfig.sttModel) {
+        warnings.push('Deepgram STT model not configured - will use default');
+      } else if (config.deepgramConfig.status === 'failed') {
+        warnings.push(
+          `Deepgram verification failed: ${config.deepgramConfig.lastError || 'Unknown error'}`,
+        );
+      } else if (config.deepgramConfig.status === 'unverified' && hasApiKey) {
+        warnings.push('Deepgram configuration has not been verified');
       }
     } else {
       warnings.push('Deepgram is disabled - speech-to-text functionality will not be available');
     }
   } else {
     warnings.push('Deepgram configuration not found - speech-to-text functionality will not be available');
-  }
-
-  // Validate Twilio if enabled
-  if (config.twilioConfig?.isEnabled) {
-    if (!config.twilioConfig.accountSid || config.twilioConfig.accountSid.trim() === '') {
-      errors.push('Twilio is enabled but Account SID is missing');
-    }
-    if (!config.twilioConfig.authToken || config.twilioConfig.authToken.trim() === '') {
-      errors.push('Twilio is enabled but Auth Token is missing');
-    }
   }
 
   if (errors.length > 0) {
@@ -248,19 +228,17 @@ export function validateDeepgramStartupConfig(deepgramConfig: any): ValidationRe
     };
   }
 
-  // Check for known configuration issues
+  // Check the current per-user Deepgram fields.
   const issues: string[] = [];
   
   if (deepgramConfig.status === 'failed') {
     issues.push(`Previous validation failed: ${deepgramConfig.lastError || 'Unknown error'}`);
+  } else if (deepgramConfig.status !== 'verified') {
+    issues.push('Deepgram configuration has not been verified');
   }
   
-  if (!deepgramConfig.primaryModel) {
-    issues.push('Primary model not configured');
-  }
-  
-  if (deepgramConfig.accountTier === 'free' && deepgramConfig.primaryModel?.includes('nova-2')) {
-    issues.push('Free tier account cannot access nova-2 models');
+  if (!deepgramConfig.sttModel) {
+    issues.push('STT model not configured');
   }
 
   return {

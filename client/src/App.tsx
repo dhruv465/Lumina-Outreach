@@ -12,7 +12,6 @@ import Leads from '@/pages/Leads';
 import Campaigns from '@/pages/Campaigns';
 import Calls from '@/pages/Calls';
 import Analytics from '@/pages/Analytics';
-import AITraining from '@/pages/AITraining';
 import Configuration from '@/pages/Configuration';
 import KnowledgeManagement from '@/pages/KnowledgeManagement';
 import DocumentDetail from '@/pages/DocumentDetail';
@@ -64,7 +63,6 @@ function App() {
           <Route path="campaigns" element={<Campaigns />} />
           <Route path="calls" element={<Calls />} />
           <Route path="analytics" element={<Analytics />} />
-          <Route path="ai-training" element={<AITraining />} />
           <Route path="configuration" element={<Configuration />} />
           <Route path="knowledge" element={<KnowledgeManagement />} />
           <Route path="knowledge/document/:id" element={<DocumentDetail />} />

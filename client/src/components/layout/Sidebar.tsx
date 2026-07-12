@@ -8,7 +8,6 @@ import {
   Settings,
   Megaphone,
   BarChart3,
-  Brain,
   LogOut,
   BookOpen,
   ChevronRight,
@@ -219,13 +218,6 @@ const Sidebar: React.FC<SidebarProps> = ({ onNavigate, collapsed = false, isMobi
               href="/analytics"
               icon={<BarChart3 size={20} />}
               title="Analytics"
-              onNavigate={onNavigate}
-              collapsed={collapsed}
-            />
-            <SidebarItem
-              href="/ai-training"
-              icon={<Brain size={20} />}
-              title="AI Training"
               onNavigate={onNavigate}
               collapsed={collapsed}
             />

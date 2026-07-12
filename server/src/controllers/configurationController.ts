@@ -48,7 +48,13 @@ const isPlaceholder = (value: unknown) => (
 
 async function configFor(req: FastifyRequest) {
   const ownerId = (req.user as any)._id;
-  return (await Configuration.findOne({ ownerId })) ?? (await Configuration.create({ ownerId }));
+  const doc = await Configuration.findOneAndUpdate(
+    { ownerId },
+    { $setOnInsert: { ownerId } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
+  if (!doc) throw new Error('Failed to load per-user configuration');
+  return doc;
 }
 
 export const getSystemConfiguration = async (req: FastifyRequest, res: FastifyReply) => {
@@ -71,6 +77,8 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
       if (!isPlaceholder(deepgram.apiKey)) {
         doc.deepgramConfig.apiKey = deepgram.apiKey;
         doc.deepgramConfig.status = 'unverified';
+        doc.deepgramConfig.lastVerified = null;
+        doc.deepgramConfig.lastError = '';
       }
       if (typeof deepgram.sttModel === 'string' && deepgram.sttModel) {
         doc.deepgramConfig.sttModel = deepgram.sttModel;
@@ -90,6 +98,7 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
         if (!isPlaceholder(incoming.apiKey)) {
           target.apiKey = incoming.apiKey;
           target.status = 'unverified';
+          target.lastVerified = null;
           target.lastError = '';
         }
       }
@@ -126,7 +135,8 @@ export const verifyDeepgram = async (req: FastifyRequest, res: FastifyReply) => 
       error: result.error,
     });
   } catch (error) {
-    res.status(500).send({ message: getErrorMessage(error) });
+    logger.error(`verifyDeepgram failed: ${getErrorMessage(error)}`);
+    res.status(500).send({ message: 'Failed to verify Deepgram key' });
   }
 };
 
@@ -146,7 +156,8 @@ export const verifyLlm = async (req: FastifyRequest, res: FastifyReply) => {
     await doc.save();
     res.status(200).send({ ok: result.ok, status: target.status, error: result.error });
   } catch (error) {
-    res.status(500).send({ message: getErrorMessage(error) });
+    logger.error(`verifyLlm failed: ${getErrorMessage(error)}`);
+    res.status(500).send({ message: 'Failed to verify LLM key' });
   }
 };
 

@@ -1,42 +1,35 @@
-# Project Lumina: Industrial Launch & Global Rollout Plan 🚀
+# Lumina Outreach MVP Launch Checklist
 
-This document outlines the final technical and operational steps to launch Project Lumina to the world.
+This checklist tracks gates that still need evidence before a production launch.
+The current codebase uses LiveKit for voice, per-user provider credentials, and
+MongoDB-backed batch recovery without a separate queue service.
 
-## Phase 1: Code-Level Readiness (COMPLETED ✅)
-- [x] **Distributed Architecture:** Redis session management integrated.
-- [x] **Real Vector Search:** MongoDB Atlas semantic retrieval implemented.
-- [x] **Self-Learning Loop:** HITL Admin UI and automated retraining service active.
-- [x] **Privacy Compliance:** Automated PII masking for all customer data.
-- [x] **Sales Automation:** Auto-updating Lead status based on AI intent.
-- [x] **Resilient Orchestration:** Provider fallbacks and adaptive timeouts.
-- [x] **Containerization:** Docker & Docker Compose configured for production.
+## LiveKit and telephony gates
 
-## Phase 2: Infrastructure Hardening (URGENT ⚠️)
-- [ ] **Stable Production Domain:** 
-    - Move from Ngrok to a dedicated domain (e.g., `ai-agent.yourcompany.com`).
-    - Setup SSL (HTTPS) - *Twilio will not connect to insecure webhooks.*
-- [ ] **Managed Database & Redis:**
-    - Use a managed MongoDB Atlas cluster (for Vector Search).
-    - Use a managed Redis instance (e.g., Upstash or AWS ElastiCache) for session stability.
-- [ ] **Secret Management:** 
-    - **DO NOT** use `.env` in production. 
-    - Move keys to AWS Secrets Manager or GCP Secret Manager.
+- [ ] Deploy the `lumina-outbound` agent to the intended LiveKit environment.
+- [ ] Configure production LiveKit credentials for the API and agent.
+- [ ] Configure the outbound SIP trunk and verify E.164 dialing on target regions.
+- [ ] Exercise the full call lifecycle through dispatch, SIP, webhooks, transcript,
+  outcome, and terminal call state.
+- [ ] Verify barge-in, voicemail handling, callbacks, and transfer behavior on the
+  production telephony path.
+- [ ] Verify optional GCS recording delivery if recording is enabled.
 
-## Phase 3: Dialogflow CX Optimization
-- [ ] **Multilingual Setup:** Enable Hindi (`hi-IN`) in the CX Console.
-- [ ] **Sentiment Analysis:** Turn on sentiment scoring in Agent Settings.
-- [ ] **Vector Index:** Create a search index named `vector_index` in your MongoDB collection to enable the new semantic RAG logic.
-- [ ] **Golden Test Set:** Upload the `check_cancellation_fee.csv` and `check_invoice.csv` to the `price_inquiry` intent.
+## Data, credentials, and operations gates
 
-## Phase 4: Operational Launch
-- [ ] **Load Testing:** Run 50 concurrent calls to verify Redis and LLM timeout logic.
-- [ ] **HITL Calibration:** Have a manager review the first 100 intents in the **AI Training Dashboard**.
-- [ ] **Sheet Sync:** Verify that leads are flowing correctly into the master Google Sheet.
+- [ ] Configure the production MongoDB deployment and validate batch recovery from
+  `processedLeadIds` after a controlled restart.
+- [ ] Store a strong `CONFIG_ENCRYPTION_KEY` in the production secret manager.
+- [ ] Have each user configure and verify their own Deepgram and LLM credentials in
+  the app; do not depend on shared provider keys.
+- [ ] Confirm logs and error monitoring are connected to the production observability
+  stack without exposing provider credentials or customer data.
+- [ ] Verify Google Sheets sync if it is enabled for the launch workflow.
+- [ ] Run an agreed pilot/load test and record the acceptance results before rollout.
 
-## Phase 5: World-Wide Rollout
-- [ ] **Monitoring:** Connect Winston logs to a log aggregator (Datadog/CloudWatch).
-- [ ] **Scaling:** Deploy to a container orchestrator (Kubernetes or AWS ECS) to handle thousands of concurrent calls.
-- [ ] **Public API:** Open the feedback endpoints to integration partners if required.
+## Post-MVP backlog
 
----
-**The engine is built. The pilot is trained. The runway is cleared. Ready for takeoff.** 🚀
+- [ ] Build Conversation Review and human quality scoring.
+- [ ] Add per-turn annotations and automatic prompt evaluation.
+- [ ] Evaluate provider-specific fine-tuning and automatic campaign-script changes
+  only after review data and explicit safeguards exist.

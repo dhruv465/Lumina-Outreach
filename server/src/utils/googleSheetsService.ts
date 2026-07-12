@@ -2,7 +2,7 @@ import { google } from 'googleapis';
 import logger from './logger';
 import path from 'path';
 
-// Use the same credentials as Dialogflow
+// Google Sheets prefers GOOGLE_APPLICATION_CREDENTIALS; ./lumina-outreach-c4082e500293.json is the local fallback.
 const auth = new google.auth.GoogleAuth({
   keyFile: path.resolve(process.cwd(), process.env.GOOGLE_APPLICATION_CREDENTIALS || './lumina-outreach-c4082e500293.json'),
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],

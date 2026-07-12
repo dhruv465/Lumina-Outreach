@@ -1,8 +1,10 @@
 import BatchCall from '../models/BatchCall';
+import Campaign from '../models/Campaign';
 import { runWithConcurrency } from '../utils/concurrencyPool';
 import { FinancialService } from '../utils/financialService';
 import logger from '../utils/logger';
 import * as Sentry from '@sentry/node';
+import { buildProviderConfig, ProviderConfigError } from '../integrations/livekit/providerConfig';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -15,6 +17,15 @@ class BatchCallService {
     createdBy: string;
     config?: any;
   }) {
+    const campaign = await Campaign.findById(params.campaignId);
+    const ownerId = campaign?.createdBy?.toString() || params.createdBy;
+    if (!ownerId) {
+      throw new ProviderConfigError(
+        'Campaign has no owner and no initiating user; cannot resolve API keys.',
+      );
+    }
+    await buildProviderConfig(ownerId);
+
     const batch = await BatchCall.create({
       name: params.name,
       campaignId: params.campaignId,

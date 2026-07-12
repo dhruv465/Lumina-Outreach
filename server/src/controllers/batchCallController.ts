@@ -3,7 +3,7 @@ import { batchCallService } from '../services/batchCallService';
 import Campaign from '../models/Campaign';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
-import { buildProviderConfig, ProviderConfigError } from '../integrations/livekit/providerConfig';
+import { ProviderConfigError } from '../integrations/livekit/providerConfig';
 
 export class BatchCallController {
   async createBatch(req: FastifyRequest, reply: FastifyReply) {
@@ -28,21 +28,6 @@ export class BatchCallController {
         return reply.status(403).send({ success: false, error: 'Access denied: you do not own this campaign' });
       }
 
-      try {
-        const ownerId = campaignOwnerId || initiatingUserId;
-        if (!ownerId) {
-          throw new ProviderConfigError(
-            'Campaign has no owner and no initiating user; cannot resolve API keys.',
-          );
-        }
-        await buildProviderConfig(ownerId);
-      } catch (error) {
-        if (error instanceof ProviderConfigError) {
-          return reply.status(400).send({ message: error.message });
-        }
-        throw error;
-      }
-
       const batch = await batchCallService.createBatch({
         name: name || `Batch Call ${new Date().toLocaleString()}`,
         campaignId,
@@ -53,6 +38,9 @@ export class BatchCallController {
 
       return reply.status(201).send({ success: true, data: batch });
     } catch (error) {
+      if (error instanceof ProviderConfigError) {
+        return reply.status(400).send({ message: error.message });
+      }
       logger.error(`Error creating batch call: ${getErrorMessage(error)}`);
       return reply.status(500).send({ success: false, error: 'Internal server error' });
     }

@@ -32,6 +32,12 @@ jest.mock('../providerConfig', () => ({
   ProviderConfigError: class ProviderConfigError extends Error {},
 }));
 
+const mockStartCallRecording = jest.fn();
+jest.mock('../egressService', () => ({
+  __esModule: true,
+  startCallRecording: (...a: any[]) => mockStartCallRecording(...a),
+}));
+
 import logger from '../../../utils/logger';
 import { dispatchOutboundCall, initiateLiveKitCall } from '../dispatchService';
 
@@ -141,6 +147,10 @@ describe('initiateLiveKitCall', () => {
     expect(sent.provider_config.llm.provider).toBe('openai');
     expect(sent.provider_config.stt.api_key).toBe('dg');
     expect(mockBuildProviderConfig).toHaveBeenCalledWith('64b0c0ffee0ddeadbeef0001');
+    expect(mockStartCallRecording).toHaveBeenCalledWith(
+      'call-64b0c0ffee0ddeadbeef9999',
+      '64b0c0ffee0ddeadbeef0001',
+    );
   });
 
   it('prefers the campaign owner over the initiating user', async () => {

@@ -42,6 +42,7 @@ export const AURA_VOICES = [
 ].map((v) => ({ value: v, name: v.replace(/^aura(-2)?-/, '').replace(/-en$/, '') }));
 
 const MASK_PREFIX = '••••';
+const VERIFICATION_CONFLICT = 'API key changed during verification. Verify the current key again.';
 const isPlaceholder = (value: unknown) => (
   typeof value !== 'string' || value === '' || value.startsWith(MASK_PREFIX)
 );
@@ -127,14 +128,27 @@ export const updateSystemConfiguration = async (req: FastifyRequest, res: Fastif
 export const verifyDeepgram = async (req: FastifyRequest, res: FastifyReply) => {
   try {
     const doc = await configFor(req);
-    const result = await verifyDeepgramKey(decryptSecret(doc.deepgramConfig.apiKey || ''));
-    doc.deepgramConfig.status = result.ok ? 'verified' : 'failed';
-    doc.deepgramConfig.lastVerified = result.ok ? new Date() : doc.deepgramConfig.lastVerified;
-    doc.deepgramConfig.lastError = result.ok ? '' : result.error || 'verification failed';
-    await doc.save();
+    const ownerId = (req.user as any)._id;
+    const storedKey = doc.deepgramConfig.apiKey || '';
+    const result = await verifyDeepgramKey(decryptSecret(storedKey));
+    const status = result.ok ? 'verified' : 'failed';
+    const set: Record<string, unknown> = {
+      'deepgramConfig.status': status,
+      'deepgramConfig.lastError': result.ok ? '' : result.error || 'verification failed',
+    };
+    if (result.ok) set['deepgramConfig.lastVerified'] = new Date();
+
+    const update = await Configuration.updateOne(
+      { ownerId, 'deepgramConfig.apiKey': storedKey },
+      { $set: set },
+    );
+    if (update.matchedCount !== 1) {
+      res.status(409).send({ message: VERIFICATION_CONFLICT });
+      return;
+    }
     res.status(200).send({
       ok: result.ok,
-      status: doc.deepgramConfig.status,
+      status,
       error: result.error,
     });
   } catch (error) {
@@ -152,12 +166,31 @@ export const verifyLlm = async (req: FastifyRequest, res: FastifyReply) => {
       res.status(400).send({ message: `Unknown provider: ${provider}` });
       return;
     }
-    const result = await verifyLlmKey(target.name, decryptSecret(target.apiKey || ''));
-    target.status = result.ok ? 'verified' : 'failed';
-    target.lastVerified = result.ok ? new Date() : target.lastVerified;
-    target.lastError = result.ok ? '' : result.error || 'verification failed';
-    await doc.save();
-    res.status(200).send({ ok: result.ok, status: target.status, error: result.error });
+    const ownerId = (req.user as any)._id;
+    const storedKey = target.apiKey || '';
+    const result = await verifyLlmKey(target.name, decryptSecret(storedKey));
+    const status = result.ok ? 'verified' : 'failed';
+    const set: Record<string, unknown> = {
+      'llmConfig.providers.$[provider].status': status,
+      'llmConfig.providers.$[provider].lastError': result.ok
+        ? ''
+        : result.error || 'verification failed',
+    };
+    if (result.ok) set['llmConfig.providers.$[provider].lastVerified'] = new Date();
+
+    const update = await Configuration.updateOne(
+      {
+        ownerId,
+        'llmConfig.providers': { $elemMatch: { name: target.name, apiKey: storedKey } },
+      },
+      { $set: set },
+      { arrayFilters: [{ 'provider.name': target.name, 'provider.apiKey': storedKey }] },
+    );
+    if (update.matchedCount !== 1) {
+      res.status(409).send({ message: VERIFICATION_CONFLICT });
+      return;
+    }
+    res.status(200).send({ ok: result.ok, status, error: result.error });
   } catch (error) {
     logger.error(`verifyLlm failed: ${getErrorMessage(error)}`);
     res.status(500).send({ message: 'Failed to verify LLM key' });

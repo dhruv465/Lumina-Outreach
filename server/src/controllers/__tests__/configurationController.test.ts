@@ -1,9 +1,10 @@
 process.env.CONFIG_ENCRYPTION_KEY = 'test-master-key-for-jest';
 
 const mockFindOneAndUpdate = jest.fn();
+const mockUpdateOne = jest.fn();
 jest.mock('../../models/Configuration', () => ({
   __esModule: true,
-  default: { findOneAndUpdate: mockFindOneAndUpdate },
+  default: { findOneAndUpdate: mockFindOneAndUpdate, updateOne: mockUpdateOne },
 }));
 
 const mockVerifyDeepgram = jest.fn();
@@ -192,27 +193,149 @@ describe('updateSystemConfiguration', () => {
 });
 
 describe('verify endpoints', () => {
-  it('verify-deepgram decrypts stored key, marks verified on ok', async () => {
+  it('verify-deepgram decrypts the snapshot and atomically marks that key verified', async () => {
     const doc = fakeDoc();
-    doc.deepgramConfig.apiKey = encryptSecret('dg-stored');
+    const storedKey = encryptSecret('dg-stored');
+    doc.deepgramConfig.apiKey = storedKey;
     mockFindOneAndUpdate.mockResolvedValue(doc);
     mockVerifyDeepgram.mockResolvedValue({ ok: true });
+    mockUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
     const res = fakeReply();
     await verifyDeepgram(reqFor(), res);
     expect(mockVerifyDeepgram).toHaveBeenCalledWith('dg-stored');
-    expect(doc.deepgramConfig.status).toBe('verified');
-    expect(doc.save).toHaveBeenCalled();
+    expect(mockUpdateOne).toHaveBeenCalledWith(
+      { ownerId, 'deepgramConfig.apiKey': storedKey },
+      { $set: {
+        'deepgramConfig.status': 'verified',
+        'deepgramConfig.lastVerified': expect.any(Date),
+        'deepgramConfig.lastError': '',
+      } },
+    );
+    expect(doc.save).not.toHaveBeenCalled();
+    expect(res.send).toHaveBeenCalledWith({ ok: true, status: 'verified', error: undefined });
   });
 
-  it('verify-llm marks failed and stores lastError on bad key', async () => {
+  it('verify-deepgram atomically marks the snapshotted key failed', async () => {
     const doc = fakeDoc();
-    doc.llmConfig.providers[0].apiKey = encryptSecret('sk-bad');
+    const storedKey = encryptSecret('dg-bad');
+    doc.deepgramConfig.apiKey = storedKey;
+    mockFindOneAndUpdate.mockResolvedValue(doc);
+    mockVerifyDeepgram.mockResolvedValue({ ok: false, error: 'provider returned HTTP 401' });
+    mockUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+
+    await verifyDeepgram(reqFor(), fakeReply());
+
+    expect(mockUpdateOne).toHaveBeenCalledWith(
+      { ownerId, 'deepgramConfig.apiKey': storedKey },
+      { $set: {
+        'deepgramConfig.status': 'failed',
+        'deepgramConfig.lastError': 'provider returned HTTP 401',
+      } },
+    );
+    expect(doc.save).not.toHaveBeenCalled();
+  });
+
+  it('verify-deepgram returns 409 when the key changes during verification', async () => {
+    const doc = fakeDoc();
+    const storedKey = encryptSecret('dg-old');
+    doc.deepgramConfig.apiKey = storedKey;
+    mockFindOneAndUpdate.mockResolvedValue(doc);
+    mockVerifyDeepgram.mockImplementation(async () => {
+      doc.deepgramConfig.apiKey = encryptSecret('dg-replacement');
+      return { ok: true };
+    });
+    mockUpdateOne.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
+    const res = fakeReply();
+
+    await verifyDeepgram(reqFor(), res);
+
+    expect(mockUpdateOne).toHaveBeenCalledWith(
+      { ownerId, 'deepgramConfig.apiKey': storedKey },
+      expect.any(Object),
+    );
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.send).toHaveBeenCalledWith({
+      message: 'API key changed during verification. Verify the current key again.',
+    });
+    expect(doc.save).not.toHaveBeenCalled();
+  });
+
+  it('verify-llm atomically marks the snapshotted provider key failed', async () => {
+    const doc = fakeDoc();
+    const storedKey = encryptSecret('sk-bad');
+    doc.llmConfig.providers[0].apiKey = storedKey;
     mockFindOneAndUpdate.mockResolvedValue(doc);
     mockVerifyLlm.mockResolvedValue({ ok: false, error: 'provider returned HTTP 401' });
+    mockUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
     const res = fakeReply();
     await verifyLlm(reqFor({ provider: 'openai' }), res);
-    expect(doc.llmConfig.providers[0].status).toBe('failed');
-    expect(doc.llmConfig.providers[0].lastError).toContain('401');
+    expect(mockUpdateOne).toHaveBeenCalledWith(
+      {
+        ownerId,
+        'llmConfig.providers': { $elemMatch: { name: 'openai', apiKey: storedKey } },
+      },
+      { $set: {
+        'llmConfig.providers.$[provider].status': 'failed',
+        'llmConfig.providers.$[provider].lastError': 'provider returned HTTP 401',
+      } },
+      { arrayFilters: [{ 'provider.name': 'openai', 'provider.apiKey': storedKey }] },
+    );
+    expect(doc.save).not.toHaveBeenCalled();
+  });
+
+  it('verify-llm atomically marks the snapshotted provider key verified', async () => {
+    const doc = fakeDoc();
+    const storedKey = encryptSecret('sk-good');
+    doc.llmConfig.providers[0].apiKey = storedKey;
+    mockFindOneAndUpdate.mockResolvedValue(doc);
+    mockVerifyLlm.mockResolvedValue({ ok: true });
+    mockUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+    const res = fakeReply();
+
+    await verifyLlm(reqFor({ provider: 'openai' }), res);
+
+    expect(mockUpdateOne).toHaveBeenCalledWith(
+      {
+        ownerId,
+        'llmConfig.providers': { $elemMatch: { name: 'openai', apiKey: storedKey } },
+      },
+      { $set: {
+        'llmConfig.providers.$[provider].status': 'verified',
+        'llmConfig.providers.$[provider].lastVerified': expect.any(Date),
+        'llmConfig.providers.$[provider].lastError': '',
+      } },
+      { arrayFilters: [{ 'provider.name': 'openai', 'provider.apiKey': storedKey }] },
+    );
+    expect(res.send).toHaveBeenCalledWith({ ok: true, status: 'verified', error: undefined });
+  });
+
+  it('verify-llm returns 409 when the provider key changes during verification', async () => {
+    const doc = fakeDoc();
+    const storedKey = encryptSecret('sk-old');
+    doc.llmConfig.providers[0].apiKey = storedKey;
+    mockFindOneAndUpdate.mockResolvedValue(doc);
+    mockVerifyLlm.mockImplementation(async () => {
+      doc.llmConfig.providers[0].apiKey = encryptSecret('sk-replacement');
+      return { ok: true };
+    });
+    mockUpdateOne.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
+    const res = fakeReply();
+
+    await verifyLlm(reqFor({ provider: 'openai' }), res);
+
+    expect(mockUpdateOne).toHaveBeenCalledWith(
+      {
+        ownerId,
+        'llmConfig.providers': { $elemMatch: { name: 'openai', apiKey: storedKey } },
+      },
+      expect.any(Object),
+      { arrayFilters: [{ 'provider.name': 'openai', 'provider.apiKey': storedKey }] },
+    );
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.send).toHaveBeenCalledWith({
+      message: 'API key changed during verification. Verify the current key again.',
+    });
+    expect(doc.save).not.toHaveBeenCalled();
   });
 
   it('verify-llm 400s on unknown provider', async () => {

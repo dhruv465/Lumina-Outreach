@@ -102,7 +102,7 @@ export async function initiateLiveKitCall(params: {
   // Best-effort: recording is opt-in (compliance switch + GCS bucket) and a
   // failure here must never fail the call itself.
   try {
-    await startCallRecording(roomName);
+    await startCallRecording(roomName, ownerId);
   } catch (error) {
     logger.warn(
       `LiveKit call recording failed to start for room ${roomName}: ${getErrorMessage(error)}`

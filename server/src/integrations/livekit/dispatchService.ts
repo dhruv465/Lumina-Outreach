@@ -6,6 +6,7 @@ import Campaign from '../../models/Campaign';
 import logger, { getErrorMessage } from '../../utils/logger';
 import { LiveKitDispatchMetadata, roomNameForCall, toE164 } from './types';
 import { startCallRecording } from './egressService';
+import { buildProviderConfig, ProviderConfigError } from './providerConfig';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -31,8 +32,9 @@ export async function initiateLiveKitCall(params: {
   campaignId: string;
   scheduleTime?: Date;
   notes?: string;
+  initiatingUserId?: string;
 }): Promise<ICall> {
-  const { leadId, campaignId, scheduleTime, notes } = params;
+  const { leadId, campaignId, scheduleTime, notes, initiatingUserId } = params;
 
   const lead = await Lead.findById(leadId);
   if (!lead) throw new Error('Lead not found');
@@ -41,6 +43,12 @@ export async function initiateLiveKitCall(params: {
 
   const activeScript = campaign.script.versions.find((v) => v.isActive);
   if (!activeScript) throw new Error('No active script found for this campaign');
+
+  const ownerId = campaign.createdBy?.toString() || initiatingUserId;
+  if (!ownerId) {
+    throw new ProviderConfigError('Campaign has no owner and no initiating user; cannot resolve API keys.');
+  }
+  const providerConfig = await buildProviderConfig(ownerId);
 
   // Twilio SIP requires E.164; bare local numbers (e.g. "9579813746") fail with
   // SIP 400/32101. Normalize once and use for both the record and the dial.
@@ -80,6 +88,7 @@ export async function initiateLiveKitCall(params: {
       voice_id: campaign.voiceConfiguration?.voiceId || '',
       lead_name: lead.name || '',
       transfer_to: campaign.transferPhoneNumber || '',
+      provider_config: providerConfig,
     });
   } catch (error) {
     newCall.status = 'failed';

@@ -25,6 +25,13 @@ jest.mock('../../../models/Campaign', () => ({
   default: { findById: mockCampaignFindById },
 }));
 
+const mockBuildProviderConfig = jest.fn();
+jest.mock('../providerConfig', () => ({
+  __esModule: true,
+  buildProviderConfig: (...a: any[]) => mockBuildProviderConfig(...a),
+  ProviderConfigError: class ProviderConfigError extends Error {},
+}));
+
 import logger from '../../../utils/logger';
 import { dispatchOutboundCall, initiateLiveKitCall } from '../dispatchService';
 
@@ -60,6 +67,11 @@ describe('dispatchOutboundCall', () => {
       voice_id: 'v1',
       lead_name: 'Ravi',
       transfer_to: '',
+      provider_config: {
+        stt: { api_key: 'dg', model: 'nova-3' },
+        llm: { provider: 'openai', api_key: 'sk', model: 'gpt-4.1', temperature: 0.7 },
+        tts: { api_key: 'dg', voice: 'aura-2-thalia-en' },
+      },
     };
     const room = await dispatchOutboundCall(meta);
     expect(room).toBe('call-64b0c0ffee0ddeadbeef1234');
@@ -77,6 +89,11 @@ describe('dispatchOutboundCall', () => {
         call_id: 'x', lead_id: '', campaign_id: '', phone_number: '',
         script: '', opening_message: '', voice_id: '', lead_name: '',
         transfer_to: '',
+        provider_config: {
+          stt: { api_key: '', model: '' },
+          llm: { provider: '', api_key: '', model: '', temperature: 0 },
+          tts: { api_key: '', voice: '' },
+        },
       }),
     ).rejects.toThrow('LIVEKIT_URL');
   });
@@ -108,7 +125,57 @@ describe('initiateLiveKitCall', () => {
       script: { versions: [{ isActive: true, content: 'sell' }] },
       openingMessage: '',
       voiceConfiguration: { voiceId: 'v1' },
+      createdBy: { toString: () => '64b0c0ffee0ddeadbeef0001' },
     });
+    mockBuildProviderConfig.mockResolvedValue({
+      stt: { api_key: 'dg', model: 'nova-3' },
+      llm: { provider: 'openai', api_key: 'sk', model: 'gpt-4.1', temperature: 0.7 },
+      tts: { api_key: 'dg', voice: 'aura-2-thalia-en' },
+    });
+  });
+
+  it('embeds provider_config in dispatch metadata', async () => {
+    mockCreateDispatch.mockResolvedValue({});
+    await initiateLiveKitCall({ leadId, campaignId });
+    const sent = JSON.parse(mockCreateDispatch.mock.calls[0][2].metadata);
+    expect(sent.provider_config.llm.provider).toBe('openai');
+    expect(sent.provider_config.stt.api_key).toBe('dg');
+    expect(mockBuildProviderConfig).toHaveBeenCalledWith('64b0c0ffee0ddeadbeef0001');
+  });
+
+  it('prefers the campaign owner over the initiating user', async () => {
+    mockCreateDispatch.mockResolvedValue({});
+    await initiateLiveKitCall({
+      leadId,
+      campaignId,
+      initiatingUserId: '64b0c0ffee0ddeadbeef0002',
+    });
+    expect(mockBuildProviderConfig).toHaveBeenCalledWith('64b0c0ffee0ddeadbeef0001');
+  });
+
+  it('falls back to the initiating user when the campaign has no owner', async () => {
+    mockCampaignFindById.mockResolvedValue({
+      script: { versions: [{ isActive: true, content: 'sell' }] },
+      openingMessage: '',
+      voiceConfiguration: { voiceId: 'v1' },
+    });
+    mockCreateDispatch.mockResolvedValue({});
+
+    await initiateLiveKitCall({
+      leadId,
+      campaignId,
+      initiatingUserId: '64b0c0ffee0ddeadbeef0002',
+    });
+
+    expect(mockBuildProviderConfig).toHaveBeenCalledWith('64b0c0ffee0ddeadbeef0002');
+  });
+
+  it('rejects before creating a Call when provider config is unavailable', async () => {
+    const { ProviderConfigError } = jest.requireMock('../providerConfig');
+    mockBuildProviderConfig.mockRejectedValue(new ProviderConfigError('Configure and verify your API keys'));
+    await expect(initiateLiveKitCall({ leadId, campaignId })).rejects.toThrow(/API keys/);
+    expect(mockCallCtor).not.toHaveBeenCalled();
+    expect(mockCreateDispatch).not.toHaveBeenCalled();
   });
 
   it('marks the call failed, logs, and rethrows when dispatch fails', async () => {

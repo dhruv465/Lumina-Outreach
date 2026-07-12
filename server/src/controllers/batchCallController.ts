@@ -3,12 +3,14 @@ import { batchCallService } from '../services/batchCallService';
 import Campaign from '../models/Campaign';
 import logger from '../utils/logger';
 import { getErrorMessage } from '../utils/logger';
+import { buildProviderConfig, ProviderConfigError } from '../integrations/livekit/providerConfig';
 
 export class BatchCallController {
   async createBatch(req: FastifyRequest, reply: FastifyReply) {
     try {
       const { campaignId, leadIds, name, config } = req.body as any;
       const user = (req as any).user;
+      const initiatingUserId = user?._id?.toString() || user?.id;
 
       if (!campaignId || !leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
         return reply.status(400).send({ success: false, error: 'Missing required fields: campaignId and leadIds array' });
@@ -21,15 +23,31 @@ export class BatchCallController {
       if (!campaign) {
         return reply.status(404).send({ success: false, error: 'Campaign not found' });
       }
-      if (user?.role !== 'admin' && campaign.createdBy.toString() !== user?.id) {
+      const campaignOwnerId = campaign.createdBy?.toString();
+      if (user?.role !== 'admin' && campaignOwnerId && campaignOwnerId !== initiatingUserId) {
         return reply.status(403).send({ success: false, error: 'Access denied: you do not own this campaign' });
+      }
+
+      try {
+        const ownerId = campaignOwnerId || initiatingUserId;
+        if (!ownerId) {
+          throw new ProviderConfigError(
+            'Campaign has no owner and no initiating user; cannot resolve API keys.',
+          );
+        }
+        await buildProviderConfig(ownerId);
+      } catch (error) {
+        if (error instanceof ProviderConfigError) {
+          return reply.status(400).send({ message: error.message });
+        }
+        throw error;
       }
 
       const batch = await batchCallService.createBatch({
         name: name || `Batch Call ${new Date().toLocaleString()}`,
         campaignId,
         leadIds,
-        createdBy: user?.id || 'system',
+        createdBy: initiatingUserId || 'system',
         config
       });
 

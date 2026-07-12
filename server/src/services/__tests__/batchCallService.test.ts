@@ -26,6 +26,7 @@ function fakeBatch(overrides: any = {}) {
   return {
     _id: 'batch1',
     campaignId: 'camp1',
+    createdBy: { toString: () => 'u1' },
     leadIds: ['L1', 'L2', 'L3'],
     processedLeadIds: [],
     config: { maxConcurrency: 10, retryCount: 1, delayBetweenCalls: 0 },
@@ -51,6 +52,13 @@ describe('batchCallService.runBatch', () => {
       .map((c) => c[1].$addToSet?.processedLeadIds)
       .filter(Boolean).sort();
     expect(addToSetLeads).toEqual(['L1', 'L2', 'L3']);
+  });
+
+  it('passes the batch creator as the initiating user for owner fallback', async () => {
+    asMock(BatchCall.findById).mockResolvedValue(fakeBatch());
+    await batchCallService.runBatch('batch1');
+    expect(asMock(initiateLiveKitCall).mock.calls.map((call) => call[0].initiatingUserId))
+      .toEqual(['u1', 'u1', 'u1']);
   });
 
   it('stops dispatching when campaign budget is depleted', async () => {

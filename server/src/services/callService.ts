@@ -5,7 +5,13 @@ import { unifiedAnalyticsService } from './unifiedAnalyticsService';
 import logger from '../utils/logger';
 
 class CallService {
-  async initiateCall(leadId: string, campaignId: string, scheduleTime?: Date, notes?: string) {
+  async initiateCall(
+    leadId: string,
+    campaignId: string,
+    scheduleTime?: Date,
+    notes?: string,
+    initiatingUserId?: string,
+  ) {
     const lead = await Lead.findById(leadId);
     if (!lead) {
       throw new Error('Lead not found');
@@ -19,7 +25,7 @@ class CallService {
     // LiveKit-only: all outbound calling is routed through the LiveKit agent.
     // (Legacy Twilio calling path removed during the LiveKit consolidation.)
     const { initiateLiveKitCall } = await import('../integrations/livekit/dispatchService');
-    return initiateLiveKitCall({ leadId, campaignId, scheduleTime, notes });
+    return initiateLiveKitCall({ leadId, campaignId, scheduleTime, notes, initiatingUserId });
   }
 
   async getCallHistory(options: any) {

@@ -27,16 +27,17 @@ import { useToast } from "@/hooks/useToast";
 import { configApi } from "@/services/configApi";
 import {
   AlertTriangle,
+  Check,
   CheckCircle,
   Info,
   MessageSquare,
   Mic,
+  PhoneCall,
   Save,
   Settings,
   Volume2,
-  Zap,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 type VerifyStatus = "unverified" | "verified" | "failed";
 type ProviderName = "openai" | "anthropic" | "google";
@@ -70,7 +71,6 @@ interface ConfigurationState {
   temperature: number;
   generalSettings: GeneralSettings;
   complianceSettings: Record<string, unknown>;
-  webhookSecret: string;
 }
 
 interface ServerProviderConfig {
@@ -94,9 +94,6 @@ interface ServerConfiguration {
   };
   generalSettings?: Partial<GeneralSettings>;
   complianceSettings?: Record<string, unknown>;
-  webhookConfig?: {
-    secret?: string;
-  };
 }
 
 interface LlmModelOption {
@@ -183,7 +180,6 @@ const INITIAL_STATE: ConfigurationState = {
     defaultTimeZone: "America/New_York",
   },
   complianceSettings: {},
-  webhookSecret: "",
 };
 
 function isProviderName(value: unknown): value is ProviderName {
@@ -277,17 +273,133 @@ function StatusBadge({
   configured: boolean;
 }) {
   const verified = status === "verified";
+  const failed = status === "failed";
+  const tone = verified
+    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+    : failed
+      ? "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400"
+      : "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
   return (
-    <Badge variant="outline" className="gap-1">
+    <Badge variant="outline" className={`gap-1 font-medium ${tone}`}>
       {verified ? (
         <CheckCircle className="h-3 w-3" />
       ) : (
-        <AlertTriangle
-          className={`h-3 w-3 ${status === "failed" ? "text-red-500" : "text-yellow-500"}`}
-        />
+        <AlertTriangle className="h-3 w-3" />
       )}
       {statusLabel(status, configured)}
     </Badge>
+  );
+}
+
+function SectionIcon({ children }: { children: ReactNode }) {
+  return (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+      {children}
+    </span>
+  );
+}
+
+interface ReadinessStep {
+  key: string;
+  title: string;
+  detail: string;
+  done: boolean;
+  icon: ReactNode;
+}
+
+/**
+ * Mirrors the server-side dispatch gate: calls are rejected until the
+ * Deepgram key and the default LLM provider key are both verified.
+ */
+function ReadinessRail({
+  deepgramVerified,
+  llmVerified,
+  defaultProviderLabel,
+}: {
+  deepgramVerified: boolean;
+  llmVerified: boolean;
+  defaultProviderLabel: string;
+}) {
+  const ready = deepgramVerified && llmVerified;
+  const steps: ReadinessStep[] = [
+    {
+      key: "voice",
+      title: "Voice",
+      detail: deepgramVerified
+        ? "Deepgram key verified"
+        : "Verify your Deepgram key",
+      done: deepgramVerified,
+      icon: <Mic className="h-4 w-4" />,
+    },
+    {
+      key: "intelligence",
+      title: "Intelligence",
+      detail: llmVerified
+        ? `${defaultProviderLabel} key verified`
+        : `Verify your ${defaultProviderLabel} key`,
+      done: llmVerified,
+      icon: <MessageSquare className="h-4 w-4" />,
+    },
+    {
+      key: "calls",
+      title: ready ? "Ready to place calls" : "Calling locked",
+      detail: ready
+        ? "Campaigns can dial with your keys"
+        : "Complete both steps to unlock calling",
+      done: ready,
+      icon: <PhoneCall className="h-4 w-4" />,
+    },
+  ];
+
+  return (
+    <Card
+      className={
+        ready
+          ? "border-emerald-500/40 bg-emerald-500/[0.04]"
+          : "border-amber-500/30 bg-amber-500/[0.03]"
+      }
+    >
+      <CardContent className="py-5">
+        <ol className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-0">
+          {steps.map((step, index) => (
+            <li
+              key={step.key}
+              className="flex flex-1 items-center gap-3 sm:min-w-0"
+            >
+              <span
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+                  step.done
+                    ? "border-emerald-500 bg-emerald-500 text-white"
+                    : "border-muted-foreground/30 bg-background text-muted-foreground"
+                }`}
+              >
+                {step.done ? <Check className="h-4 w-4" /> : step.icon}
+              </span>
+              <span className="min-w-0">
+                <span
+                  className={`block truncate text-sm font-semibold ${
+                    step.done ? "" : "text-muted-foreground"
+                  }`}
+                >
+                  {step.title}
+                </span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {step.detail}
+                </span>
+              </span>
+              {index < steps.length - 1 && (
+                <span
+                  aria-hidden
+                  className={`mx-4 hidden h-px flex-1 sm:block ${
+                    step.done ? "bg-emerald-500/60" : "bg-border"
+                  }`}
+                />
+              )}
+            </li>
+          ))}
+        </ol>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -302,7 +414,6 @@ const Configuration = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [webhookSecretDirty, setWebhookSecretDirty] = useState(false);
   const [verifyingDeepgram, setVerifyingDeepgram] = useState(false);
   const [verifyingProvider, setVerifyingProvider] =
     useState<ProviderName | null>(null);
@@ -374,9 +485,7 @@ const Configuration = () => {
             ...(serverConfig.generalSettings ?? {}),
           },
           complianceSettings: { ...(serverConfig.complianceSettings ?? {}) },
-          webhookSecret: serverConfig.webhookConfig?.secret || "",
         });
-        setWebhookSecretDirty(false);
       } catch (error) {
         if (!cancelled) {
           const message = getErrorMessage(
@@ -503,7 +612,6 @@ const Configuration = () => {
         ...current.complianceSettings,
         ...(saved.complianceSettings ?? {}),
       },
-      webhookSecret: saved.webhookConfig?.secret || current.webhookSecret,
     }));
   };
 
@@ -554,16 +662,12 @@ const Configuration = () => {
         },
         generalSettings: config.generalSettings,
         complianceSettings: config.complianceSettings,
-        ...(webhookSecretDirty
-          ? { webhookConfig: { secret: config.webhookSecret } }
-          : {}),
       };
 
       const saved = (await configApi.updateConfiguration(
         payload,
       )) as ServerConfiguration;
       mergeSavedConfiguration(saved);
-      setWebhookSecretDirty(false);
       toast({
         title: "Configuration Saved",
         description: "Your provider and call settings have been updated.",
@@ -719,6 +823,9 @@ const Configuration = () => {
 
   const selectedModels = modelsForProvider(config.defaultProvider);
   const selectedProvider = config.providers[config.defaultProvider];
+  const selectedProviderLabel =
+    PROVIDERS.find((provider) => provider.value === config.defaultProvider)
+      ?.label ?? config.defaultProvider;
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -745,88 +852,18 @@ const Configuration = () => {
         disabled={saving || verifyingDeepgram || Boolean(verifyingProvider)}
         className="min-w-0 space-y-4 sm:space-y-6"
       >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-sm font-medium">
-                Speech & Voice
-              </CardTitle>
-              <HoverCard>
-                <HoverCardTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="About Deepgram speech and voice"
-                    className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                  >
-                    <Info className="h-4 w-4" />
-                  </button>
-                </HoverCardTrigger>
-                <HoverCardContent className="w-80">
-                  <p className="text-sm text-muted-foreground">
-                    One Deepgram key powers both real-time transcription and
-                    Aura voice synthesis for calls.
-                  </p>
-                </HoverCardContent>
-              </HoverCard>
-            </div>
-            <Mic className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">Deepgram</div>
-            <div className="mt-1">
-              <StatusBadge
-                status={config.deepgram.status}
-                configured={Boolean(config.deepgram.apiKey)}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-sm font-medium">
-                LLM Provider
-              </CardTitle>
-              <HoverCard>
-                <HoverCardTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="About the default LLM provider"
-                    className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                  >
-                    <Info className="h-4 w-4" />
-                  </button>
-                </HoverCardTrigger>
-                <HoverCardContent className="w-80">
-                  <p className="text-sm text-muted-foreground">
-                    The selected language model powers conversation reasoning
-                    and response generation during calls.
-                  </p>
-                </HoverCardContent>
-              </HoverCard>
-            </div>
-            <MessageSquare className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold capitalize">
-              {config.defaultProvider}
-            </div>
-            <div className="mt-1">
-              <StatusBadge
-                status={selectedProvider.status}
-                configured={Boolean(selectedProvider.apiKey)}
-              />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <ReadinessRail
+        deepgramVerified={config.deepgram.status === "verified"}
+        llmVerified={selectedProvider.status === "verified"}
+        defaultProviderLabel={selectedProviderLabel}
+      />
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Volume2 className="h-5 w-5" />
+          <CardTitle className="flex items-center gap-3">
+            <SectionIcon>
+              <Volume2 className="h-4 w-4" />
+            </SectionIcon>
             Deepgram Speech & Voice
           </CardTitle>
           <CardDescription>
@@ -864,6 +901,7 @@ const Configuration = () => {
                   }}
                   placeholder="Enter your Deepgram API key"
                   autoComplete="off"
+                  className="font-mono"
                 />
                 <Button
                   type="button"
@@ -927,8 +965,10 @@ const Configuration = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5" />
+          <CardTitle className="flex items-center gap-3">
+            <SectionIcon>
+              <MessageSquare className="h-4 w-4" />
+            </SectionIcon>
             AI Model Configuration
           </CardTitle>
           <CardDescription>
@@ -936,85 +976,105 @@ const Configuration = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            {PROVIDERS.map((provider) => {
-              const providerConfig = config.providers[provider.value];
-              const isVerifying = verifyingProvider === provider.value;
-              return (
-                <div
-                  key={provider.value}
-                  className="space-y-3 rounded-xl border p-4"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <Label htmlFor={`${provider.value}ApiKey`}>
-                      {provider.label} API Key
-                    </Label>
+          <div className="space-y-2">
+            <Label>LLM Provider</Label>
+            <div
+              role="radiogroup"
+              aria-label="LLM provider"
+              className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+            >
+              {PROVIDERS.map((provider) => {
+                const providerConfig = config.providers[provider.value];
+                const isSelected = config.defaultProvider === provider.value;
+                return (
+                  <button
+                    key={provider.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={isSelected}
+                    onClick={() => handleDefaultProviderChange(provider.value)}
+                    disabled={!llmOptionsAvailable}
+                    className={`flex items-center justify-between gap-2 rounded-xl border p-4 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      isSelected
+                        ? "border-primary/60 bg-primary/[0.04] ring-1 ring-primary/40"
+                        : "hover:border-primary/30 hover:shadow-sm"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span
+                        aria-hidden
+                        className={`h-2.5 w-2.5 shrink-0 rounded-full border-2 ${
+                          isSelected
+                            ? "border-primary bg-primary"
+                            : "border-muted-foreground/40"
+                        }`}
+                      />
+                      <span className="text-sm font-semibold">
+                        {provider.label}
+                      </span>
+                    </span>
                     <StatusBadge
                       status={providerConfig.status}
                       configured={Boolean(providerConfig.apiKey)}
                     />
-                  </div>
-                  <Input
-                    id={`${provider.value}ApiKey`}
-                    type="password"
-                    value={providerConfig.apiKey}
-                    onChange={(event) =>
-                      updateProviderKey(
-                        provider.value,
-                        replacementKeyValue(
-                          providerConfig.apiKey,
-                          event.target.value,
-                        ),
-                      )
-                    }
-                    onFocus={(event) => {
-                      if (isMasked(providerConfig.apiKey)) {
-                        event.currentTarget.select();
-                      }
-                    }}
-                    placeholder={`Enter your ${provider.label} API key`}
-                    autoComplete="off"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleVerifyProvider(provider.value)}
-                    disabled={Boolean(verifyingProvider)}
-                  >
-                    {isVerifying ? "Verifying..." : "Verify"}
-                  </Button>
-                  {providerConfig.apiKey && !isMasked(providerConfig.apiKey) && (
-                    <p className="text-xs text-muted-foreground">
-                      Save the new key before verifying it.
-                    </p>
-                  )}
-                </div>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-2 rounded-xl border bg-muted/20 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="selectedProviderApiKey">
+                {selectedProviderLabel} API Key
+              </Label>
+              <StatusBadge
+                status={selectedProvider.status}
+                configured={Boolean(selectedProvider.apiKey)}
+              />
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                id="selectedProviderApiKey"
+                type="password"
+                value={selectedProvider.apiKey}
+                onChange={(event) =>
+                  updateProviderKey(
+                    config.defaultProvider,
+                    replacementKeyValue(
+                      selectedProvider.apiKey,
+                      event.target.value,
+                    ),
+                  )
+                }
+                onFocus={(event) => {
+                  if (isMasked(selectedProvider.apiKey)) {
+                    event.currentTarget.select();
+                  }
+                }}
+                placeholder={`Enter your ${selectedProviderLabel} API key`}
+                autoComplete="off"
+                className="font-mono"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => handleVerifyProvider(config.defaultProvider)}
+                disabled={Boolean(verifyingProvider)}
+              >
+                {verifyingProvider === config.defaultProvider
+                  ? "Verifying..."
+                  : "Verify"}
+              </Button>
+            </div>
+            {selectedProvider.apiKey && !isMasked(selectedProvider.apiKey) && (
+              <p className="text-xs text-muted-foreground">
+                Save the new key before verifying it.
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="llmProvider">Default LLM Provider</Label>
-              <Select
-                value={config.defaultProvider}
-                onValueChange={handleDefaultProviderChange}
-                disabled={!llmOptionsAvailable}
-              >
-                <SelectTrigger id="llmProvider" className="h-10 w-full rounded-xl">
-                  <SelectValue placeholder="Select an LLM provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROVIDERS.map((provider) => (
-                    <SelectItem key={provider.value} value={provider.value}>
-                      {provider.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             <div className="space-y-2">
               <Label htmlFor="llmModel">Default Model</Label>
               <Select
@@ -1082,8 +1142,10 @@ const Configuration = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Settings className="h-5 w-5" />
+          <CardTitle className="flex items-center gap-3">
+            <SectionIcon>
+              <Settings className="h-4 w-4" />
+            </SectionIcon>
             Call Settings
             <HoverCard>
               <HoverCardTrigger asChild>
@@ -1178,47 +1240,6 @@ const Configuration = () => {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Zap className="h-5 w-5" />
-            Webhook Integration
-          </CardTitle>
-          <CardDescription>
-            Configure the secret used to verify incoming call-event webhooks
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="webhookSecret">Webhook Secret</Label>
-            <Input
-              id="webhookSecret"
-              type="password"
-              value={config.webhookSecret}
-              onChange={(event) => {
-                setWebhookSecretDirty(true);
-                setConfig((current) => ({
-                  ...current,
-                  webhookSecret: replacementKeyValue(
-                    current.webhookSecret,
-                    event.target.value,
-                  ),
-                }));
-              }}
-              onFocus={(event) => {
-                if (isMasked(config.webhookSecret)) {
-                  event.currentTarget.select();
-                }
-              }}
-              placeholder="Enter your webhook secret"
-              autoComplete="off"
-            />
-            <p className="text-xs text-muted-foreground">
-              The webhook base URL is configured by the server environment.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
       </fieldset>
     </div>
   );

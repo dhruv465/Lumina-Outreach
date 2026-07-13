@@ -176,7 +176,10 @@ export const verifyLlm = async (req: FastifyRequest, res: FastifyReply) => {
         ? ''
         : result.error || 'verification failed',
     };
-    if (result.ok) set['llmConfig.providers.$[provider].lastVerified'] = new Date();
+    if (result.ok) {
+      set['llmConfig.providers.$[provider].lastVerified'] = new Date();
+      set['llmConfig.providers.$[provider].availableModels'] = result.models ?? [];
+    }
 
     const update = await Configuration.updateOne(
       {
@@ -190,7 +193,12 @@ export const verifyLlm = async (req: FastifyRequest, res: FastifyReply) => {
       res.status(409).send({ message: VERIFICATION_CONFLICT });
       return;
     }
-    res.status(200).send({ ok: result.ok, status, error: result.error });
+    res.status(200).send({
+      ok: result.ok,
+      status,
+      error: result.error,
+      models: result.models ?? [],
+    });
   } catch (error) {
     logger.error(`verifyLlm failed: ${getErrorMessage(error)}`);
     res.status(500).send({ message: 'Failed to verify LLM key' });

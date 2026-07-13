@@ -4,12 +4,18 @@ import { encryptSecret, decryptSecret, isEncrypted, maskSecret } from '../utils/
 export type ProviderName = 'openai' | 'anthropic' | 'google';
 export type VerifyStatus = 'unverified' | 'verified' | 'failed';
 
+export interface IProviderModel {
+  name: string;
+  value: string;
+}
+
 export interface ILlmProvider {
   name: ProviderName;
   apiKey: string;
   status: VerifyStatus;
   lastVerified?: Date | null;
   lastError?: string;
+  availableModels?: IProviderModel[];
 }
 
 export interface IConfiguration extends mongoose.Document {
@@ -63,6 +69,14 @@ export interface IConfiguration extends mongoose.Document {
   getMaskedConfig(): any;
 }
 
+const providerModelSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    value: { type: String, required: true },
+  },
+  { _id: false },
+);
+
 const providerSchema = new mongoose.Schema(
   {
     name: { type: String, enum: ['openai', 'anthropic', 'google'], required: true },
@@ -70,6 +84,9 @@ const providerSchema = new mongoose.Schema(
     status: { type: String, enum: ['unverified', 'verified', 'failed'], default: 'unverified' },
     lastVerified: { type: Date, default: null },
     lastError: { type: String, default: '' },
+    // Chat models fetched from the provider with the user's own key at verify
+    // time; the UI model picker prefers this list over the static catalog.
+    availableModels: { type: [providerModelSchema], default: [] },
   },
   { _id: false },
 );

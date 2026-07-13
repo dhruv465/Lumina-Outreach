@@ -52,6 +52,8 @@ interface DeepgramState {
 interface LlmProviderState {
   apiKey: string;
   status: VerifyStatus;
+  /** Chat models fetched from the provider with the user's key at verify time. */
+  models: LlmModelOption[];
 }
 
 interface GeneralSettings {
@@ -77,6 +79,7 @@ interface ServerProviderConfig {
   name?: string;
   apiKey?: string;
   status?: string;
+  availableModels?: Array<{ name?: string; value?: string }>;
 }
 
 interface ServerConfiguration {
@@ -128,6 +131,7 @@ interface VerifyResponse {
   ok?: boolean;
   status?: string;
   error?: string;
+  models?: Array<{ name?: string; value?: string }>;
 }
 
 interface ApiErrorLike {
@@ -165,9 +169,9 @@ const INITIAL_STATE: ConfigurationState = {
     status: "unverified",
   },
   providers: {
-    openai: { apiKey: "", status: "unverified" },
-    anthropic: { apiKey: "", status: "unverified" },
-    google: { apiKey: "", status: "unverified" },
+    openai: { apiKey: "", status: "unverified", models: [] },
+    anthropic: { apiKey: "", status: "unverified", models: [] },
+    google: { apiKey: "", status: "unverified", models: [] },
   },
   defaultProvider: "openai",
   defaultModel: "gpt-4.1",
@@ -241,6 +245,14 @@ function normalizeVoiceOptions(response: VoiceOptionsResponse): VoiceOption[] {
   );
 }
 
+function toModelOptions(
+  models: Array<{ name?: string; value?: string }> | undefined,
+): LlmModelOption[] {
+  return (models ?? []).flatMap((model) =>
+    model.value ? [{ name: model.name || model.value, value: model.value }] : [],
+  );
+}
+
 function buildProviders(
   serverProviders: ServerProviderConfig[] | undefined,
 ): Record<ProviderName, LlmProviderState> {
@@ -252,6 +264,7 @@ function buildProviders(
       providers[provider.value] = {
         apiKey: savedProvider?.apiKey || "",
         status: toVerifyStatus(savedProvider?.status),
+        models: toModelOptions(savedProvider?.availableModels),
       };
       return providers;
     },
@@ -510,8 +523,13 @@ const Configuration = () => {
     };
   }, [loadAttempt]);
 
-  const modelsForProvider = (provider: ProviderName) =>
-    llmOptions.find((option) => option.value === provider)?.models ?? [];
+  // Prefer the models fetched live from the provider with the user's own key
+  // (populated on verify); the static catalog is only the pre-verify fallback.
+  const modelsForProvider = (provider: ProviderName) => {
+    const fetched = config.providers[provider].models;
+    if (fetched.length > 0) return fetched;
+    return llmOptions.find((option) => option.value === provider)?.models ?? [];
+  };
 
   const updateDeepgram = <Key extends keyof DeepgramState>(
     key: Key,
@@ -590,6 +608,9 @@ const Configuration = () => {
                 apiKey:
                   savedProvider.apiKey || current.providers[provider.value].apiKey,
                 status: toVerifyStatus(savedProvider.status),
+                models: savedProvider.availableModels
+                  ? toModelOptions(savedProvider.availableModels)
+                  : current.providers[provider.value].models,
               }
             : current.providers[provider.value];
           return providers;
@@ -761,13 +782,28 @@ const Configuration = () => {
       const status = toVerifyStatus(
         result.status ?? (verified ? "verified" : "failed"),
       );
-      setConfig((current) => ({
-        ...current,
-        providers: {
-          ...current.providers,
-          [provider]: { ...current.providers[provider], status },
-        },
-      }));
+      const fetchedModels = verified ? toModelOptions(result.models) : [];
+      setConfig((current) => {
+        const models =
+          fetchedModels.length > 0
+            ? fetchedModels
+            : current.providers[provider].models;
+        // Keep the selected model valid against the freshly fetched list.
+        const defaultModel =
+          provider === current.defaultProvider &&
+          models.length > 0 &&
+          !models.some((model) => model.value === current.defaultModel)
+            ? models[0].value
+            : current.defaultModel;
+        return {
+          ...current,
+          defaultModel,
+          providers: {
+            ...current.providers,
+            [provider]: { ...current.providers[provider], status, models },
+          },
+        };
+      });
       const label = PROVIDERS.find((item) => item.value === provider)?.label;
       toast({
         title: verified ? `${label} verified` : `${label} verification failed`,
@@ -1082,7 +1118,7 @@ const Configuration = () => {
                 onValueChange={(value) =>
                   setConfig((current) => ({ ...current, defaultModel: value }))
                 }
-                disabled={!llmOptionsAvailable}
+                disabled={selectedModels.length === 0}
               >
                 <SelectTrigger id="llmModel" className="h-10 w-full rounded-xl">
                   <SelectValue placeholder="Select a model" />
@@ -1101,6 +1137,11 @@ const Configuration = () => {
                   )}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                {selectedProvider.models.length > 0
+                  ? `Models fetched from your ${selectedProviderLabel} account.`
+                  : `Standard catalog shown — verify your ${selectedProviderLabel} key to load the models available to your account.`}
+              </p>
             </div>
 
             <div className="space-y-2 lg:col-span-2">

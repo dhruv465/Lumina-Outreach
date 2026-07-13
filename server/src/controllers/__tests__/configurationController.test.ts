@@ -288,7 +288,10 @@ describe('verify endpoints', () => {
     const storedKey = encryptSecret('sk-good');
     doc.llmConfig.providers[0].apiKey = storedKey;
     mockFindOneAndUpdate.mockResolvedValue(doc);
-    mockVerifyLlm.mockResolvedValue({ ok: true });
+    mockVerifyLlm.mockResolvedValue({
+      ok: true,
+      models: [{ name: 'gpt-4.1', value: 'gpt-4.1' }],
+    });
     mockUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
     const res = fakeReply();
 
@@ -303,10 +306,18 @@ describe('verify endpoints', () => {
         'llmConfig.providers.$[provider].status': 'verified',
         'llmConfig.providers.$[provider].lastVerified': expect.any(Date),
         'llmConfig.providers.$[provider].lastError': '',
+        'llmConfig.providers.$[provider].availableModels': [
+          { name: 'gpt-4.1', value: 'gpt-4.1' },
+        ],
       } },
       { arrayFilters: [{ 'provider.name': 'openai', 'provider.apiKey': storedKey }] },
     );
-    expect(res.send).toHaveBeenCalledWith({ ok: true, status: 'verified', error: undefined });
+    expect(res.send).toHaveBeenCalledWith({
+      ok: true,
+      status: 'verified',
+      error: undefined,
+      models: [{ name: 'gpt-4.1', value: 'gpt-4.1' }],
+    });
   });
 
   it('verify-llm returns 409 when the provider key changes during verification', async () => {

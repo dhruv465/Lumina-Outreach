@@ -41,7 +41,9 @@ load_dotenv(".env.local")
 logger = logging.getLogger("lumina-outbound")
 logger.setLevel(logging.INFO)
 
-AGENT_NAME = "lumina-outbound"
+# Overridable so a canary worker can register under its own name and run beside
+# the stable one; the server dispatches to "lumina-outbound".
+AGENT_NAME = os.getenv("LUMINA_AGENT_NAME", "lumina-outbound")
 SIP_OUTBOUND_TRUNK_ID = os.getenv("SIP_OUTBOUND_TRUNK_ID", "")
 # Krisp BVCTelephony is a LiveKit-Cloud-only model. Set LIVEKIT_BVC_ENABLED=false
 # on self-hosted deploys where the Cloud noise-cancellation models are unavailable.
@@ -322,6 +324,25 @@ async def enforce_max_duration(
     await speech.wait_for_playout()
     await agent.ensure_outcome("completed", "call reached the maximum duration")
     await hangup_call()
+
+
+async def classify_with_amd(detector) -> AMDPredictionEvent | None:
+    """Await an AMD classification, or None if the call ended before one arrived.
+
+    AMD frequently never classifies on these calls, so this await outlives the
+    whole conversation and is still pending when the session closes (end_call,
+    the callee hanging up, or a watchdog firing). The detector then raises
+    "amd closed before a result was available", and because that propagates out
+    of `entrypoint` the SDK reports the job as `crashed` — after a perfectly
+    clean hangup. Live call `AJ_GyJnG6PRAXdq` deleted its room and persisted its
+    transcript and was still logged as crashed. A conversation that outlived AMD
+    is a normal ending, not a failure.
+    """
+    try:
+        return await detector.execute()
+    except RuntimeError as e:
+        logger.info("AMD closed without a classification: %s", e)
+        return None
 
 
 async def _resolve_amd_outcome(
@@ -613,7 +634,9 @@ async def entrypoint(ctx: JobContext) -> None:
                 )
                 ctx.add_shutdown_callback(_canceller(duration_task))
 
-                result = await detector.execute()
+                result = await classify_with_amd(detector)
+                if result is None:
+                    return
                 if await _resolve_amd_outcome(result, session=session, agent=agent, ctx=ctx):
                     return
         except api.TwirpError as e:

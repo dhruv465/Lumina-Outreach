@@ -12,6 +12,7 @@ from agent import (
     SalesAgent,
     _resolve_amd_outcome,
     build_lead_context,
+    classify_with_amd,
     enforce_max_duration,
     fetch_lead_context,
     hangup_call,
@@ -85,7 +86,15 @@ def test_instructions_demand_the_closing_sequence():
     assert "Saying goodbye does not end the call" in instructions
     # ...and give an explicit order to close in.
     assert "1. Call record_outcome" in instructions
-    assert "3. Call end_call." in instructions
+    assert "2. Call end_call." in instructions
+
+
+def test_instructions_forbid_narrating_tool_use():
+    # Live call AJ_GyJnG6PRAXdq spoke "I'll go ahead and record that." out loud,
+    # and said goodbye twice: once itself, then again via end_call's reply.
+    instructions = make_agent().instructions
+    assert "Never narrate what you are doing behind the scenes" in instructions
+    assert "do not say goodbye yourself first" in instructions
 
 
 def test_instructions_include_lead_context_when_available():
@@ -275,6 +284,27 @@ def make_amd_result(category: AMDCategory) -> AMDPredictionEvent:
         transcript="hello, you've reached voicemail, please leave a message",
         delay=0.5,
     )
+
+
+async def test_classify_with_amd_returns_the_result():
+    detector = MagicMock()
+    expected = make_amd_result(AMDCategory.HUMAN)
+    detector.execute = AsyncMock(return_value=expected)
+
+    assert await classify_with_amd(detector) is expected
+
+
+async def test_classify_with_amd_survives_the_call_ending_first():
+    # Live call AJ_GyJnG6PRAXdq: the conversation ran to a clean end_call while
+    # AMD was still waiting to classify. The detector then raised, the exception
+    # escaped entrypoint, and the SDK logged `job crashed` after a successful
+    # hangup. A call that outlives AMD is a normal ending.
+    detector = MagicMock()
+    detector.execute = AsyncMock(
+        side_effect=RuntimeError("amd closed before a result was available")
+    )
+
+    assert await classify_with_amd(detector) is None
 
 
 async def test_amd_machine_vm_leaves_message_records_voicemail_and_hangs_up():

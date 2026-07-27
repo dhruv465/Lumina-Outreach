@@ -56,10 +56,14 @@ export const authenticate = async (
       return reply.status(401).send({ message: 'Token version mismatch' });
     }
     
-    // Cache the user object for future requests
-    const userObj = user.toObject();
+    // Cache the user object for future requests.
+    // `virtuals: true` is required: a plain toObject() drops Mongoose's `id`
+    // getter, and 31 call sites across the controllers read `req.user.id`
+    // (e.g. campaignController sets `createdBy: req.user.id`). Without it that
+    // reads undefined and Campaign.save() fails its required-field validation.
+    const userObj = user.toObject({ virtuals: true });
     tokenCache.set(token, userObj);
-    
+
     // Add user from payload
     request.user = userObj;
   } catch (error: any) {

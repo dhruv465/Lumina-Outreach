@@ -9,8 +9,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Slider } from "@/components/ui/slider";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import {
@@ -52,6 +50,7 @@ interface CampaignFormData {
     content: string;
   };
   openingMessage: string;
+  transferPhoneNumber: string;
   callTiming: {
     daysOfWeek: string[];
     startTime: string;
@@ -126,6 +125,7 @@ const initialFormState: CampaignFormData = {
     content: "",
   },
   openingMessage: "",
+  transferPhoneNumber: "",
   callTiming: {
     daysOfWeek: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
     startTime: "09:00",
@@ -151,15 +151,6 @@ const initialFormState: CampaignFormData = {
   },
 };
 
-// Time zone options
-const timeZones = [
-  "Asia/Kolkata",
-  "America/New_York",
-  "America/Los_Angeles",
-  "Europe/London",
-  "Australia/Sydney",
-];
-
 // Language options
 const languages = [
   "English",
@@ -179,13 +170,10 @@ const CampaignForm = ({
 }: CampaignFormProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState<CampaignFormData>(initialFormState);
-  const [currentTab, setCurrentTab] = useState<
-    "basic" | "script" | "scheduling" | "ai" | "budget"
-  >("basic");
+  const [currentTab, setCurrentTab] = useState<"basic" | "script" | "ai">(
+    "basic"
+  );
   const [systemConfig, setSystemConfig] = useState<any>(null);
-  const [availableLLMModels, setAvailableLLMModels] =
-    useState<string[]>([]);
-  const [llmModelsUnavailable, setLLMModelsUnavailable] = useState(false);
   const [availableVoices, setAvailableVoices] = useState<
     Record<string, VoiceOption[]>
   >({});
@@ -243,6 +231,7 @@ const CampaignForm = ({
           content: campaignData.script?.versions?.[0]?.content || "",
         },
         openingMessage: campaignData.openingMessage || "",
+        transferPhoneNumber: campaignData.transferPhoneNumber || "",
         callTiming: {
           daysOfWeek: campaignData.callTiming?.daysOfWeek || [
             "Monday",
@@ -371,8 +360,6 @@ const CampaignForm = ({
             (model: { value?: string }) => model.value ? [model.value] : []
           )
         : [];
-      setAvailableLLMModels(providerModels);
-      setLLMModelsUnavailable(providerModels.length === 0);
 
       // Only update form data if not editing an existing campaign
       if (!campaignId) {
@@ -436,8 +423,6 @@ const CampaignForm = ({
       setIsLoading(false);
     } catch (error) {
       console.error("Error loading system configuration:", error);
-      setAvailableLLMModels([]);
-      setLLMModelsUnavailable(true);
 
       // Set fallback values for required fields even if config loading fails
       if (!campaignId) {
@@ -622,28 +607,6 @@ const CampaignForm = ({
     }
   };
 
-  // Handle checkbox changes (days of week)
-  const handleDayChange = (day: string, checked: boolean) => {
-    setFormData((prev: CampaignFormData) => {
-      const currentDays = [...prev.callTiming.daysOfWeek];
-
-      if (checked && !currentDays.includes(day)) {
-        currentDays.push(day);
-      } else if (!checked && currentDays.includes(day)) {
-        const index = currentDays.indexOf(day);
-        currentDays.splice(index, 1);
-      }
-
-      return {
-        ...prev,
-        callTiming: {
-          ...prev.callTiming,
-          daysOfWeek: currentDays,
-        },
-      };
-    });
-  };
-
   // Handle lead sources
   const addLeadSource = () => {
     setFormData((prev: CampaignFormData) => ({
@@ -694,30 +657,6 @@ const CampaignForm = ({
     });
   };
 
-  // Handle number inputs for temperature, speed, etc.
-  const handleNumberChange = (name: string, value: string) => {
-    const [parent, child] = name.split(".");
-    const numValue = parseFloat(value);
-
-    if (!isNaN(numValue)) {
-      setFormData((prev: CampaignFormData) => {
-        const updatedData = { ...prev };
-        if (parent === "llmConfiguration") {
-          updatedData.llmConfiguration = {
-            ...updatedData.llmConfiguration,
-            [child]: numValue,
-          };
-        } else if (parent === "voiceConfiguration") {
-          updatedData.voiceConfiguration = {
-            ...updatedData.voiceConfiguration,
-            [child]: numValue,
-          };
-        }
-        return updatedData;
-      });
-    }
-  };
-
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -763,31 +702,6 @@ const CampaignForm = ({
         return;
       }
 
-      if (!formData.llmConfiguration.model) {
-        showToast(
-          "LLM Model Required",
-          "Model options are unavailable. Configure an LLM provider before saving the campaign.",
-          "destructive"
-        );
-        setCurrentTab("ai");
-        setIsLoading(false);
-        return;
-      }
-
-      if (
-        !formData.llmConfiguration.systemPrompt ||
-        formData.llmConfiguration.systemPrompt === ""
-      ) {
-        showToast(
-          "System Prompt Required",
-          "Please provide a system prompt for the AI model.",
-          "destructive"
-        );
-        setCurrentTab("ai");
-        setIsLoading(false);
-        return;
-      }
-
       if (!formData.startDate) {
         showToast(
           "Start Date Required",
@@ -823,6 +737,7 @@ const CampaignForm = ({
         status: "Draft", // Default status for new campaigns
         script: scriptData,
         openingMessage: formData.openingMessage,
+        transferPhoneNumber: formData.transferPhoneNumber,
         // Explicitly format date fields as strings
         // Explicitly format date fields as strings
         startDate:
@@ -840,7 +755,13 @@ const CampaignForm = ({
           timeZone: formData.callTiming.timeZone,
         },
         llmConfiguration: {
-          model: formData.llmConfiguration.model,
+          // The agent takes its LLM from the account-level provider config, not
+          // from the campaign, but Campaign.llmConfiguration.model is a required
+          // schema field - so keep sending a non-empty value.
+          model:
+            formData.llmConfiguration.model ||
+            systemConfig?.llmConfig?.model ||
+            "gpt-4o",
           // Ensure systemPrompt is always provided as a non-empty string
           systemPrompt:
             formData.llmConfiguration.systemPrompt ||
@@ -1033,31 +954,11 @@ const CampaignForm = ({
                   <button
                     type="button"
                     className={`px-3 sm:px-5 py-3 text-sm sm:text-base whitespace-nowrap ${
-                      currentTab === "scheduling"
-                        ? "border-b-2 border-primary"
-                        : ""
-                    }`}
-                    onClick={() => setCurrentTab("scheduling")}
-                  >
-                    Scheduling
-                  </button>
-                  <button
-                    type="button"
-                    className={`px-3 sm:px-5 py-3 text-sm sm:text-base whitespace-nowrap ${
                       currentTab === "ai" ? "border-b-2 border-primary" : ""
                     }`}
                     onClick={() => setCurrentTab("ai")}
                   >
-                    AI & Voice
-                  </button>
-                  <button
-                    type="button"
-                    className={`px-3 sm:px-5 py-3 text-sm sm:text-base whitespace-nowrap ${
-                      currentTab === "budget" ? "border-b-2 border-primary" : ""
-                    }`}
-                    onClick={() => setCurrentTab("budget")}
-                  >
-                    Budget
+                    Voice
                   </button>
                 </div>
 
@@ -1328,107 +1229,7 @@ const CampaignForm = ({
                     </div>
                   )}
 
-                  {/* Scheduling Tab */}
-                  {currentTab === "scheduling" && (
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium mb-1">
-                          Days of Week
-                        </label>
-                        <div className="bg-muted/50 p-3 rounded-xl">
-                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                            {[
-                              "Monday",
-                              "Tuesday",
-                              "Wednesday",
-                              "Thursday",
-                              "Friday",
-                              "Saturday",
-                              "Sunday",
-                            ].map((day: string) => (
-                              <div
-                                key={day}
-                                className="flex items-center gap-2"
-                              >
-                                <Checkbox
-                                  id={`day-${day}`}
-                                  checked={formData.callTiming.daysOfWeek.includes(
-                                    day
-                                  )}
-                                  onCheckedChange={(checked: boolean) =>
-                                    handleDayChange(day, checked)
-                                  }
-                                />
-                                <label
-                                  htmlFor={`day-${day}`}
-                                  className="text-sm cursor-pointer"
-                                >
-                                  {day}
-                                </label>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium mb-1">
-                            Start Time
-                          </label>
-                          <Input
-                            type="time"
-                            name="callTiming.startTime"
-                            value={formData.callTiming.startTime}
-                            onChange={handleChange}
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium mb-1">
-                            End Time
-                          </label>
-                          <Input
-                            type="time"
-                            name="callTiming.endTime"
-                            value={formData.callTiming.endTime}
-                            onChange={handleChange}
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium mb-1">
-                            Time Zone
-                          </label>
-                          <Select
-                            value={formData.callTiming.timeZone}
-                            onValueChange={(value) =>
-                              setFormData((prev) => ({
-                                ...prev,
-                                callTiming: {
-                                  ...prev.callTiming,
-                                  timeZone: value,
-                                },
-                              }))
-                            }
-                          >
-                            <SelectTrigger className="w-full rounded-xl">
-                              <SelectValue placeholder="Select a time zone" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {timeZones.map((tz: string) => (
-                                <SelectItem key={tz} value={tz}>
-                                  {tz}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* AI & Voice Tab */}
+                  {/* Voice Tab */}
                   {currentTab === "ai" && (
                     <div className="space-y-4">
                       {systemConfig && (
@@ -1437,337 +1238,139 @@ const CampaignForm = ({
                             Using your account configuration
                           </p>
                           <p className="text-muted-foreground text-xs mt-1">
-                            Your saved LLM and Deepgram settings are used for
-                            this campaign.
+                            The LLM and Deepgram credentials saved on the
+                            Configuration page are used for every call in this
+                            campaign.
                           </p>
                         </div>
                       )}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium mb-1">
-                            LLM Model
-                          </label>
-                          {llmModelsUnavailable ? (
-                            <>
-                              <Input
-                                value={formData.llmConfiguration.model}
-                                disabled
-                                placeholder="Model options unavailable"
-                              />
-                              <p className="text-xs text-red-500 mt-1">
-                                Model options are unavailable. Any saved model
-                                is preserved but cannot be changed here.
-                              </p>
-                            </>
-                          ) : (
-                            <Select
-                              value={formData.llmConfiguration.model}
-                              onValueChange={(value) =>
-                                setFormData((prev) => ({
-                                  ...prev,
-                                  llmConfiguration: {
-                                    ...prev.llmConfiguration,
-                                    model: value,
-                                  },
-                                }))
-                              }
-                            >
-                              <SelectTrigger className="w-full rounded-xl">
-                                <SelectValue placeholder="Select a model" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {availableLLMModels.map((model: string) => (
-                                  <SelectItem key={model} value={model}>
-                                    {model}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        </div>
 
-                        <div>
-                          <label className="block text-sm font-medium mb-1">
-                            Voice Provider
-                          </label>
-                          <Select
-                            value={formData.voiceConfiguration.provider}
-                            onValueChange={handleTTSProviderChange}
-                          >
-                            <SelectTrigger className="w-full rounded-xl">
-                              <SelectValue placeholder="Select a voice provider" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="deepgram">
-                                Deepgram TTS
-                              </SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Using Deepgram from your account configuration
-                          </p>
-                        </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Voice Provider
+                        </label>
+                        <Select
+                          value={formData.voiceConfiguration.provider}
+                          onValueChange={handleTTSProviderChange}
+                        >
+                          <SelectTrigger className="w-full rounded-xl">
+                            <SelectValue placeholder="Select a voice provider" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="deepgram">
+                              Deepgram TTS
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Using Deepgram from your account configuration
+                        </p>
                       </div>
 
                       <div>
                         <label className="block text-sm font-medium mb-1">
-                          System Prompt *
+                          Voice
                         </label>
-                        <textarea
-                          name="llmConfiguration.systemPrompt"
-                          value={formData.llmConfiguration.systemPrompt}
-                          onChange={handleChange}
-                          className={`${textareaStyles} ${
-                            !formData.llmConfiguration.systemPrompt
-                              ? "border-red-500"
-                              : ""
-                          }`}
-                          placeholder="Instructions for the AI model"
-                          required
-                        />
-                        {!formData.llmConfiguration.systemPrompt && (
+                        {loadingVoices[
+                          formData.voiceConfiguration.provider
+                        ] ? (
+                          <div className="space-y-2">
+                            <div className="w-full h-10 rounded-xl border border-input bg-background px-3 py-2 flex items-center">
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
+                              <span className="text-sm text-muted-foreground">
+                                Loading voices...
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Fetching available voices for{" "}
+                              {formData.voiceConfiguration.provider}
+                            </p>
+                          </div>
+                        ) : availableVoices[
+                            formData.voiceConfiguration.provider
+                          ]?.length > 0 ? (
+                          <Select
+                            value={formData.voiceConfiguration.voiceId}
+                            onValueChange={(value) =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                voiceConfiguration: {
+                                  ...prev.voiceConfiguration,
+                                  voiceId: value,
+                                },
+                              }))
+                            }
+                            required
+                          >
+                            <SelectTrigger
+                              className={`w-full rounded-xl ${
+                                !formData.voiceConfiguration.voiceId
+                                  ? "border-red-500"
+                                  : ""
+                              }`}
+                            >
+                              <SelectValue placeholder="Select a voice" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableVoices[
+                                formData.voiceConfiguration.provider
+                              ].map((voice: VoiceOption) => (
+                                <SelectItem
+                                  key={voice.voiceId}
+                                  value={voice.voiceId}
+                                >
+                                  {voice.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <div className="space-y-2">
+                            <Input
+                              value={formData.voiceConfiguration.voiceId}
+                              disabled
+                              placeholder="Voice options unavailable"
+                            />
+                            <p className="text-xs text-red-500">
+                              Deepgram voice options are unavailable. Check
+                              provider configuration and reload the voices.
+                            </p>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                loadVoicesForProvider(
+                                  formData.voiceConfiguration.provider
+                                )
+                              }
+                              className="text-xs"
+                            >
+                              Load Voices
+                            </Button>
+                          </div>
+                        )}
+                        {!formData.voiceConfiguration.voiceId && (
                           <p className="text-xs text-red-500 mt-1">
-                            System prompt is required
+                            Voice ID is required
                           </p>
                         )}
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium mb-1">
-                            Voice
-                          </label>
-                          {loadingVoices[
-                            formData.voiceConfiguration.provider
-                          ] ? (
-                            <div className="space-y-2">
-                              <div className="w-full h-10 rounded-xl border border-input bg-background px-3 py-2 flex items-center">
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
-                                <span className="text-sm text-muted-foreground">
-                                  Loading voices...
-                                </span>
-                              </div>
-                              <p className="text-xs text-muted-foreground">
-                                Fetching available voices for{" "}
-                                {formData.voiceConfiguration.provider}
-                              </p>
-                            </div>
-                          ) : availableVoices[
-                              formData.voiceConfiguration.provider
-                            ]?.length > 0 ? (
-                            <Select
-                              value={formData.voiceConfiguration.voiceId}
-                              onValueChange={(value) =>
-                                setFormData((prev) => ({
-                                  ...prev,
-                                  voiceConfiguration: {
-                                    ...prev.voiceConfiguration,
-                                    voiceId: value,
-                                  },
-                                }))
-                              }
-                              required
-                            >
-                              <SelectTrigger
-                                className={`w-full rounded-xl ${
-                                  !formData.voiceConfiguration.voiceId
-                                    ? "border-red-500"
-                                    : ""
-                                }`}
-                              >
-                                <SelectValue placeholder="Select a voice" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {availableVoices[
-                                  formData.voiceConfiguration.provider
-                                ].map((voice: VoiceOption) => (
-                                  <SelectItem
-                                    key={voice.voiceId}
-                                    value={voice.voiceId}
-                                  >
-                                    {voice.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <div className="space-y-2">
-                              <Input
-                                value={formData.voiceConfiguration.voiceId}
-                                disabled
-                                placeholder="Voice options unavailable"
-                              />
-                              <p className="text-xs text-red-500">
-                                Deepgram voice options are unavailable. Check
-                                provider configuration and reload the voices.
-                              </p>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  loadVoicesForProvider(
-                                    formData.voiceConfiguration.provider
-                                  )
-                                }
-                                className="text-xs"
-                              >
-                                Load Voices
-                              </Button>
-                            </div>
-                          )}
-                          {!formData.voiceConfiguration.voiceId && (
-                            <p className="text-xs text-red-500 mt-1">
-                              Voice ID is required
-                            </p>
-                          )}
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium mb-1">
-                            Max Tokens
-                          </label>
-                          <Input
-                            type="number"
-                            value={formData.llmConfiguration.maxTokens}
-                            onChange={(
-                              e: React.ChangeEvent<HTMLInputElement>
-                            ) =>
-                              handleNumberChange(
-                                "llmConfiguration.maxTokens",
-                                e.target.value
-                              )
-                            }
-                            min="100"
-                            max="4000"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium mb-1">
-                            Temperature: {formData.llmConfiguration.temperature}
-                          </label>
-                          <Slider
-                            value={[formData.llmConfiguration.temperature]}
-                            onValueChange={(value) =>
-                              handleNumberChange(
-                                "llmConfiguration.temperature",
-                                value[0].toString()
-                              )
-                            }
-                            min={0}
-                            max={2}
-                            step={0.1}
-                            className="py-4"
-                          />
-                          <div className="flex justify-between text-xs text-muted-foreground">
-                            <span>0 (Precise)</span>
-                            <span>2 (Creative)</span>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium mb-1">
-                            Voice Speed: {formData.voiceConfiguration.speed}
-                          </label>
-                          <Slider
-                            value={[formData.voiceConfiguration.speed]}
-                            onValueChange={(value) =>
-                              handleNumberChange(
-                                "voiceConfiguration.speed",
-                                value[0].toString()
-                              )
-                            }
-                            min={0.25}
-                            max={4.0}
-                            step={0.05}
-                            className="py-4"
-                          />
-                          <div className="flex justify-between text-xs text-muted-foreground">
-                            <span>0.25 (Slow)</span>
-                            <span>4.0 (Fast)</span>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium mb-1">
-                            Voice Pitch: {formData.voiceConfiguration.pitch}
-                          </label>
-                          <Slider
-                            value={[formData.voiceConfiguration.pitch]}
-                            onValueChange={(value) =>
-                              handleNumberChange(
-                                "voiceConfiguration.pitch",
-                                value[0].toString()
-                              )
-                            }
-                            min={-1.0}
-                            max={1.0}
-                            step={0.1}
-                            className="py-4"
-                          />
-                          <div className="flex justify-between text-xs text-muted-foreground">
-                            <span>-1.0 (Lower)</span>
-                            <span>1.0 (Higher)</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Budget Tab */}
-                  {currentTab === "budget" && (
-                    <div className="space-y-6">
-                      <div className="bg-card p-5 rounded-xl border shadow-sm">
-                        <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                          <span className="p-1.5 bg-primary/10 text-primary rounded-lg">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
-                          </span>
-                          Campaign Budget Limits
-                        </h3>
-                        <p className="text-sm text-muted-foreground mb-6">
-                          Set financial boundaries for this campaign to prevent runaway costs from AI providers. These limits are enforced in real-time.
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Transfer Phone Number
+                        </label>
+                        <Input
+                          name="transferPhoneNumber"
+                          value={formData.transferPhoneNumber}
+                          onChange={handleChange}
+                          placeholder="+911234567890"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Where the agent forwards a call when the lead asks for
+                          a human. Leave blank to disable transfers.
                         </p>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <div className="space-y-3">
-                            <label className={labelStyles}>
-                              Total Campaign Budget ($)
-                            </label>
-                            <Input
-                              type="number"
-                              name="budget.totalBudget"
-                              value={formData.budget.totalBudget}
-                              onChange={handleChange}
-                              placeholder="e.g., 1000.00"
-                              min="0"
-                              step="0.01"
-                            />
-                            <p className="text-xs text-muted-foreground">
-                              The campaign will automatically pause if the total cost exceeds this amount.
-                            </p>
-                          </div>
-
-                          <div className="space-y-3">
-                            <label className={labelStyles}>
-                              Max Cost Per Call ($)
-                            </label>
-                            <Input
-                              type="number"
-                              name="budget.maxCostPerCall"
-                              value={formData.budget.maxCostPerCall}
-                              onChange={handleChange}
-                              placeholder="e.g., 2.00"
-                              min="0"
-                              step="0.01"
-                            />
-                            <p className="text-xs text-muted-foreground">
-                              A call will gracefully terminate if its individual processing cost exceeds this limit.
-                            </p>
-                          </div>
-                        </div>
                       </div>
                     </div>
                   )}

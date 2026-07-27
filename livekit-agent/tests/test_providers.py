@@ -12,9 +12,9 @@ VALID_META = {
 }
 
 
-def cfg_for(provider: str) -> ProviderConfig:
+def cfg_for(provider: str, stt_model: str = "nova-3") -> ProviderConfig:
     return ProviderConfig(
-        stt_api_key="dg-key", stt_model="nova-3",
+        stt_api_key="dg-key", stt_model=stt_model,
         llm_provider=provider, llm_api_key="k", llm_model="m", llm_temperature=0.7,
         tts_api_key="dg-key", tts_voice="aura-luna-en",
     )
@@ -55,6 +55,26 @@ def test_build_stt_and_tts_are_deepgram():
     cfg = cfg_for("openai")
     assert isinstance(build_stt(cfg), deepgram.STT)
     assert isinstance(build_tts(cfg), deepgram.TTS)
+
+
+def test_build_stt_requests_numerals():
+    # Callback times and quantities must reach the LLM as digits.
+    assert build_stt(cfg_for("openai"))._opts.numerals is True
+
+
+def test_build_stt_passes_keyterms_on_nova_3():
+    stt = build_stt(cfg_for("openai"), keyterms=["Lumina", "Ravi"])
+    assert stt._opts.keyterm == ["Lumina", "Ravi"]
+
+
+def test_build_stt_omits_keyterms_on_older_models():
+    # Keyterm prompting is a nova-3 feature; nova-2 rejects the parameter.
+    stt = build_stt(cfg_for("openai", stt_model="nova-2"), keyterms=["Lumina"])
+    assert not stt._opts.keyterm
+
+
+def test_build_stt_without_keyterms_is_unchanged():
+    assert not build_stt(cfg_for("openai"))._opts.keyterm
 
 
 def test_build_llm_selects_plugin_per_provider():

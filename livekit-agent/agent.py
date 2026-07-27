@@ -4,7 +4,8 @@ import asyncio
 import json
 import logging
 import os
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Literal
 
 from dotenv import load_dotenv
 
@@ -26,8 +27,10 @@ from livekit.agents import (
     inference,
     room_io,
 )
+from livekit.agents.beta.tools import EndCallTool
 from livekit.plugins import noise_cancellation
 
+from prompts import build_instructions, build_lead_context
 from providers import build_llm, build_stt, build_tts, parse_provider_config
 from tools.lumina_api import LuminaAPI
 
@@ -38,30 +41,70 @@ load_dotenv(".env.local")
 logger = logging.getLogger("lumina-outbound")
 logger.setLevel(logging.INFO)
 
-AGENT_NAME = "lumina-outbound"
+# Overridable so a canary worker can register under its own name and run beside
+# the stable one; the server dispatches to "lumina-outbound".
+AGENT_NAME = os.getenv("LUMINA_AGENT_NAME", "lumina-outbound")
 SIP_OUTBOUND_TRUNK_ID = os.getenv("SIP_OUTBOUND_TRUNK_ID", "")
 # Krisp BVCTelephony is a LiveKit-Cloud-only model. Set LIVEKIT_BVC_ENABLED=false
 # on self-hosted deploys where the Cloud noise-cancellation models are unavailable.
 BVC_ENABLED = os.getenv("LIVEKIT_BVC_ENABLED", "true").strip().lower() not in ("0", "false", "no")
 
+# ── Hang-up guards ───────────────────────────────────────────────────────────
+# An LLM that forgets to call end_call leaves the SIP leg open, and the callee
+# hears silence until they hang up themselves (docs.livekit.io/telephony/
+# making-calls/outbound-calls/ "Hang up"). Every path out of a conversation is
+# therefore backed by a deterministic timer.
+#
+# Seconds of two-way silence before the session marks the user "away"
+# (AgentSession user_away_timeout, default 15s - tightened for telephony where
+# dead air reads as a dropped call).
+USER_AWAY_TIMEOUT = float(os.getenv("USER_AWAY_TIMEOUT", "10"))
+# How many times the agent asks "are you still there?" before hanging up.
+INACTIVITY_CHECKINS = int(os.getenv("INACTIVITY_CHECKINS", "2"))
+# Seconds to wait for a reply after each check-in.
+INACTIVITY_CHECKIN_INTERVAL = float(os.getenv("INACTIVITY_CHECKIN_INTERVAL", "8"))
+# Hard ceiling on a single conversation, counted from callee pickup.
+MAX_CALL_SECONDS = float(os.getenv("MAX_CALL_SECONDS", "600"))
 
-def build_instructions(lead_name: str, script: str, opening_message: str) -> str:
-    return f"""You are a professional sales representative for Lumina on a live phone call.
-The person you are calling is named {lead_name or "unknown"}.
+# Values the client's Dashboard/Analytics pages bucket on (client/src/pages/
+# Analytics.tsx). Constraining the tool arg to this Literal puts the enum in the
+# function schema, so the LLM cannot invent an outcome the CRM won't chart.
+CallOutcome = Literal[
+    "interested",
+    "not-interested",
+    "callback-requested",
+    "voicemail",
+    "wrong-number",
+    "do-not-call",
+]
 
-Campaign script (follow it, adapt naturally):
-{script}
 
-{f"Open with: {opening_message}" if opening_message else ""}
+def _canceller(task: asyncio.Task) -> Callable[[], Awaitable[None]]:
+    """Shutdown callback that cancels a background timer task."""
 
-Rules:
-- Voice conversation: be concise, warm, professional. No emojis, asterisks, or markdown.
-- Listen more than you talk. One question at a time.
-- Handle objections with empathy; never argue.
-- If they ask to stop or are clearly uninterested, wrap up politely and use end_call.
-- Record the outcome with record_outcome before ending every call.
-- To schedule a follow-up, use schedule_callback with an ISO datetime.
-"""
+    async def _cancel() -> None:
+        task.cancel()
+
+    return _cancel
+
+
+async def hangup_call() -> None:
+    """Delete the room, which disconnects the SIP leg for everyone.
+
+    Per docs.livekit.io/telephony/making-calls/outbound-calls/ ("Hang up"):
+    ending the session alone is not enough - without deleting the room the
+    caller keeps hearing silence.
+    """
+    ctx = get_job_context(required=False)
+    if ctx is None:
+        return
+    try:
+        await ctx.delete_room()
+    except Exception as e:
+        # Several paths can race to hang up (end_call, the watchdogs, the callee
+        # dropping the line). Deleting an already-deleted room is a success as
+        # far as this function is concerned.
+        logger.info("delete_room during hangup was a no-op: %s", e)
 
 
 class SalesAgent(Agent):
@@ -74,61 +117,107 @@ class SalesAgent(Agent):
         opening_message: str = "",
         transfer_to: str = "",
         lumina_api: LuminaAPI | None = None,
+        lead_context: str = "",
     ) -> None:
-        super().__init__(instructions=build_instructions(lead_name, script, opening_message))
+        # The prebuilt EndCallTool is what actually terminates the call: it waits
+        # for the goodbye to play out, shuts the session down, deletes the room
+        # (disconnecting the SIP leg), and then shuts the job process down.
+        # docs.livekit.io/agents/prebuilt/tools/end-call-tool/. The previous
+        # hand-rolled end_call only deleted the room and left the closing
+        # behaviour entirely to prompt wording, which the model routinely skipped.
+        end_call_tool = EndCallTool(
+            delete_room=True,
+            extra_description=(
+                "Also call this when the person declines, asks to be removed from the list, "
+                "says they are busy or not interested, reaches a natural end of the "
+                "conversation, or says goodbye. Call record_outcome first. Saying goodbye "
+                "without calling this tool leaves the person listening to silence."
+            ),
+            end_instructions=(
+                "Say one short, warm goodbye line. Do not ask another question and do not "
+                "restate anything you already said."
+            ),
+            on_tool_called=self._on_end_call,
+        )
+        super().__init__(
+            instructions=build_instructions(lead_name, script, opening_message, lead_context),
+            tools=end_call_tool.tools,
+        )
         self.call_id = call_id
         self.lumina = lumina_api
         self.transfer_to = transfer_to
         # Set by entrypoint once the outbound SIP callee has answered
         # (participant_identity, which is the dialed phone number).
         self.sip_identity: str = ""
+        # Guards against double-posting an outcome: the LLM records one, and
+        # every deterministic exit path (end_call, silence watchdog, duration
+        # cap, shutdown) falls back to recording one only if it hasn't happened.
+        self.outcome_recorded = False
+
+    async def ensure_outcome(self, outcome: str, notes: str = "") -> bool:
+        """Record `outcome` only if nothing has been recorded for this call yet."""
+        if self.outcome_recorded or self.lumina is None:
+            return False
+        self.outcome_recorded = True
+        ok = await self.lumina.post_outcome(self.call_id, outcome, notes)
+        if not ok:
+            logger.warning("failed to record fallback outcome=%s call_id=%s", outcome, self.call_id)
+        return ok
+
+    async def _on_end_call(self, ev) -> None:
+        """EndCallTool hook: never let a call end with a blank CRM row."""
+        await self.ensure_outcome("completed", "call ended without a recorded outcome")
 
     async def _hangup(self) -> None:
-        ctx = get_job_context(required=False)
-        if ctx is None:
-            return
-        await ctx.api.room.delete_room(api.DeleteRoomRequest(room=ctx.room.name))
+        await hangup_call()
 
     @function_tool()
-    async def record_outcome(self, ctx: RunContext, outcome: str, notes: str = "") -> str:
-        """Record the call outcome in the CRM. Call this before ending every call.
+    async def record_outcome(self, ctx: RunContext, outcome: CallOutcome, notes: str = "") -> str:
+        """Record what happened on this call in the CRM.
+
+        Required on every call, exactly once, before end_call.
 
         Args:
-            outcome: One of: interested, not-interested, callback-requested, voicemail, wrong-number, do-not-call
-            notes: Short summary of the conversation result
+            outcome: What actually happened. interested = they want to proceed or hear more.
+                not-interested = they declined. callback-requested = they asked to be called
+                back later. voicemail = you reached a machine. wrong-number = not the person
+                or number you wanted. do-not-call = they asked to be removed from the list.
+            notes: One or two sentences summarising the conversation and any commitment made.
         """
+        # Writes CRM state, so it must not be discarded by a barge-in
+        # (docs.livekit.io/agents/logic/tools/definition/ "Best practices").
+        ctx.disallow_interruptions()
+        self.outcome_recorded = True
         if self.lumina is None:
-            return "outcome noted"
+            return "outcome recorded"
         ok = await self.lumina.post_outcome(self.call_id, outcome, notes)
         return "outcome recorded" if ok else "could not record outcome, continue anyway"
 
     @function_tool()
     async def schedule_callback(self, ctx: RunContext, datetime_iso: str, notes: str = "") -> str:
-        """Schedule a follow-up call at the time the lead requested.
+        """Schedule a follow-up call at the time the person asked to be called back.
 
         Args:
-            datetime_iso: ISO-8601 datetime for the callback, e.g. 2026-07-10T15:00:00+05:30
-            notes: What to discuss on the follow-up
+            datetime_iso: ISO-8601 datetime for the callback, e.g. 2026-07-10T15:00:00+05:30.
+                Resolve vague answers ("tomorrow afternoon", "next Tuesday") into a real
+                date and time before calling this.
+            notes: What to discuss on the follow-up.
         """
+        ctx.disallow_interruptions()
         if self.lumina is None:
-            return "callback noted"
+            return "callback scheduled"
         ok = await self.lumina.schedule_callback(self.call_id, datetime_iso, notes)
-        return "callback scheduled" if ok else "could not schedule callback, apologize and offer to try again"
-
-    @function_tool()
-    async def end_call(self, ctx: RunContext) -> str:
-        """End the phone call. Use after saying goodbye, or when the user asks to stop."""
-        current_speech = ctx.session.current_speech
-        if current_speech:
-            await current_speech.wait_for_playout()
-        await self._hangup()
-        return "call ended"
+        if not ok:
+            return "could not schedule callback, apologize and offer to try again"
+        # A booked callback is itself the outcome; recording it here means the
+        # CRM is correct even if the model skips record_outcome on the way out.
+        await self.ensure_outcome("callback-requested", notes or "callback scheduled")
+        return "callback scheduled"
 
     @function_tool()
     async def detected_answering_machine(self, ctx: RunContext) -> str:
         """Call this AFTER you hear a voicemail greeting or beep instead of a live person."""
-        if self.lumina is not None:
-            await self.lumina.post_outcome(self.call_id, "voicemail", "answering machine detected")
+        await self.ensure_outcome("voicemail", "answering machine detected")
         await self._hangup()
         return "hung up on voicemail"
 
@@ -151,8 +240,7 @@ class SalesAgent(Agent):
                     transfer_to=f"tel:{self.transfer_to}",
                 )
             )
-            if self.lumina is not None:
-                await self.lumina.post_outcome(self.call_id, "interested", "transferred to human")
+            await self.ensure_outcome("interested", "transferred to human")
             return "transfer initiated"
         except Exception as e:
             logger.error("transfer failed: %s", e)
@@ -162,12 +250,106 @@ class SalesAgent(Agent):
 server = AgentServer()
 
 
+async def fetch_lead_context(lumina: LuminaAPI, lead_id: str) -> dict:
+    """Best-effort CRM lookup for the person being called."""
+    if not lead_id:
+        return {}
+    try:
+        return await lumina.get_lead(lead_id)
+    except Exception as e:  # never block a call on CRM context
+        logger.warning("lead context fetch failed lead_id=%s: %s", lead_id, e)
+        return {}
+
+
+def stt_keyterms(lead_name: str, lead: dict | None) -> list[str]:
+    """Names Deepgram nova-3 should bias towards on this specific call.
+
+    Proper nouns are what 8kHz PSTN audio gets wrong most often, and getting the
+    callee's own name or company back as garbage is what makes an agent sound
+    like it isn't listening. Keyterm prompting is nova-3 only.
+    """
+    terms = ["Lumina"]
+    if lead_name:
+        terms.append(lead_name)
+    if lead and lead.get("company"):
+        terms.append(lead["company"])
+    # De-duplicate while preserving order.
+    return list(dict.fromkeys(t.strip() for t in terms if t and t.strip()))
+
+
+async def run_inactivity_checkins(
+    *,
+    session: AgentSession,
+    agent: SalesAgent,
+    checkins: int = INACTIVITY_CHECKINS,
+    interval: float = INACTIVITY_CHECKIN_INTERVAL,
+) -> None:
+    """Ask whether the caller is still there, then hang up if they never answer.
+
+    Started when the session marks the user `away` and cancelled the moment they
+    speak again, per docs.livekit.io/agents/logic/sessions/ ("Handling inactive
+    users"). Without this, a caller who puts the phone down keeps the SIP leg -
+    and the per-minute billing - open indefinitely.
+    """
+    for _ in range(checkins):
+        speech = session.generate_reply(
+            instructions=(
+                "The line has gone quiet. In one short sentence, ask if they are still there."
+            )
+        )
+        await speech.wait_for_playout()
+        await asyncio.sleep(interval)
+
+    logger.info("no response after %d check-ins, hanging up", checkins)
+    await agent.ensure_outcome("no-answer", "caller went silent mid-call")
+    await hangup_call()
+
+
+async def enforce_max_duration(
+    *,
+    session: AgentSession,
+    agent: SalesAgent,
+    seconds: float = MAX_CALL_SECONDS,
+) -> None:
+    """Wrap up and hang up once a single call has run past its ceiling."""
+    await asyncio.sleep(seconds)
+
+    logger.info("max call duration %.0fs reached, wrapping up", seconds)
+    speech = session.generate_reply(
+        instructions=(
+            "You are out of time on this call. In one sentence, thank them and say you will "
+            "follow up. Do not ask a question."
+        )
+    )
+    await speech.wait_for_playout()
+    await agent.ensure_outcome("completed", "call reached the maximum duration")
+    await hangup_call()
+
+
+async def classify_with_amd(detector) -> AMDPredictionEvent | None:
+    """Await an AMD classification, or None if the call ended before one arrived.
+
+    AMD frequently never classifies on these calls, so this await outlives the
+    whole conversation and is still pending when the session closes (end_call,
+    the callee hanging up, or a watchdog firing). The detector then raises
+    "amd closed before a result was available", and because that propagates out
+    of `entrypoint` the SDK reports the job as `crashed` — after a perfectly
+    clean hangup. Live call `AJ_GyJnG6PRAXdq` deleted its room and persisted its
+    transcript and was still logged as crashed. A conversation that outlived AMD
+    is a normal ending, not a failure.
+    """
+    try:
+        return await detector.execute()
+    except RuntimeError as e:
+        logger.info("AMD closed without a classification: %s", e)
+        return None
+
+
 async def _resolve_amd_outcome(
     result: AMDPredictionEvent,
     *,
     session: AgentSession,
-    lumina: LuminaAPI,
-    call_id: str,
+    agent: SalesAgent,
     ctx: JobContext,
 ) -> bool:
     """Act on an AMD classification result.
@@ -176,7 +358,7 @@ async def _resolve_amd_outcome(
     starting the normal conversation (voicemail message left, or mailbox
     unavailable).
     """
-    logger.info("AMD result=%s call_id=%s", result.category.value, call_id)
+    logger.info("AMD result=%s call_id=%s", result.category.value, agent.call_id)
 
     if result.category in ("human", "uncertain", "machine-ivr"):
         # Outbound etiquette: let the callee speak first; agent responds after their turn.
@@ -190,11 +372,15 @@ async def _resolve_amd_outcome(
             )
         )
         await speech.wait_for_playout()
-        await lumina.post_outcome(call_id, "voicemail", "left voicemail message")
+        await agent.ensure_outcome("voicemail", "left voicemail message")
+        # Shutting the job down does not hang the phone up on its own; the room
+        # has to go too or the machine keeps recording silence.
+        await hangup_call()
         ctx.shutdown("voicemail")
         return True
     elif result.category == "machine-unavailable":
-        await lumina.post_outcome(call_id, "voicemail", "mailbox unavailable")
+        await agent.ensure_outcome("voicemail", "mailbox unavailable")
+        await hangup_call()
         ctx.shutdown("mailbox unavailable")
         return True
 
@@ -221,13 +407,22 @@ async def entrypoint(ctx: JobContext) -> None:
         ctx.shutdown("provider config missing")
         return
 
+    lead_name = meta.get("lead_name", "")
+    # Pull the CRM record so the agent knows who it is talking to (company, role,
+    # prior notes) instead of guessing from the script alone. This runs before the
+    # SIP dial, so nobody is waiting on the line for it, and a failure degrades to
+    # an empty context block rather than blocking the call.
+    lead = await fetch_lead_context(lumina, meta.get("lead_id", ""))
+    lead_context = build_lead_context(lead)
+
     agent = SalesAgent(
         call_id=call_id,
-        lead_name=meta.get("lead_name", ""),
+        lead_name=lead_name,
         script=meta.get("script", ""),
         opening_message=meta.get("opening_message", ""),
         transfer_to=meta.get("transfer_to", ""),
         lumina_api=lumina,
+        lead_context=lead_context,
     )
 
     session = AgentSession(
@@ -236,9 +431,18 @@ async def entrypoint(ctx: JobContext) -> None:
         # especially on speech that overlaps the agent's own TTS. A single-language
         # "en" model emits interim words faster and more reliably during overlap,
         # which is what the min_words interruption gate below now depends on.
-        stt=build_stt(provider_cfg),
+        stt=build_stt(provider_cfg, keyterms=stt_keyterms(lead_name, lead)),
         llm=build_llm(provider_cfg),
         tts=build_tts(provider_cfg),
+        # Silence on a phone line reads as a dropped call, not as thinking time.
+        # Marking the user "away" this early is what arms the check-in watchdog
+        # below (docs.livekit.io/agents/logic/sessions/ "Handling inactive users").
+        user_away_timeout=USER_AWAY_TIMEOUT,
+        # Put a breath between back-to-back utterances - notably a tool-driven
+        # generate_reply landing straight on top of the previous line, which is
+        # the documented cause of the agent sounding like it is running sentences
+        # together (docs.livekit.io/agents/logic/turns/tuning/ troubleshooting).
+        min_consecutive_speech_delay=0.3,
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(),
             # Explicit barge-in config for telephony, per
@@ -316,14 +520,31 @@ async def entrypoint(ctx: JobContext) -> None:
         else "DISABLED via LIVEKIT_BVC_ENABLED",
     )
 
+    # ── Silence watchdog ─────────────────────────────────────────────────────
+    # Armed when the session marks the user "away" (USER_AWAY_TIMEOUT of two-way
+    # silence), cancelled the instant they speak again.
+    inactivity_task: asyncio.Task[None] | None = None
+
     @session.on("user_state_changed")
     def _on_user_state(ev: UserStateChangedEvent) -> None:
+        nonlocal inactivity_task
         logger.info(
             "user state %s -> %s (agent_state=%s)",
             ev.old_state,
             ev.new_state,
             session.agent_state,
         )
+        if ev.new_state == "away":
+            if inactivity_task is None or inactivity_task.done():
+                logger.info("user went away, starting inactivity check-ins")
+                inactivity_task = asyncio.create_task(
+                    run_inactivity_checkins(session=session, agent=agent)
+                )
+            return
+
+        if inactivity_task is not None:
+            inactivity_task.cancel()
+            inactivity_task = None
 
     @session.on("agent_state_changed")
     def _on_agent_state(ev: AgentStateChangedEvent) -> None:
@@ -359,6 +580,9 @@ async def entrypoint(ctx: JobContext) -> None:
                 items.append({"role": role, "content": content})
         transcript = "\n".join(f"{i['role']}: {i['content']}" for i in items)
         await lumina.post_transcript(call_id, transcript, items)
+        # Last line of defence: a call that ends any other way (callee hangs up,
+        # worker restarts) still leaves a row the CRM can report on.
+        await agent.ensure_outcome("completed", "call ended without a recorded outcome")
 
     ctx.add_shutdown_callback(persist_transcript)
 
@@ -403,10 +627,17 @@ async def entrypoint(ctx: JobContext) -> None:
                 logger.info("callee answered call_id=%s", call_id)
                 # Outbound etiquette: let the callee speak first; agent responds after their turn.
 
-                result = await detector.execute()
-                if await _resolve_amd_outcome(
-                    result, session=session, lumina=lumina, call_id=call_id, ctx=ctx
-                ):
+                # Ceiling starts at pickup, not at dispatch, so time spent
+                # ringing doesn't eat into the conversation.
+                duration_task = asyncio.create_task(
+                    enforce_max_duration(session=session, agent=agent)
+                )
+                ctx.add_shutdown_callback(_canceller(duration_task))
+
+                result = await classify_with_amd(detector)
+                if result is None:
+                    return
+                if await _resolve_amd_outcome(result, session=session, agent=agent, ctx=ctx):
                     return
         except api.TwirpError as e:
             logger.error(
@@ -415,6 +646,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 e.metadata.get("sip_status_code"),
                 e.metadata.get("sip_status"),
             )
+            agent.outcome_recorded = True
             await lumina.post_outcome(call_id, "no-answer", f"SIP {e.metadata.get('sip_status_code')}")
             ctx.shutdown()
             return

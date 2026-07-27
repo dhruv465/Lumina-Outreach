@@ -56,9 +56,23 @@ def parse_provider_config(meta: dict) -> ProviderConfig | None:
     return cfg
 
 
-def build_stt(cfg: ProviderConfig) -> deepgram.STT:
+def build_stt(cfg: ProviderConfig, keyterms: list[str] | None = None) -> deepgram.STT:
     # language="en" matches the barge-in fix (fast interims on PSTN overlap).
-    return deepgram.STT(model=cfg.stt_model, language="en", api_key=cfg.stt_api_key)
+    kwargs = {}
+    # Keyterm prompting biases recognition towards the proper nouns this specific
+    # call turns on (the lead's name, their company). It is a nova-3-only feature;
+    # passing it to nova-2 is rejected by the API.
+    if keyterms and cfg.stt_model.startswith("nova-3"):
+        kwargs["keyterm"] = keyterms
+    return deepgram.STT(
+        model=cfg.stt_model,
+        language="en",
+        api_key=cfg.stt_api_key,
+        # Return "9:30" and "2000" as digits rather than spelled-out words, so
+        # callback times and quantities survive the trip to the LLM intact.
+        numerals=True,
+        **kwargs,
+    )
 
 
 def build_llm(cfg: ProviderConfig):

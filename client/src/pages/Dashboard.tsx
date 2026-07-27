@@ -1,11 +1,18 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { LineChart, PieChart, Phone, Users, Clock, CheckCircle, Info, TrendingUp, Activity, Zap, Target, PlayCircle, UserPlus as UserPlusIcon } from 'lucide-react';
+import { LineChart, PieChart, Phone, Users, Clock, CheckCircle, Info, TrendingUp, Activity, Zap, Target, PlayCircle, UserPlus as UserPlusIcon, Calendar, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import {
   ChartContainer,
@@ -80,7 +87,10 @@ interface DashboardData {
 // Dashboard data will be fetched from the server
 const Dashboard = () => {
   const { toast } = useToast();
-  const [timeframe, setTimeframe] = useState('week'); // week, month, year
+  const navigate = useNavigate();
+  // Days of history to request, or 'all'. Sent to the API as a startDate
+  // param - not just a cache key, so changing it actually refetches.
+  const [dateRange, setDateRange] = useState('30');
   const { isConnected, systemMetrics, activeCalls } = useSocketIO();
   const [dashboardState, setDashboardState] = useState<DashboardData | null>(null);
 
@@ -129,13 +139,20 @@ const Dashboard = () => {
 
   // Fetch dashboard data
   const { data: dashboardData, isLoading, error } = useQuery({
-    queryKey: ['dashboardOverview', timeframe],
+    queryKey: ['dashboardOverview', dateRange],
     queryFn: async () => {
       try {
+        const params = new URLSearchParams();
+        if (dateRange !== 'all') {
+          const startDate = new Date();
+          startDate.setDate(startDate.getDate() - parseInt(dateRange));
+          params.append('startDate', startDate.toISOString());
+        }
+
         // Get both dashboard overview and analytics data for complete dashboard
         const [overviewResponse, analyticsResponse] = await Promise.all([
           api.get('/dashboard/overview'),
-          api.get('/analytics/unified-metrics').catch(() => ({ data: null })) // Fallback if analytics fails
+          api.get(`/analytics/unified-metrics?${params.toString()}`).catch(() => ({ data: null })) // Fallback if analytics fails
         ]);
         
         if (overviewResponse.data) {
@@ -253,6 +270,12 @@ const Dashboard = () => {
       });
     }
   }, [activeCalls, dashboardState]);
+
+  const formatDuration = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.round(seconds % 60);
+    return `${minutes}m ${remainingSeconds}s`;
+  };
 
   // Generate chart data based on dashboard state
   const generateChartData = () => {
@@ -443,29 +466,25 @@ const Dashboard = () => {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl sm:text-3xl font-bold">Dashboard</h1>
         
-        <div className="flex flex-row gap-2 flex-wrap">
-          <Button
-            variant={timeframe === 'week' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setTimeframe('week')}
-          >
-            Week
-          </Button>
-          <Button
-            variant={timeframe === 'month' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setTimeframe('month')}
-          >
-            Month
-          </Button>
-          <Button
-            variant={timeframe === 'year' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setTimeframe('year')}
-          >
-            Year
-          </Button>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="flex items-center gap-1 justify-between sm:justify-center">
+              <div className="flex items-center gap-1">
+                <Calendar className="h-4 w-4" />
+                <span className="truncate">
+                  {dateRange === 'all' ? 'All time' : `Last ${dateRange} days`}
+                </span>
+              </div>
+              <ChevronDown className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setDateRange('7')}>Last 7 days</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setDateRange('30')}>Last 30 days</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setDateRange('90')}>Last 90 days</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setDateRange('all')}>All time</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* KPI Cards */}
@@ -590,7 +609,7 @@ const Dashboard = () => {
       </div>
 
       {/* Charts and Data Section */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
+      <div id="call-charts" className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
         {/* Main Chart */}
         <Card className="xl:col-span-2 p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4">
@@ -695,16 +714,49 @@ const Dashboard = () => {
         </Card>
       </div>
 
+      {/* Performance Summary */}
+      <Card className="p-4 sm:p-6">
+        <h3 className="text-base sm:text-lg font-medium mb-4">Performance Summary</h3>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div>
+            <p className="text-xs text-muted-foreground">Total Talk Time</p>
+            <p className="text-lg font-semibold mt-1">
+              {formatDuration(displayData.metrics?.totalDuration || 0)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Positive Outcomes</p>
+            <p className="text-lg font-semibold mt-1 text-green-600">
+              {(displayData.metrics?.conversionRate || 0).toFixed(1)}%
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Negative Outcomes</p>
+            <p className="text-lg font-semibold mt-1 text-red-600">
+              {(displayData.metrics?.negativeRate || 0).toFixed(1)}%
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Connection Rate</p>
+            <p className="text-lg font-semibold mt-1">
+              {displayData.metrics?.totalCalls
+                ? ((displayData.metrics.completedCalls / displayData.metrics.totalCalls) * 100).toFixed(1)
+                : '0.0'}%
+            </p>
+          </div>
+        </div>
+      </Card>
+
       {/* Quick Actions & Active Campaigns */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* Quick Actions */}
         <Card className="p-4 sm:p-6">
           <h3 className="text-base sm:text-lg font-medium mb-4">Quick Actions</h3>
           <div className="space-y-3">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               className="w-full justify-start gap-3 h-auto py-3"
-              onClick={() => window.location.href = '/campaigns'}
+              onClick={() => navigate('/campaigns')}
             >
               <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
                 <PlayCircle size={16} className="text-blue-600 dark:text-blue-400" />
@@ -715,10 +767,10 @@ const Dashboard = () => {
               </div>
             </Button>
             
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               className="w-full justify-start gap-3 h-auto py-3"
-              onClick={() => window.location.href = '/leads'}
+              onClick={() => navigate('/leads')}
             >
               <div className="h-8 w-8 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center shrink-0">
                 <UserPlusIcon size={16} className="text-green-600 dark:text-green-400" />
@@ -729,17 +781,19 @@ const Dashboard = () => {
               </div>
             </Button>
             
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               className="w-full justify-start gap-3 h-auto py-3"
-              onClick={() => window.location.href = '/analytics'}
+              onClick={() =>
+                document.getElementById('call-charts')?.scrollIntoView({ behavior: 'smooth' })
+              }
             >
               <div className="h-8 w-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center shrink-0">
                 <TrendingUp size={16} className="text-purple-600 dark:text-purple-400" />
               </div>
               <div className="text-left flex-1">
-                <p className="font-medium text-sm">View Analytics</p>
-                <p className="text-xs text-muted-foreground">Detailed performance reports</p>
+                <p className="font-medium text-sm">View Charts</p>
+                <p className="text-xs text-muted-foreground">Jump to call volume and outcomes</p>
               </div>
             </Button>
           </div>
@@ -749,7 +803,7 @@ const Dashboard = () => {
         <Card className="lg:col-span-2 p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-base sm:text-lg font-medium">Active Campaigns</h3>
-            <Button variant="ghost" size="sm" onClick={() => window.location.href = '/campaigns'}>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/campaigns')}>
               View All
             </Button>
           </div>
@@ -768,7 +822,7 @@ const Dashboard = () => {
                   <div 
                     key={campaign._id} 
                     className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors cursor-pointer"
-                    onClick={() => window.location.href = '/campaigns'}
+                    onClick={() => navigate('/campaigns')}
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <div className={cn(
@@ -808,7 +862,7 @@ const Dashboard = () => {
             <div className="py-12 text-center border rounded-lg">
               <Target className="h-12 w-12 text-muted-foreground/50 mx-auto mb-3" />
               <p className="text-muted-foreground text-sm mb-2">No active campaigns</p>
-              <Button variant="outline" size="sm" onClick={() => window.location.href = '/campaigns'}>
+              <Button variant="outline" size="sm" onClick={() => navigate('/campaigns')}>
                 Create Campaign
               </Button>
             </div>

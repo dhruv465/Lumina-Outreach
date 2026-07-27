@@ -64,7 +64,6 @@ const Header = ({ toggleSidebar, sidebarCollapsed }: HeaderProps) => {
       leads: "Lead Management",
       campaigns: "Campaigns",
       calls: "Call History",
-      analytics: "Analytics",
       configuration: "Configuration",
       knowledge: "Knowledge Base",
     };

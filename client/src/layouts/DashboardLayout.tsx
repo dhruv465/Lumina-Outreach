@@ -2,7 +2,6 @@ import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import Sidebar from '@/components/layout/Sidebar';
 import Header from '@/components/layout/Header';
-import { StatusBar } from '@/components/common/StatusBar';
 import { useState } from 'react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
@@ -49,11 +48,6 @@ const DashboardLayout = () => {
             </div>
           </div>
         </main>
-        
-        {/* Status bar */}
-        <div className="flex-shrink-0">
-          <StatusBar />
-        </div>
       </div>
     </div>
   );

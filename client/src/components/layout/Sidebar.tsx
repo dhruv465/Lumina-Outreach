@@ -1,14 +1,11 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
 import {
   LayoutDashboard,
   Users,
   PhoneCall,
   Settings,
   Megaphone,
-  BarChart3,
-  LogOut,
   BookOpen,
   ChevronRight,
 } from "lucide-react";
@@ -29,7 +26,6 @@ interface SidebarItemProps {
   title: string;
   onNavigate?: () => void;
   collapsed?: boolean;
-  badge?: string | number;
 }
 
 const SidebarItem: React.FC<SidebarItemProps> = ({
@@ -38,7 +34,6 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
   title,
   onNavigate,
   collapsed,
-  badge,
 }) => {
   const { pathname } = useLocation();
   const isActive = pathname === href;
@@ -83,12 +78,6 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
           {title}
         </span>
 
-        {badge && !collapsed && (
-          <span className="ml-auto px-2 py-0.5 text-xs font-medium bg-primary/20 text-primary rounded-full">
-            {badge}
-          </span>
-        )}
-
         {!collapsed && (
           <ChevronRight
             size={14}
@@ -118,23 +107,6 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
   return buttonContent;
 };
 
-interface SidebarSectionProps {
-  title: string;
-  collapsed?: boolean;
-}
-
-const SidebarSection: React.FC<SidebarSectionProps> = ({ title, collapsed }) => {
-  if (collapsed) return null;
-  
-  return (
-    <div className="px-3 py-2">
-      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-        {title}
-      </h3>
-    </div>
-  );
-};
-
 interface SidebarProps {
   onNavigate?: () => void;
   collapsed?: boolean;
@@ -142,8 +114,6 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ onNavigate, collapsed = false, isMobile = false }) => {
-  const { logout } = useAuth();
-
   return (
     <div
       className={cn(
@@ -180,8 +150,6 @@ const Sidebar: React.FC<SidebarProps> = ({ onNavigate, collapsed = false, isMobi
       {/* Navigation */}
       <ScrollArea className="flex-1 py-4">
         <nav className="space-y-1 px-2">
-          {/* Main Section */}
-          <SidebarSection title="Main" collapsed={collapsed} />
           <SidebarItem
             href="/dashboard"
             icon={<LayoutDashboard size={20} />}
@@ -211,72 +179,22 @@ const Sidebar: React.FC<SidebarProps> = ({ onNavigate, collapsed = false, isMobi
             collapsed={collapsed}
           />
 
-          {/* Analytics Section */}
-          <div className="pt-4">
-            <SidebarSection title="Insights" collapsed={collapsed} />
-            <SidebarItem
-              href="/analytics"
-              icon={<BarChart3 size={20} />}
-              title="Analytics"
-              onNavigate={onNavigate}
-              collapsed={collapsed}
-            />
-          </div>
-
-          {/* Settings Section */}
-          <div className="pt-4">
-            <SidebarSection title="Resources" collapsed={collapsed} />
-            <SidebarItem
-              href="/knowledge"
-              icon={<BookOpen size={20} />}
-              title="Knowledge Base"
-              onNavigate={onNavigate}
-              collapsed={collapsed}
-            />
-            <SidebarItem
-              href="/configuration"
-              icon={<Settings size={20} />}
-              title="Configuration"
-              onNavigate={onNavigate}
-              collapsed={collapsed}
-            />
-          </div>
+          <SidebarItem
+            href="/knowledge"
+            icon={<BookOpen size={20} />}
+            title="Knowledge Base"
+            onNavigate={onNavigate}
+            collapsed={collapsed}
+          />
+          <SidebarItem
+            href="/configuration"
+            icon={<Settings size={20} />}
+            title="Configuration"
+            onNavigate={onNavigate}
+            collapsed={collapsed}
+          />
         </nav>
       </ScrollArea>
-
-      {/* Logout */}
-      <div className="p-3">
-        <TooltipProvider delayDuration={0}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "w-full gap-3 text-muted-foreground transition-all duration-200 h-10 rounded-lg hover:bg-destructive/10 hover:text-destructive",
-                  collapsed ? "justify-center px-2" : "justify-start px-3"
-                )}
-                onClick={logout}
-              >
-                <LogOut size={20} className="shrink-0" />
-                <span
-                  className={cn(
-                    "transition-all duration-200 whitespace-nowrap text-sm",
-                    collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"
-                  )}
-                >
-                  Sign Out
-                </span>
-              </Button>
-            </TooltipTrigger>
-            {collapsed && (
-              <TooltipContent side="right" className="font-medium">
-                Sign Out
-              </TooltipContent>
-            )}
-          </Tooltip>
-        </TooltipProvider>
-      </div>
     </div>
   );
 };

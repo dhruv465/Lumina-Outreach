@@ -901,8 +901,8 @@ const Dashboard = () => {
               <Zap size={18} className="text-green-600 dark:text-green-400" />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">System Load</p>
-              <p className="text-lg font-bold">{systemMetrics?.activeConnections || 0}%</p>
+              <p className="text-xs text-muted-foreground">Active Connections</p>
+              <p className="text-lg font-bold">{systemMetrics?.activeConnections || 0}</p>
             </div>
           </div>
 

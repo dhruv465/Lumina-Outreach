@@ -3,7 +3,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
   SelectContent,
@@ -81,7 +80,6 @@ const Calls = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [isSyncingRecordings, setIsSyncingRecordings] = useState(false);
   const [isRefreshingRecording, setIsRefreshingRecording] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('history');
 
   useEffect(() => {
     // Fetch calls from API
@@ -321,455 +319,439 @@ const Calls = () => {
         </div>
       </div>
       
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="mb-4">
-          <TabsTrigger value="history">Call History</TabsTrigger>
-          <TabsTrigger value="analysis">Call Analysis</TabsTrigger>
-        </TabsList>
-        
-        <TabsContent value="history">
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card className="p-4 flex flex-col">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-medium text-muted-foreground">Total Calls</h3>
-                  <HoverCard>
-                    <HoverCardTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
-                        <Info className="h-3 w-3 text-muted-foreground" />
-                        <span className="sr-only">Info</span>
-                      </Button>
-                    </HoverCardTrigger>
-                    <HoverCardContent className="w-80">
-                      <div className="space-y-2">
-                        <h4 className="text-sm font-semibold">Total Calls</h4>
-                        <p className="text-sm text-muted-foreground">
-                          The total number of calls made across all campaigns and time periods in your call history.
-                        </p>
-                      </div>
-                    </HoverCardContent>
-                  </HoverCard>
-                </div>
-                <Phone className="h-4 w-4 text-muted-foreground" />
-              </div>
-              <p className="text-2xl font-bold mt-2">{calls.length}</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {calls.length > 0 
-                  ? `${Math.round((calls.filter((c: Call) => c.status === 'completed').length / calls.length) * 100)}%` 
-                  : "0%"} Successful
-              </p>
-            </Card>
-            
-            <Card className="p-4 flex flex-col">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-medium text-muted-foreground">Successful Calls</h3>
-                  <HoverCard>
-                    <HoverCardTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
-                        <Info className="h-3 w-3 text-muted-foreground" />
-                        <span className="sr-only">Info</span>
-                      </Button>
-                    </HoverCardTrigger>
-                    <HoverCardContent className="w-80">
-                      <div className="space-y-2">
-                        <h4 className="text-sm font-semibold">Successful Calls</h4>
-                        <p className="text-sm text-muted-foreground">
-                          The number of calls that were successfully completed, regardless of outcome.
-                        </p>
-                      </div>
-                    </HoverCardContent>
-                  </HoverCard>
-                </div>
-                <CheckCircle className="h-4 w-4 text-muted-foreground" />
-              </div>
-              <p className="text-2xl font-bold mt-2">
-                {calls.filter((c: Call) => c.status === 'completed').length}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                completed successfully
-              </p>
-            </Card>
-            
-            <Card className="p-4 flex flex-col">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-medium text-muted-foreground">Avg. Call Duration</h3>
-                  <HoverCard>
-                    <HoverCardTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
-                        <Info className="h-3 w-3 text-muted-foreground" />
-                        <span className="sr-only">Info</span>
-                      </Button>
-                    </HoverCardTrigger>
-                    <HoverCardContent className="w-80">
-                      <div className="space-y-2">
-                        <h4 className="text-sm font-semibold">Average Duration</h4>
-                        <p className="text-sm text-muted-foreground">
-                          The average length of time for all calls in your history, including talk time and hold time.
-                        </p>
-                      </div>
-                    </HoverCardContent>
-                  </HoverCard>
-                </div>
-                <Clock className="h-4 w-4 text-muted-foreground" />
-              </div>
-              <p className="text-2xl font-bold mt-2">
-                {formatDuration(calls.length > 0 ? Math.round(calls.reduce((acc: number, call: Call) => acc + (call.duration || 0), 0) / calls.length) : 0)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                per call
-              </p>
-            </Card>
-            
-            <Card className="p-4 flex flex-col">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-medium text-muted-foreground">Interested Leads</h3>
-                  <HoverCard>
-                    <HoverCardTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
-                        <Info className="h-3 w-3 text-muted-foreground" />
-                        <span className="sr-only">Info</span>
-                      </Button>
-                    </HoverCardTrigger>
-                    <HoverCardContent className="w-80">
-                      <div className="space-y-2">
-                        <h4 className="text-sm font-semibold">Interested Leads</h4>
-                        <p className="text-sm text-muted-foreground">
-                          The number of calls that resulted in interested leads showing positive engagement.
-                        </p>
-                      </div>
-                    </HoverCardContent>
-                  </HoverCard>
-                </div>
-                <AlertCircle className="h-4 w-4 text-muted-foreground" />
-              </div>
-              <p className="text-2xl font-bold mt-2">
-                {calls.filter((c: Call) => c.outcome === 'interested').length}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                positive responses
-              </p>
-            </Card>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="p-4 flex flex-col">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Total Calls</h3>
+              <HoverCard>
+                <HoverCardTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
+                    <Info className="h-3 w-3 text-muted-foreground" />
+                    <span className="sr-only">Info</span>
+                  </Button>
+                </HoverCardTrigger>
+                <HoverCardContent className="w-80">
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Total Calls</h4>
+                    <p className="text-sm text-muted-foreground">
+                      The total number of calls made across all campaigns and time periods in your call history.
+                    </p>
+                  </div>
+                </HoverCardContent>
+              </HoverCard>
+            </div>
+            <Phone className="h-4 w-4 text-muted-foreground" />
           </div>
+          <p className="text-2xl font-bold mt-2">{calls.length}</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {calls.length > 0 
+              ? `${Math.round((calls.filter((c: Call) => c.status === 'completed').length / calls.length) * 100)}%` 
+              : "0%"} Successful
+          </p>
+        </Card>
+            
+        <Card className="p-4 flex flex-col">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Successful Calls</h3>
+              <HoverCard>
+                <HoverCardTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
+                    <Info className="h-3 w-3 text-muted-foreground" />
+                    <span className="sr-only">Info</span>
+                  </Button>
+                </HoverCardTrigger>
+                <HoverCardContent className="w-80">
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Successful Calls</h4>
+                    <p className="text-sm text-muted-foreground">
+                      The number of calls that were successfully completed, regardless of outcome.
+                    </p>
+                  </div>
+                </HoverCardContent>
+              </HoverCard>
+            </div>
+            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+          </div>
+          <p className="text-2xl font-bold mt-2">
+            {calls.filter((c: Call) => c.status === 'completed').length}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            completed successfully
+          </p>
+        </Card>
+            
+        <Card className="p-4 flex flex-col">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Avg. Call Duration</h3>
+              <HoverCard>
+                <HoverCardTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
+                    <Info className="h-3 w-3 text-muted-foreground" />
+                    <span className="sr-only">Info</span>
+                  </Button>
+                </HoverCardTrigger>
+                <HoverCardContent className="w-80">
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Average Duration</h4>
+                    <p className="text-sm text-muted-foreground">
+                      The average length of time for all calls in your history, including talk time and hold time.
+                    </p>
+                  </div>
+                </HoverCardContent>
+              </HoverCard>
+            </div>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </div>
+          <p className="text-2xl font-bold mt-2">
+            {formatDuration(calls.length > 0 ? Math.round(calls.reduce((acc: number, call: Call) => acc + (call.duration || 0), 0) / calls.length) : 0)}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            per call
+          </p>
+        </Card>
+            
+        <Card className="p-4 flex flex-col">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Interested Leads</h3>
+              <HoverCard>
+                <HoverCardTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
+                    <Info className="h-3 w-3 text-muted-foreground" />
+                    <span className="sr-only">Info</span>
+                  </Button>
+                </HoverCardTrigger>
+                <HoverCardContent className="w-80">
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Interested Leads</h4>
+                    <p className="text-sm text-muted-foreground">
+                      The number of calls that resulted in interested leads showing positive engagement.
+                    </p>
+                  </div>
+                </HoverCardContent>
+              </HoverCard>
+            </div>
+            <AlertCircle className="h-4 w-4 text-muted-foreground" />
+          </div>
+          <p className="text-2xl font-bold mt-2">
+            {calls.filter((c: Call) => c.outcome === 'interested').length}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            positive responses
+          </p>
+        </Card>
+      </div>
 
-          {/* Filters */}
-          <Collapsible className="w-full mt-4">
-            <Card>
-              <CardHeader className="p-3 sm:p-4">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base sm:text-lg">Filters</CardTitle>
-                  <CollapsibleTrigger asChild>
-                    <Button variant="ghost" size="sm" className="p-0 h-8 w-8">
-                      <ChevronDown className="h-4 w-4" />
-                      <span className="sr-only">Toggle filters</span>
-                    </Button>
-                  </CollapsibleTrigger>
+      {/* Filters */}
+      <Collapsible className="w-full mt-4">
+        <Card>
+          <CardHeader className="p-3 sm:p-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base sm:text-lg">Filters</CardTitle>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="p-0 h-8 w-8">
+                  <ChevronDown className="h-4 w-4" />
+                  <span className="sr-only">Toggle filters</span>
+                </Button>
+              </CollapsibleTrigger>
+            </div>
+          </CardHeader>
+          <CollapsibleContent>
+            <CardContent className="pt-0 px-3 sm:px-4 pb-4">
+              <div className="flex flex-col space-y-4 sm:flex-row sm:gap-4 sm:space-y-0">
+                <div className="flex-1 min-w-0">
+                  <div className="relative">
+                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search calls by lead, phone, or campaign..."
+                      value={searchTerm}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
+                      className="pl-8"
+                    />
+                  </div>
                 </div>
-              </CardHeader>
-              <CollapsibleContent>
-                <CardContent className="pt-0 px-3 sm:px-4 pb-4">
-                  <div className="flex flex-col space-y-4 sm:flex-row sm:gap-4 sm:space-y-0">
-                    <div className="flex-1 min-w-0">
-                      <div className="relative">
-                        <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          placeholder="Search calls by lead, phone, or campaign..."
-                          value={searchTerm}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
-                          className="pl-8"
-                        />
-                      </div>
-                    </div>
-                    <div className="w-full sm:w-48">
-                      <Select
-                        value={statusFilter}
-                        onValueChange={setStatusFilter}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Statuses</SelectItem>
-                          <SelectItem value="completed">Completed</SelectItem>
-                          <SelectItem value="failed">Failed</SelectItem>
-                          <SelectItem value="in-progress">In Progress</SelectItem>
-                          <SelectItem value="scheduled">Scheduled</SelectItem>
-                          <SelectItem value="no-answer">No Answer</SelectItem>
-                          <SelectItem value="busy">Busy</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </CardContent>
-              </CollapsibleContent>
-            </Card>
-          </Collapsible>
-
-          {/* Calls List */}
-          <Card className="mt-4">
-            <CardHeader>
-              <CardTitle>Recent Calls</CardTitle>
-              <CardDescription>
-                {filteredCalls.length} call{filteredCalls.length !== 1 ? 's' : ''} found
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-3 sm:p-6">
-              <div className="space-y-4">
-                {filteredCalls.map((call: Call) => (
-                  <div key={call._id}>
-                    {/* Desktop Layout - Hidden on mobile */}
-                    <div className="hidden lg:block">
-                      <div className="flex flex-col">
-                        <ResizablePanelGroup
-                          direction="horizontal"
-                          className="border rounded-lg hover:bg-muted/50 transition-colors"
-                        >
-                          <ResizablePanel defaultSize={70}>
-                            <div className="grid grid-cols-3 items-center gap-4 p-4 h-full">
-                              <div className="flex items-center space-x-3 col-span-1">
-                                {getStatusIcon(call.status)}
-                                <div>
-                                  <p className="font-medium truncate">{call.leadId?.name || 'Unknown Lead'}</p>
-                                  <p className="text-sm text-muted-foreground">{call.phoneNumber}</p>
-                                </div>
-                              </div>
-                              <div className="col-span-2">
-                                <p className="text-sm font-medium truncate">{call.campaignId?.name || 'Unknown Campaign'}</p>
-                                <p className="text-sm text-muted-foreground">
-                                  {call.startTime ? new Date(call.startTime).toLocaleString() : 'N/A'}
-                                </p>
-                              </div>
-                            </div>
-                          </ResizablePanel>
-                          
-                          <ResizableHandle withHandle />
-                          
-                          <ResizablePanel defaultSize={30}>
-                            <div className="flex items-center justify-end space-x-2 p-4 h-full">
-                              <div className="text-right flex-shrink-0">
-                                <p className="text-sm font-medium">{formatDuration(call.duration)}</p>
-                                {getOutcomeBadge(call.outcome)}
-                              </div>
-                              {call.recordingUrl && (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button 
-                                      variant="outline" 
-                                      size="icon"
-                                      className="h-8 w-8"
-                                    >
-                                      <MoreVertical className="h-4 w-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem 
-                                      onClick={() => {
-                                        // Stop any currently playing audio when toggling
-                                        setCurrentPlayingId(null);
-                                        setCalls(prevCalls => 
-                                          prevCalls.map(c => 
-                                            c._id === call._id 
-                                              ? { ...c, expandedRecording: !c.expandedRecording } 
-                                              : c
-                                          )
-                                        );
-                                      }}
-                                    >
-                                      <Volume2 className="h-4 w-4 mr-2" />
-                                      {call.expandedRecording ? 'Hide' : 'Show'} Audio Player
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem 
-                                      onClick={async () => {
-                                        try {
-                                          const response = await fetch(call.recordingUrl!);
-                                          const blob = await response.blob();
-                                          const url = window.URL.createObjectURL(blob);
-                                          const a = document.createElement('a');
-                                          a.href = url;
-                                          a.download = `${call.leadId?.name || 'call'}-${call._id}.mp3`;
-                                          document.body.appendChild(a);
-                                          a.click();
-                                          window.URL.revokeObjectURL(url);
-                                          document.body.removeChild(a);
-                                        } catch (error) {
-                                          console.error('Download failed:', error);
-                                        }
-                                      }}
-                                    >
-                                      <Download className="h-4 w-4 mr-2" />
-                                      Download Recording
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              )}
-                              <Button 
-                                variant="ghost" 
-                                size="icon"
-                                onClick={() => handleRefreshRecording(call._id)}
-                                disabled={isRefreshingRecording === call._id}
-                                title="Refresh recording"
-                                className="h-8 w-8"
-                              >
-                                <RotateCcw className={`h-4 w-4 ${isRefreshingRecording === call._id ? 'animate-spin' : ''}`} />
-                              </Button>
-                            </div>
-                          </ResizablePanel>
-                        </ResizablePanelGroup>
-                        
-                        {call.expandedRecording && call.recordingUrl && (
-                          <AudioPlayer
-                            audioUrl={call.recordingUrl.startsWith('http') 
-                              ? call.recordingUrl 
-                              : `${import.meta.env.VITE_API_BASE_URL || ''}${call.recordingUrl}`}
-                            isPlaying={currentPlayingId === call._id}
-                            onPlayPause={(playing) => setCurrentPlayingId(playing ? call._id : null)}
-                            callId={call._id}
-                            leadName={call.leadId?.name}
-                            campaignName={call.campaignId?.name}
-                          />
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* Mobile Layout - Hidden on desktop */}
-                    <div className="lg:hidden">
-                      <Card className="hover:bg-muted/50 transition-colors">
-                        <CardContent className="p-4">
-                          <div className="space-y-3">
-                            <div className="flex items-start justify-between">
-                              <div className="flex items-center space-x-2 min-w-0 flex-1">
-                                {getStatusIcon(call.status)}
-                                <div className="min-w-0 flex-1">
-                                  <p className="font-medium truncate">{call.leadId?.name || 'Unknown Lead'}</p>
-                                  <p className="text-sm text-muted-foreground truncate">{call.phoneNumber}</p>
-                                </div>
-                              </div>
-                              <div className="flex-shrink-0 ml-2">
-                                {getOutcomeBadge(call.outcome)}
-                              </div>
-                            </div>
-
-                            <div className="space-y-1 text-sm">
-                              <p className="font-medium truncate">{call.campaignId?.name || 'Unknown Campaign'}</p>
-                              <p className="text-muted-foreground">
-                                {call.startTime ? new Date(call.startTime).toLocaleString() : 'N/A'}
-                              </p>
-                            </div>
-
-                            <div className="flex items-center justify-between pt-2 border-t mt-2">
-                              <div className="text-sm font-medium">
-                                Duration: {formatDuration(call.duration)}
-                              </div>
-                              <div className="flex space-x-1">
-                                {call.recordingUrl && (
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button 
-                                        variant="outline" 
-                                        size="sm"
-                                        className="flex-shrink-0"
-                                      >
-                                        <MoreVertical className="h-4 w-4 mr-1" />
-                                        Audio
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                      <DropdownMenuItem 
-                                        onClick={() => {
-                                          // Stop any currently playing audio when toggling
-                                          setCurrentPlayingId(null);
-                                          setCalls(prevCalls => 
-                                            prevCalls.map(c => 
-                                              c._id === call._id 
-                                                ? { ...c, expandedRecording: !c.expandedRecording } 
-                                                : c
-                                            )
-                                          );
-                                        }}
-                                      >
-                                        <Volume2 className="h-4 w-4 mr-2" />
-                                        {call.expandedRecording ? 'Hide' : 'Show'} Audio Player
-                                      </DropdownMenuItem>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem 
-                                        onClick={async () => {
-                                          try {
-                                            const response = await fetch(call.recordingUrl!);
-                                            const blob = await response.blob();
-                                            const url = window.URL.createObjectURL(blob);
-                                            const a = document.createElement('a');
-                                            a.href = url;
-                                            a.download = `${call.leadId?.name || 'call'}-${call._id}.mp3`;
-                                            document.body.appendChild(a);
-                                            a.click();
-                                            window.URL.revokeObjectURL(url);
-                                            document.body.removeChild(a);
-                                          } catch (error) {
-                                            console.error('Download failed:', error);
-                                          }
-                                        }}
-                                      >
-                                        <Download className="h-4 w-4 mr-2" />
-                                        Download Recording
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                )}
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon"
-                                  onClick={() => handleRefreshRecording(call._id)}
-                                  disabled={isRefreshingRecording === call._id}
-                                  title="Refresh recording"
-                                  className="h-8 w-8"
-                                >
-                                  <RotateCcw className={`h-4 w-4 ${isRefreshingRecording === call._id ? 'animate-spin' : ''}`} />
-                                </Button>
-                              </div>
-                            </div>
-                            
-                            {call.expandedRecording && call.recordingUrl && (
-                              <div className="mt-2">
-                                <AudioPlayer
-                                  audioUrl={call.recordingUrl.startsWith('http') 
-                                    ? call.recordingUrl 
-                                    : `${import.meta.env.VITE_API_BASE_URL || ''}${call.recordingUrl}`}
-                                  isPlaying={currentPlayingId === call._id}
-                                  onPlayPause={(playing) => setCurrentPlayingId(playing ? call._id : null)}
-                                  callId={call._id}
-                                  leadName={call.leadId?.name}
-                                  campaignName={call.campaignId?.name}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  </div>
-                ))}
-                {filteredCalls.length === 0 && (
-                  <div className="text-center py-8">
-                    <PhoneCall className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                    <p className="text-muted-foreground">No calls found matching your criteria.</p>
-                  </div>
-                )}
+                <div className="w-full sm:w-48">
+                  <Select
+                    value={statusFilter}
+                    onValueChange={setStatusFilter}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="failed">Failed</SelectItem>
+                      <SelectItem value="in-progress">In Progress</SelectItem>
+                      <SelectItem value="scheduled">Scheduled</SelectItem>
+                      <SelectItem value="no-answer">No Answer</SelectItem>
+                      <SelectItem value="busy">Busy</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </CardContent>
-          </Card>
-        </TabsContent>
-        
-        <TabsContent value="analysis">
-          <div className="text-center py-8 text-muted-foreground">
-            Call analysis features coming soon
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
+
+      {/* Calls List */}
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>Recent Calls</CardTitle>
+          <CardDescription>
+            {filteredCalls.length} call{filteredCalls.length !== 1 ? 's' : ''} found
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-3 sm:p-6">
+          <div className="space-y-4">
+            {filteredCalls.map((call: Call) => (
+              <div key={call._id}>
+                {/* Desktop Layout - Hidden on mobile */}
+                <div className="hidden lg:block">
+                  <div className="flex flex-col">
+                    <ResizablePanelGroup
+                      direction="horizontal"
+                      className="border rounded-lg hover:bg-muted/50 transition-colors"
+                    >
+                      <ResizablePanel defaultSize={70}>
+                        <div className="grid grid-cols-3 items-center gap-4 p-4 h-full">
+                          <div className="flex items-center space-x-3 col-span-1">
+                            {getStatusIcon(call.status)}
+                            <div>
+                              <p className="font-medium truncate">{call.leadId?.name || 'Unknown Lead'}</p>
+                              <p className="text-sm text-muted-foreground">{call.phoneNumber}</p>
+                            </div>
+                          </div>
+                          <div className="col-span-2">
+                            <p className="text-sm font-medium truncate">{call.campaignId?.name || 'Unknown Campaign'}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {call.startTime ? new Date(call.startTime).toLocaleString() : 'N/A'}
+                            </p>
+                          </div>
+                        </div>
+                      </ResizablePanel>
+                          
+                      <ResizableHandle withHandle />
+                          
+                      <ResizablePanel defaultSize={30}>
+                        <div className="flex items-center justify-end space-x-2 p-4 h-full">
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-sm font-medium">{formatDuration(call.duration)}</p>
+                            {getOutcomeBadge(call.outcome)}
+                          </div>
+                          {call.recordingUrl && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button 
+                                  variant="outline" 
+                                  size="icon"
+                                  className="h-8 w-8"
+                                >
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem 
+                                  onClick={() => {
+                                    // Stop any currently playing audio when toggling
+                                    setCurrentPlayingId(null);
+                                    setCalls(prevCalls => 
+                                      prevCalls.map(c => 
+                                        c._id === call._id 
+                                          ? { ...c, expandedRecording: !c.expandedRecording } 
+                                          : c
+                                      )
+                                    );
+                                  }}
+                                >
+                                  <Volume2 className="h-4 w-4 mr-2" />
+                                  {call.expandedRecording ? 'Hide' : 'Show'} Audio Player
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem 
+                                  onClick={async () => {
+                                    try {
+                                      const response = await fetch(call.recordingUrl!);
+                                      const blob = await response.blob();
+                                      const url = window.URL.createObjectURL(blob);
+                                      const a = document.createElement('a');
+                                      a.href = url;
+                                      a.download = `${call.leadId?.name || 'call'}-${call._id}.mp3`;
+                                      document.body.appendChild(a);
+                                      a.click();
+                                      window.URL.revokeObjectURL(url);
+                                      document.body.removeChild(a);
+                                    } catch (error) {
+                                      console.error('Download failed:', error);
+                                    }
+                                  }}
+                                >
+                                  <Download className="h-4 w-4 mr-2" />
+                                  Download Recording
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                          <Button 
+                            variant="ghost" 
+                            size="icon"
+                            onClick={() => handleRefreshRecording(call._id)}
+                            disabled={isRefreshingRecording === call._id}
+                            title="Refresh recording"
+                            className="h-8 w-8"
+                          >
+                            <RotateCcw className={`h-4 w-4 ${isRefreshingRecording === call._id ? 'animate-spin' : ''}`} />
+                          </Button>
+                        </div>
+                      </ResizablePanel>
+                    </ResizablePanelGroup>
+                        
+                    {call.expandedRecording && call.recordingUrl && (
+                      <AudioPlayer
+                        audioUrl={call.recordingUrl.startsWith('http') 
+                          ? call.recordingUrl 
+                          : `${import.meta.env.VITE_API_BASE_URL || ''}${call.recordingUrl}`}
+                        isPlaying={currentPlayingId === call._id}
+                        onPlayPause={(playing) => setCurrentPlayingId(playing ? call._id : null)}
+                        callId={call._id}
+                        leadName={call.leadId?.name}
+                        campaignName={call.campaignId?.name}
+                      />
+                    )}
+                  </div>
+                </div>
+                    
+                {/* Mobile Layout - Hidden on desktop */}
+                <div className="lg:hidden">
+                  <Card className="hover:bg-muted/50 transition-colors">
+                    <CardContent className="p-4">
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center space-x-2 min-w-0 flex-1">
+                            {getStatusIcon(call.status)}
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium truncate">{call.leadId?.name || 'Unknown Lead'}</p>
+                              <p className="text-sm text-muted-foreground truncate">{call.phoneNumber}</p>
+                            </div>
+                          </div>
+                          <div className="flex-shrink-0 ml-2">
+                            {getOutcomeBadge(call.outcome)}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1 text-sm">
+                          <p className="font-medium truncate">{call.campaignId?.name || 'Unknown Campaign'}</p>
+                          <p className="text-muted-foreground">
+                            {call.startTime ? new Date(call.startTime).toLocaleString() : 'N/A'}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t mt-2">
+                          <div className="text-sm font-medium">
+                            Duration: {formatDuration(call.duration)}
+                          </div>
+                          <div className="flex space-x-1">
+                            {call.recordingUrl && (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm"
+                                    className="flex-shrink-0"
+                                  >
+                                    <MoreVertical className="h-4 w-4 mr-1" />
+                                    Audio
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem 
+                                    onClick={() => {
+                                      // Stop any currently playing audio when toggling
+                                      setCurrentPlayingId(null);
+                                      setCalls(prevCalls => 
+                                        prevCalls.map(c => 
+                                          c._id === call._id 
+                                            ? { ...c, expandedRecording: !c.expandedRecording } 
+                                            : c
+                                        )
+                                      );
+                                    }}
+                                  >
+                                    <Volume2 className="h-4 w-4 mr-2" />
+                                    {call.expandedRecording ? 'Hide' : 'Show'} Audio Player
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem 
+                                    onClick={async () => {
+                                      try {
+                                        const response = await fetch(call.recordingUrl!);
+                                        const blob = await response.blob();
+                                        const url = window.URL.createObjectURL(blob);
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = `${call.leadId?.name || 'call'}-${call._id}.mp3`;
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        window.URL.revokeObjectURL(url);
+                                        document.body.removeChild(a);
+                                      } catch (error) {
+                                        console.error('Download failed:', error);
+                                      }
+                                    }}
+                                  >
+                                    <Download className="h-4 w-4 mr-2" />
+                                    Download Recording
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            )}
+                            <Button 
+                              variant="ghost" 
+                              size="icon"
+                              onClick={() => handleRefreshRecording(call._id)}
+                              disabled={isRefreshingRecording === call._id}
+                              title="Refresh recording"
+                              className="h-8 w-8"
+                            >
+                              <RotateCcw className={`h-4 w-4 ${isRefreshingRecording === call._id ? 'animate-spin' : ''}`} />
+                            </Button>
+                          </div>
+                        </div>
+                            
+                        {call.expandedRecording && call.recordingUrl && (
+                          <div className="mt-2">
+                            <AudioPlayer
+                              audioUrl={call.recordingUrl.startsWith('http') 
+                                ? call.recordingUrl 
+                                : `${import.meta.env.VITE_API_BASE_URL || ''}${call.recordingUrl}`}
+                              isPlaying={currentPlayingId === call._id}
+                              onPlayPause={(playing) => setCurrentPlayingId(playing ? call._id : null)}
+                              callId={call._id}
+                              leadName={call.leadId?.name}
+                              campaignName={call.campaignId?.name}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            ))}
+            {filteredCalls.length === 0 && (
+              <div className="text-center py-8">
+                <PhoneCall className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                <p className="text-muted-foreground">No calls found matching your criteria.</p>
+              </div>
+            )}
           </div>
-        </TabsContent>
-      </Tabs>
+        </CardContent>
+      </Card>
     </div>
   );
 };

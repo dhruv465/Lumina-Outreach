@@ -70,11 +70,6 @@ interface Campaign {
     endTime: string;
     timeZone: string;
   };
-  llmConfiguration: {
-    model: string;
-    temperature: number;
-    maxTokens: number;
-  };
   voiceConfiguration: {
     provider: string;
     voiceId: string;
@@ -825,27 +820,6 @@ const Campaigns = () => {
                       
                       {/* Configuration Sections */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="bg-card p-4 rounded-lg border">
-                          <h3 className="text-base font-medium flex items-center gap-2 mb-3 text-card-foreground">
-                            <Zap size={16} className="text-muted-foreground" />
-                            LLM Config
-                          </h3>
-                          <div className="space-y-2">
-                            <div className="space-y-1">
-                              <p className="text-xs text-muted-foreground">Model</p>
-                              <p className="text-sm font-medium">{selectedCampaign.llmConfiguration.model}</p>
-                            </div>
-                            <div className="space-y-1">
-                              <p className="text-xs text-muted-foreground">Temperature</p>
-                              <p className="text-sm font-medium">{selectedCampaign.llmConfiguration.temperature}</p>
-                            </div>
-                            <div className="space-y-1">
-                              <p className="text-xs text-muted-foreground">Max Tokens</p>
-                              <p className="text-sm font-medium">{selectedCampaign.llmConfiguration.maxTokens}</p>
-                            </div>
-                          </div>
-                        </div>
-                        
                         <div className="bg-card p-4 rounded-lg border">
                           <h3 className="text-base font-medium flex items-center gap-2 mb-3 text-card-foreground">
                             <Zap size={16} className="text-muted-foreground" />

@@ -53,15 +53,11 @@ export interface IConfiguration extends mongoose.Document {
   };
   complianceSettings: {
     recordCalls: boolean;
-    callIntroduction?: string;
     maxCallsPerLeadPerDay: number;
     callBlackoutPeriod: { start: string; end: string };
   };
   webhookConfig: { secret: string; lastVerified?: Date | null; status?: VerifyStatus };
-  errorMessages?: Record<string, string>;
-  closingScripts?: Record<string, string>;
   intentDetection?: { closingPhrases?: string[]; objectionPhrases?: string[] };
-  callResponses?: Record<string, string>;
   updatedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -146,7 +142,6 @@ const ConfigurationSchema = new mongoose.Schema(
     },
     complianceSettings: {
       recordCalls: { type: Boolean, default: true },
-      callIntroduction: { type: String, default: '' },
       maxCallsPerLeadPerDay: { type: Number, default: 1, min: 1, max: 5 },
       callBlackoutPeriod: {
         start: { type: String, default: '21:00' },
@@ -154,13 +149,10 @@ const ConfigurationSchema = new mongoose.Schema(
       },
     },
     webhookConfig: { secret: { type: String, default: '' } },
-    errorMessages: { type: mongoose.Schema.Types.Mixed, default: {} },
-    closingScripts: { type: mongoose.Schema.Types.Mixed, default: {} },
     intentDetection: {
       closingPhrases: { type: [String], default: [] },
       objectionPhrases: { type: [String], default: [] },
     },
-    callResponses: { type: mongoose.Schema.Types.Mixed, default: {} },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: false },
   },
   { timestamps: true },

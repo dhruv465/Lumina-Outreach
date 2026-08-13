@@ -168,11 +168,6 @@ const CallLeadSheet = ({
           endTime: '17:00',
           timeZone: 'Asia/Kolkata'
         },
-        llmConfiguration: {
-          model: 'gpt-4o',
-          temperature: 0.7,
-          maxTokens: 500
-        },
         voiceConfiguration: {
           provider: 'elevenlabs',
           voiceId: '',

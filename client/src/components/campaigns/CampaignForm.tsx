@@ -57,11 +57,6 @@ interface CampaignFormData {
     endTime: string;
     timeZone: string;
   };
-  llmConfiguration: {
-    model: string;
-    temperature: number;
-    maxTokens: number;
-  };
   voiceConfiguration: {
     provider: string;
     voiceId: string;
@@ -130,11 +125,6 @@ const initialFormState: CampaignFormData = {
     startTime: "09:00",
     endTime: "17:00",
     timeZone: "Asia/Kolkata",
-  },
-  llmConfiguration: {
-    model: "",
-    temperature: 0.7,
-    maxTokens: 500,
   },
   voiceConfiguration: {
     provider: "deepgram",
@@ -241,11 +231,6 @@ const CampaignForm = ({
           endTime: campaignData.callTiming?.endTime || "17:00",
           timeZone: campaignData.callTiming?.timeZone || "Asia/Kolkata",
         },
-        llmConfiguration: {
-          model: campaignData.llmConfiguration?.model || "",
-          temperature: campaignData.llmConfiguration?.temperature || 0.7,
-          maxTokens: campaignData.llmConfiguration?.maxTokens || 500,
-        },
         voiceConfiguration: {
           provider: "deepgram",
           voiceId: campaignData.voiceConfiguration?.voiceId || "",
@@ -316,14 +301,9 @@ const CampaignForm = ({
     try {
       setIsLoading(true);
       const config = await configApi.getConfiguration();
-      const [llmOptionsResult, voiceOptionsResult] = await Promise.allSettled([
-        configApi.getLLMOptions(),
+      const [voiceOptionsResult] = await Promise.allSettled([
         configApi.getVoiceOptions(),
       ]);
-      const llmOptions =
-        llmOptionsResult.status === "fulfilled"
-          ? llmOptionsResult.value
-          : { providers: [] };
       const voiceOptions =
         voiceOptionsResult.status === "fulfilled"
           ? voiceOptionsResult.value
@@ -345,16 +325,6 @@ const CampaignForm = ({
         deepgram: deepgramVoices,
       }));
 
-      const providerInfo = llmOptions.providers?.find(
-        (provider: { value?: string }) =>
-          provider.value === config.llmConfig?.defaultProvider
-      );
-      const providerModels = Array.isArray(providerInfo?.models)
-        ? providerInfo.models.flatMap(
-            (model: { value?: string }) => model.value ? [model.value] : []
-          )
-        : [];
-
       // Only update form data if not editing an existing campaign
       if (!campaignId) {
         const bestProvider = "deepgram";
@@ -365,9 +335,6 @@ const CampaignForm = ({
         );
 
         // Determine best LLM model
-        const bestModel =
-          config.llmConfig?.defaultModel || providerModels[0] || "";
-
         // Ensure we have a valid date
         const today = new Date();
 
@@ -375,15 +342,6 @@ const CampaignForm = ({
         setFormData((prev) => ({
           ...prev,
           startDate: today,
-          llmConfiguration: {
-            ...prev.llmConfiguration,
-            model: bestModel,
-            temperature:
-              config.llmConfig?.temperature ||
-              prev.llmConfiguration.temperature,
-            maxTokens:
-              config.llmConfig?.maxTokens || prev.llmConfiguration.maxTokens,
-          },
           voiceConfiguration: {
             ...prev.voiceConfiguration,
             provider: bestProvider,
@@ -403,7 +361,6 @@ const CampaignForm = ({
         console.log("Set required fields from system config:", {
           startDate: today,
           voiceId: bestVoiceId,
-          model: bestModel,
         });
       }
 
@@ -734,17 +691,6 @@ const CampaignForm = ({
           startTime: formData.callTiming.startTime,
           endTime: formData.callTiming.endTime,
           timeZone: formData.callTiming.timeZone,
-        },
-        llmConfiguration: {
-          // The agent takes its LLM from the account-level provider config, not
-          // from the campaign, but Campaign.llmConfiguration.model is a required
-          // schema field - so keep sending a non-empty value.
-          model:
-            formData.llmConfiguration.model ||
-            systemConfig?.llmConfig?.model ||
-            "gpt-4o",
-          temperature: Number(formData.llmConfiguration.temperature) || 0.7,
-          maxTokens: Number(formData.llmConfiguration.maxTokens) || 500,
         },
         voiceConfiguration: {
           provider: "deepgram",

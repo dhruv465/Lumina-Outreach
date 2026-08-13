@@ -553,6 +553,23 @@ process.on("uncaughtException", (error: Error) => {
 const gracefulShutdown = (signal: string) => {
   logger.info(`Received ${signal}. Starting graceful shutdown...`);
 
+  // Disconnect Socket.IO clients first, while the transport is still up.
+  //
+  // Not io.close(): that closes the underlying HTTP server, which Fastify owns
+  // and is about to close itself - doing it here only raises
+  // ERR_SERVER_NOT_RUNNING. And not from inside the app.close callback either:
+  // closing the HTTP server destroys the connections, so by the time the
+  // callback runs there is nothing left to disconnect. Measured with a client
+  // demonstrably connected, that path reported 0 open sockets.
+  //
+  // The old code called io.close(cb) without awaiting it and ran
+  // process.exit(0) on the next line, so the callback never fired, its error
+  // went unseen, and clients had the connection yanked instead of being told
+  // to go away.
+  const openSockets = io.sockets.sockets.size;
+  io.disconnectSockets(true);
+  logger.info(`Socket.IO clients disconnected (${openSockets} open)`);
+
   // Stop accepting new connections
   app.close(async () => {
     logger.info("HTTP server closed");
@@ -567,19 +584,17 @@ const gracefulShutdown = (signal: string) => {
       // reload wedged the old process and the port stayed dead until it was
       // killed by hand. Keep every import in this handler at the top of file.
 
+      // Socket.IO first, then the database: a socket handler still mid-flight
+      // when the Mongo client goes away would fail on a closed connection.
+      //
+      // io.close is callback-style. It used to be called without being awaited,
+      // with process.exit(0) on the very next line, so the callback never ran
+      // and live sockets were severed rather than closed - "Socket.IO server
+      // closed" had never once appeared in a shutdown log.
       // Close database connections
       logger.info("Closing database connection...");
       await mongoose.connection.close();
       logger.info("Database connections closed");
-
-      // Close Socket.IO connections
-      io.close((err) => {
-        if (err) {
-          logger.error("Error closing Socket.IO:", err);
-        } else {
-          logger.info("Socket.IO server closed");
-        }
-      });
 
       logger.info("Graceful shutdown completed");
       process.exit(0);

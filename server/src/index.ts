@@ -562,10 +562,10 @@ const gracefulShutdown = (signal: string) => {
       // restart SIGTERMs this process while tearing the compiler down, so a
       // lazy require() of a local .ts module blocks forever - and because
       // require() is synchronous it also blocks the event loop, which stops
-      // the force-exit timer below from ever firing. That is exactly what a
-      // require("./utils/tempFileCleanup") here used to do: every hot reload
-      // wedged the old process and the port stayed dead until it was killed
-      // by hand. Keep every import in this handler at the top of the file.
+      // the force-exit timer below from ever firing. A lazy require of a
+      // since-deleted temp-file cleanup util here did exactly that: every hot
+      // reload wedged the old process and the port stayed dead until it was
+      // killed by hand. Keep every import in this handler at the top of file.
 
       // Close database connections
       logger.info("Closing database connection...");

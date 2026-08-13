@@ -59,7 +59,6 @@ interface CampaignFormData {
   };
   llmConfiguration: {
     model: string;
-    systemPrompt: string;
     temperature: number;
     maxTokens: number;
   };
@@ -134,8 +133,6 @@ const initialFormState: CampaignFormData = {
   },
   llmConfiguration: {
     model: "",
-    systemPrompt:
-      "You are an AI assistant making a call on behalf of a company. Be professional, friendly, and helpful.",
     temperature: 0.7,
     maxTokens: 500,
   },
@@ -246,9 +243,6 @@ const CampaignForm = ({
         },
         llmConfiguration: {
           model: campaignData.llmConfiguration?.model || "",
-          systemPrompt:
-            campaignData.llmConfiguration?.systemPrompt ||
-            "You are an AI assistant making a call on behalf of a company. Be professional, friendly, and helpful.",
           temperature: campaignData.llmConfiguration?.temperature || 0.7,
           maxTokens: campaignData.llmConfiguration?.maxTokens || 500,
         },
@@ -370,11 +364,6 @@ const CampaignForm = ({
           config.deepgramConfig?.ttsVoice
         );
 
-        // Determine best system prompt
-        const bestSystemPrompt =
-          config.generalSettings?.defaultSystemPrompt ||
-          "You are an AI assistant making a call on behalf of a company. Be professional, friendly, and helpful.";
-
         // Determine best LLM model
         const bestModel =
           config.llmConfig?.defaultModel || providerModels[0] || "";
@@ -389,7 +378,6 @@ const CampaignForm = ({
           llmConfiguration: {
             ...prev.llmConfiguration,
             model: bestModel,
-            systemPrompt: bestSystemPrompt,
             temperature:
               config.llmConfig?.temperature ||
               prev.llmConfiguration.temperature,
@@ -414,7 +402,6 @@ const CampaignForm = ({
         // Log the important values to verify they're set
         console.log("Set required fields from system config:", {
           startDate: today,
-          systemPrompt: bestSystemPrompt,
           voiceId: bestVoiceId,
           model: bestModel,
         });
@@ -434,12 +421,6 @@ const CampaignForm = ({
         setFormData((prev) => ({
           ...prev,
           startDate: new Date(),
-          llmConfiguration: {
-            ...prev.llmConfiguration,
-            systemPrompt:
-              systemConfig?.generalSettings?.defaultSystemPrompt ||
-              "You are an AI assistant making a call on behalf of a company.",
-          },
           voiceConfiguration: {
             ...prev.voiceConfiguration,
             voiceId: "", // Don't use default-voice-id fallback
@@ -762,10 +743,6 @@ const CampaignForm = ({
             formData.llmConfiguration.model ||
             systemConfig?.llmConfig?.model ||
             "gpt-4o",
-          // Ensure systemPrompt is always provided as a non-empty string
-          systemPrompt:
-            formData.llmConfiguration.systemPrompt ||
-            "You are an AI assistant making a call on behalf of a company. Be professional, friendly, and helpful.",
           temperature: Number(formData.llmConfiguration.temperature) || 0.7,
           maxTokens: Number(formData.llmConfiguration.maxTokens) || 500,
         },
@@ -784,7 +761,6 @@ const CampaignForm = ({
       // Debug log to verify required fields are present
       console.log("Critical fields check:", {
         startDate: submissionData.startDate,
-        systemPrompt: submissionData.llmConfiguration.systemPrompt,
         voiceId: submissionData.voiceConfiguration.voiceId,
       });
 
@@ -792,13 +768,6 @@ const CampaignForm = ({
       if (!submissionData.startDate) {
         console.error("startDate is still missing after all validations");
         submissionData.startDate = new Date().toISOString();
-      }
-
-      if (!submissionData.llmConfiguration.systemPrompt) {
-        console.error("systemPrompt is still missing after all validations");
-        submissionData.llmConfiguration.systemPrompt =
-          systemConfig?.generalSettings?.defaultSystemPrompt ||
-          "You are an AI assistant making a call on behalf of a company.";
       }
 
       if (!submissionData.voiceConfiguration.voiceId) {
@@ -817,13 +786,6 @@ const CampaignForm = ({
         submissionData.startDate = new Date().toISOString();
       }
 
-      // 2. Ensure systemPrompt is a non-empty string
-      if (!submissionData.llmConfiguration.systemPrompt) {
-        submissionData.llmConfiguration.systemPrompt =
-          systemConfig?.generalSettings?.defaultSystemPrompt ||
-          "You are an AI assistant making a call on behalf of a company.";
-      }
-
       // 3. Ensure voiceId is a non-empty Deepgram Aura voice.
       if (!submissionData.voiceConfiguration.voiceId) {
         submissionData.voiceConfiguration.voiceId = normalizedVoiceId;
@@ -832,7 +794,6 @@ const CampaignForm = ({
       // Double-check that the required fields are present and log them
       const sanitizationCheck = {
         startDate: !!submissionData.startDate,
-        systemPrompt: !!submissionData.llmConfiguration.systemPrompt,
         voiceId: !!submissionData.voiceConfiguration.voiceId,
       };
 
@@ -892,7 +853,6 @@ const CampaignForm = ({
       // Log the current state of the critical fields for debugging
       console.error("Current form data state:", {
         startDate: formData.startDate,
-        systemPrompt: formData.llmConfiguration.systemPrompt,
         voiceId: formData.voiceConfiguration.voiceId,
       });
 
@@ -1214,8 +1174,6 @@ const CampaignForm = ({
                           Script Content *
                         </label>
                         <div className="text-xs text-muted-foreground mb-2">
-                          You can use variables like {"{agent_name}"},{" "}
-                          {"{company_name}"}, {"{product_name}"} in your script.
                         </div>
                         <textarea
                           name="script.content"

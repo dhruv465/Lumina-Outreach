@@ -65,7 +65,6 @@ const CallLeadSheet = ({
   const [callStatus, setCallStatus] = useState<'idle' | 'connecting' | 'connected' | 'completed' | 'failed'>('idle');
   const [notes, setNotes] = useState('');
   const [configStatus, setConfigStatus] = useState<ConfigurationStatus | null>(null);
-  const [, setSystemConfig] = useState<any>(null);
 
   // Load campaigns when component mounts
   useEffect(() => {
@@ -122,14 +121,6 @@ const CallLeadSheet = ({
     const checkConfig = async () => {
       const status = await checkTelephonyConfiguration();
       setConfigStatus(status);
-      
-      // Fetch system configuration for defaultSystemPrompt
-      try {
-        const configResponse = await api.get('/configuration');
-        setSystemConfig(configResponse.data);
-      } catch (error) {
-        console.error('Error loading system configuration:', error);
-      }
     };
     
     if (open) {
@@ -179,7 +170,6 @@ const CallLeadSheet = ({
         },
         llmConfiguration: {
           model: 'gpt-4o',
-          systemPrompt: 'You are an AI assistant making a call on behalf of a company. Be professional, friendly, and helpful.',
           temperature: 0.7,
           maxTokens: 500
         },

@@ -43,7 +43,6 @@ export interface IConfiguration extends mongoose.Document {
     callRetryAttempts: number;
     callRetryDelay: number;
     maxCallDuration: number;
-    defaultSystemPrompt: string;
     defaultTimeZone: string;
     workingHours: {
       start: string;
@@ -133,11 +132,6 @@ const ConfigurationSchema = new mongoose.Schema(
       callRetryAttempts: { type: Number, default: 3, min: 0, max: 10 },
       callRetryDelay: { type: Number, default: 60, min: 15, max: 1440 },
       maxCallDuration: { type: Number, default: 300, min: 30, max: 3600 },
-      defaultSystemPrompt: {
-        type: String,
-        default:
-          'You are a professional sales representative making cold calls. Be polite, respectful, and helpful.',
-      },
       defaultTimeZone: { type: String, default: 'America/New_York' },
       workingHours: {
         start: { type: String, default: '09:00' },

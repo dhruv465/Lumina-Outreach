@@ -72,7 +72,6 @@ interface Campaign {
   };
   llmConfiguration: {
     model: string;
-    systemPrompt: string;
     temperature: number;
     maxTokens: number;
   };

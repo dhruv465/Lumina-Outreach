@@ -34,7 +34,6 @@ export interface ICampaign extends mongoose.Document {
   };
   llmConfiguration: {
     model: string;
-    systemPrompt: string;
     temperature: number;
     maxTokens: number;
   };
@@ -174,10 +173,6 @@ const CampaignSchema = new mongoose.Schema(
         type: String,
         required: [true, 'Please specify an LLM model'],
         default: 'gpt-4o',
-      },
-      systemPrompt: {
-        type: String,
-        required: [true, 'Please provide a system prompt'],
       },
       temperature: {
         type: Number,

@@ -558,14 +558,14 @@ const gracefulShutdown = (signal: string) => {
     logger.info("HTTP server closed");
 
     try {
-      // Stop temp file cleanup process
-      const { TempFileCleanup } = require("./utils/tempFileCleanup");
-      TempFileCleanup.stopPeriodicCleanup();
-
-      // Perform final cleanup of temp files
-      TempFileCleanup.emergencyCleanup();
-
-      // Clean up enhanced WebSocket connections
+      // Nothing may be require()d from here on. Under ts-node-dev a watch
+      // restart SIGTERMs this process while tearing the compiler down, so a
+      // lazy require() of a local .ts module blocks forever - and because
+      // require() is synchronous it also blocks the event loop, which stops
+      // the force-exit timer below from ever firing. That is exactly what a
+      // require("./utils/tempFileCleanup") here used to do: every hot reload
+      // wedged the old process and the port stayed dead until it was killed
+      // by hand. Keep every import in this handler at the top of the file.
 
       // Close database connections
       logger.info("Closing database connection...");

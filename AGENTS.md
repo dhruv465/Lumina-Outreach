@@ -1,73 +1,80 @@
 <claude-mem-context>
 # Memory Context
 
-# $CMEM Project Lumina 2026-07-10 11:22am GMT+5:30
+# [Project Lumina] recent context, 2026-07-16 9:21am GMT+5:30
 
-Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
+Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (22,071t read) | 1,596,691t work | 99% savings
+Stats: 50 obs (16,028t read) | 515,687t work | 97% savings
 
-### May 28, 2026
-975 1:41p 🔵 Launch readiness plan shows Phase 1 code features completed, awaiting infrastructure deployment
-976 " ✅ README transformed from technical developer guide to marketing-focused industrial platform overview
-980 1:42p 🟣 BullMQ distributed queue system implemented for batch call processing with Redis backend
-981 " 🟣 Complete Human-in-the-Loop AI training system with Dialogflow CX integration for continuous NLU improvement
-982 " 🟣 JWT token caching with NodeCache reduces authentication overhead by 95% for repeated requests
-983 " 🟣 Redis service with automatic NodeCache fallback enables graceful degradation when Redis unavailable
-984 " 🔵 Google Cloud service account credentials shared between Dialogflow CX and Google Sheets services
-### May 30, 2026
-1008 12:20a 🔵 Retrieved Project Lumina audit history and architecture from memory system
-1010 12:21a 🔵 Project Lumina has extensive uncommitted changes blocking launch readiness
-1011 " 🔵 Network connectivity issue preventing GitHub remote operations
-1013 " ✅ README transformed into marketing-focused "Industrial Conversational AI Platform" pitch
-1014 " 🟣 Human-in-the-loop AI training dashboard with feedback loop and retraining triggers
-1015 " 🟣 PII masking service automatically scrubs sensitive data from logs and exports
-1016 " 🟣 Google Sheets integration enables automated lead data export and CRM sync
-1017 " 🟣 Batch call controller and service infrastructure for distributed queue-based calling
-1018 " ✅ Added role-based access control middleware for admin and manager permissions
-1019 " ✅ Debug and health routes enhanced with proper logging and monitoring endpoints
-1020 " ✅ Production dependencies added for enterprise features: Sentry, BullMQ, document parsing, and Google APIs
-1021 " ⚖️ LAUNCH_TODO.md establishes 5-phase production rollout plan with Phase 1 marked complete
-1022 12:23a 🟣 BullMQ-based distributed job queue orchestrates batch calling with Redis backend
-1023 " 🟣 Daily automated AI retraining cron job pushes corrected utterances to Dialogflow CX at 2 AM
-1024 " ✅ Dashboard redesigned with action-oriented UI replacing passive activity feeds
-1025 " ✅ Notification UI enhanced with mobile-responsive design and styled notification cards
-1026 " 🔵 Google Cloud service account credentials file not properly excluded from git tracking
-1027 1:24p 🔵 Project Lumina is an enterprise conversational AI platform for voice outreach with major refactoring in progress
-1028 1:25p 🟣 Batch calling infrastructure implemented with BullMQ distributed queue and budget controls
-1032 1:26p 🟣 Human-in-the-Loop AI training dashboard with Dialogflow CX auto-retraining pipeline
-1033 " 🔵 Redis session management includes NodeCache fallback when USE_MEMORY_STORE flag is set or Redis unavailable
-1034 " 🔵 Google service account credentials stored in repository as lumina-outreach-c4082e500293.json
-1035 1:27p 🔵 AI Training dashboard displays hardcoded placeholder metrics instead of calculated statistics
-1036 " 🔵 Role-based access control middleware exists but is minimally applied across API routes
-### Jun 3, 2026
-1125 10:16p 🔵 Project Lumina current state and architecture from SecBrain audit
-1126 10:17p 🔵 Human-in-the-loop AI training system with Dialogflow CX integration
-1127 " 🔵 Production infrastructure with Redis fallback and Docker containerization
-1128 " 🔵 Authentication system uses email/password only with problematic 500 error responses
-1129 " ✅ Enhanced environment configuration and gitignore for production secrets
-1130 10:19p 🔵 Industrial batch calling system powered by BullMQ job queue with budget controls
-### Jun 4, 2026
-1131 12:49a 🔵 Extensive uncommitted work including batch calling, feedback system, and Docker deployment
-1132 12:50a 🔵 Google Cloud credentials file security exposure despite recent cleanup commit
-1133 " 🔵 Production launch readiness phase tracking in LAUNCH_TODO.md
-1134 " 🟣 Batch calling system with BullMQ queueing fully implemented but uncommitted
-1135 " 🟣 Human-in-the-loop AI training dashboard with Dialogflow CX retraining pipeline
-### Jul 8, 2026
-1217 10:20a 🟣 LiveKit voice pipeline integration architecture implemented
-1218 " ✅ LLM provider switched from Gemini to OpenAI GPT-4
-1219 " 🔴 Live environment configuration fixes for gate testing
-1220 " 🔵 Barge-in failure root cause: false-interruption auto-resume timing
-1221 " ⚖️ Subagent development with per-task implementer and reviewer agents
-1222 2:56p ✅ LiveKit agent worker background process stopped
-### Jul 9, 2026
-1223 10:49a ⚖️ LiveKit Migration Architecture - Redis Dependency Assessment
-### Jul 10, 2026
-1224 10:35a ✅ ngrok tunnel URL updated
+### Jul 12, 2026
+S36 Configuration Component Refactor - Webhook Removal and LLM Provider UI Redesign (Jul 12 at 11:21 PM)
+1330 11:30p 🔴 Fixed barge-in (interruption) bug blocking Phase 2 gate
+### Jul 13, 2026
+1339 1:38p 🔴 LiveKit Voice Agent Barge-In Interruption Fix
+1340 " 🔄 Redis and BullMQ Removed from Batch Calling System
+1341 " 🔴 E.164 Phone Number Formatting Fix for SIP Calls
+1342 " ✅ Complete Legacy Voice Pipeline Removal
+1343 " 🔐 Call Feedback and Batch Call IDOR Vulnerabilities Fixed
+1344 " 🟣 LiveKit Phase 3 Features Implemented
+1345 " ✅ LiveKit Integration Branch Merged and Deployed to Main
+1346 1:39p 🔵 Client Lint Errors Identified in Post-Merge Cleanup
+1347 1:41p 🔄 Webhook Configuration Feature Removal from Client
+1348 1:42p 🔄 Webhook Secret Configuration Removal - Nearly Complete
+S39 Implement dynamic LLM model fetching from user API keys and update SecBrain documentation (Jul 13 at 1:48 PM)
+1360 2:01p 🔴 Barge-in interruption bug fixed in LiveKit agent
+1361 " 🟣 Phase 3 LiveKit features completed and committed
+1362 " 🔄 Redis and BullMQ removed from batch calling architecture
+1363 " 🔴 E.164 phone number formatting fix for SIP dialing
+1364 " ✅ LiveKit set as default call provider system-wide
+1365 " 🔄 Legacy voice pipeline completely removed (Task 21)
+1366 " ✅ WIP foundation committed and GCP credentials secured
+1367 " ✅ LiveKit integration merged to main and pushed
+1368 " 🚨 IDOR vulnerabilities fixed in call feedback and batch call controllers
+1369 2:02p 🔵 Client builds successfully but has lint error
+1370 2:03p 🔵 Server down despite ts-node-dev processes running
+1373 " 🔴 Fastify server restarted successfully after hung process cleanup
+1375 2:04p 🔵 OpenAI LLM configuration verified end-to-end
+1376 " 🔴 Filter out OpenAI instruct models from chat model list
+1377 " ✅ Provider verification tests pass and probe user cleaned up
+1378 2:05p ✅ All 10 provider verification tests passing
+1379 " 🟣 Dynamic LLM model list fetching from user API keys
+1380 " ✅ BYOK documentation updated with Configuration page UX and model discovery
+1381 2:07p ✅ Project index updated with Configuration redesign and sync status
+1383 " ✅ Verification snapshot updated with live testing results and new operational gate
+1384 " ✅ Project log and recent changes updated with BYOK and Configuration work summary
+1385 2:08p ✅ Progress ledger updated with Configuration redesign and model fetch work
+S47 Testing phone calls from app UI using configuration page instead of env file API keys (Jul 13 at 2:08 PM)
+1414 2:39p 🔵 LiveKit Agent Worker Successfully Registered
+S49 Discussion of LiveKit outbound agent implementation: whether it was built from actual docs/source, and root causes of 4-5s introduction delay plus interruption handling issues ("hi hi" stacking) (Jul 13 at 2:40 PM)
+### Jul 14, 2026
+1421 8:06p 🔵 Project Lumina end-to-end test readiness check
+1422 8:07p 🔵 Project Lumina services started and healthy on localhost
+1423 8:10p 🔵 Opening message feature already implemented end-to-end
+1424 " 🔵 Provider configuration architecture in place
+1425 8:11p 🔵 Fallback greeting bypasses campaign opening_message for inbound calls
+1426 8:30p 🔵 LiveKit agent interruption handling implementation reviewed
+1427 8:31p 🔵 LiveKit agents SDK version locked at 1.6.4
+1428 " 🔵 LiveKit documentation guidance on outbound call agent behavior
+1429 8:32p 🔵 AMD pauses agent speech during classification on outbound calls
+S50 Analyzing latency issues with BYOKey approach and exploring options to achieve LiveKit-style natural agent interactions (Jul 14 at 8:33 PM)
+1430 9:31p ⚖️ Evaluating alternatives to BYOKey for improved agent UX
+1431 9:32p 🔵 LiveKit's latency optimization techniques for natural agent interactions
+1432 " 🔵 Confirmed preemptive_generation available in installed LiveKit SDK
+S51 Clarification on cloud deployment impact on 523ms gateway latency and regional model selection constraints (Jul 14 at 9:32 PM)
+S52 Clarifying latency and speaking quality trade-offs between US worker and Mumbai worker deployment setups for India-based voice calls (Jul 14 at 9:56 PM)
+S53 Clarifying architecture decision: self-hosting with own API keys to avoid LiveKit cloud costs and calling minute limits (Jul 14 at 10:11 PM)
+1433 11:08p ⚖️ Self-hosting with own API keys instead of LiveKit cloud
+S54 Validate LiveKit self-hosted architecture for natural voice agent with interruption handling (Jul 14 at 11:09 PM)
+1434 11:25p 🔵 LiveKit Voice Agent Requirements Identified
+1435 " 🔵 LiveKit Turn Detector Local Model Options
+S55 Complete implementation roadmap for LiveKit voice agent system with latency optimization and self-hosting (Jul 14 at 11:39 PM)
+### Jul 16, 2026
+1436 9:12a 🔵 Project Lumina full stack already running locally
 
-Access 1597k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 516k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
 
 ## LiveKit

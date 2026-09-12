@@ -22,7 +22,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/useToast";
 import { configApi } from "@/services/configApi";
 import {
@@ -57,7 +56,6 @@ interface LlmProviderState {
 }
 
 interface GeneralSettings {
-  defaultSystemPrompt: string;
   maxCallDuration: number;
   callRetryAttempts: number;
   callRetryDelay: number;
@@ -152,15 +150,6 @@ const PROVIDERS: Array<{ value: ProviderName; label: string }> = [
 
 const MASK_PREFIX = "••••";
 
-const DEFAULT_SYSTEM_PROMPT = `You are a professional sales representative making cold calls. Be polite, respectful, and helpful. Your goal is to:
-1. Introduce yourself and your company
-2. Understand the prospect's needs
-3. Present relevant solutions
-4. Schedule a follow-up if there's interest
-5. Respect their time and decisions
-
-Keep the conversation natural and engaging. If they're not interested, politely end the call.`;
-
 const INITIAL_STATE: ConfigurationState = {
   deepgram: {
     apiKey: "",
@@ -177,7 +166,6 @@ const INITIAL_STATE: ConfigurationState = {
   defaultModel: "gpt-4.1",
   temperature: 0.7,
   generalSettings: {
-    defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT,
     maxCallDuration: 300,
     callRetryAttempts: 3,
     callRetryDelay: 60,
@@ -1163,20 +1151,6 @@ const Configuration = () => {
                 className="py-4"
               />
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="systemPrompt">System Prompt</Label>
-            <Textarea
-              id="systemPrompt"
-              value={config.generalSettings.defaultSystemPrompt}
-              onChange={(event) =>
-                updateGeneralSetting("defaultSystemPrompt", event.target.value)
-              }
-              rows={8}
-              placeholder="Enter the system prompt for your AI assistant..."
-              className="min-h-[120px] sm:min-h-[200px]"
-            />
           </div>
         </CardContent>
       </Card>

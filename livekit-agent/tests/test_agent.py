@@ -78,6 +78,17 @@ def test_agent_exposes_the_full_tool_surface():
     }
 
 
+def test_every_registered_tool_is_documented_in_the_instructions():
+    # A tool the model is never told about is a tool the model never calls.
+    # detected_answering_machine shipped registered but undocumented, so the
+    # voicemail backstop never fired on the calls where AMD failed to classify -
+    # exactly the calls it exists for.
+    agent = make_agent()
+    instructions = agent.instructions
+    undocumented = [name for name in tool_names(agent) if name not in instructions]
+    assert not undocumented, f"registered but missing from the prompt: {undocumented}"
+
+
 def test_instructions_demand_the_closing_sequence():
     instructions = make_agent().instructions
     assert "record_outcome" in instructions

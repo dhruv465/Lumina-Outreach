@@ -32,12 +32,6 @@ export interface ICampaign extends mongoose.Document {
     endTime: string;
     timeZone: string;
   };
-  llmConfiguration: {
-    model: string;
-    systemPrompt: string;
-    temperature: number;
-    maxTokens: number;
-  };
   voiceConfiguration: {
     provider: string;
     voiceId: string;
@@ -167,27 +161,6 @@ const CampaignSchema = new mongoose.Schema(
       timeZone: {
         type: String,
         default: 'Asia/Kolkata',
-      },
-    },
-    llmConfiguration: {
-      model: {
-        type: String,
-        required: [true, 'Please specify an LLM model'],
-        default: 'gpt-4o',
-      },
-      systemPrompt: {
-        type: String,
-        required: [true, 'Please provide a system prompt'],
-      },
-      temperature: {
-        type: Number,
-        default: 0.7,
-        min: 0,
-        max: 2,
-      },
-      maxTokens: {
-        type: Number,
-        default: 500,
       },
     },
     voiceConfiguration: {

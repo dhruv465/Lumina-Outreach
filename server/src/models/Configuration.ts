@@ -43,7 +43,6 @@ export interface IConfiguration extends mongoose.Document {
     callRetryAttempts: number;
     callRetryDelay: number;
     maxCallDuration: number;
-    defaultSystemPrompt: string;
     defaultTimeZone: string;
     workingHours: {
       start: string;
@@ -54,15 +53,11 @@ export interface IConfiguration extends mongoose.Document {
   };
   complianceSettings: {
     recordCalls: boolean;
-    callIntroduction?: string;
     maxCallsPerLeadPerDay: number;
     callBlackoutPeriod: { start: string; end: string };
   };
   webhookConfig: { secret: string; lastVerified?: Date | null; status?: VerifyStatus };
-  errorMessages?: Record<string, string>;
-  closingScripts?: Record<string, string>;
   intentDetection?: { closingPhrases?: string[]; objectionPhrases?: string[] };
-  callResponses?: Record<string, string>;
   updatedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -133,11 +128,6 @@ const ConfigurationSchema = new mongoose.Schema(
       callRetryAttempts: { type: Number, default: 3, min: 0, max: 10 },
       callRetryDelay: { type: Number, default: 60, min: 15, max: 1440 },
       maxCallDuration: { type: Number, default: 300, min: 30, max: 3600 },
-      defaultSystemPrompt: {
-        type: String,
-        default:
-          'You are a professional sales representative making cold calls. Be polite, respectful, and helpful.',
-      },
       defaultTimeZone: { type: String, default: 'America/New_York' },
       workingHours: {
         start: { type: String, default: '09:00' },
@@ -152,7 +142,6 @@ const ConfigurationSchema = new mongoose.Schema(
     },
     complianceSettings: {
       recordCalls: { type: Boolean, default: true },
-      callIntroduction: { type: String, default: '' },
       maxCallsPerLeadPerDay: { type: Number, default: 1, min: 1, max: 5 },
       callBlackoutPeriod: {
         start: { type: String, default: '21:00' },
@@ -160,13 +149,10 @@ const ConfigurationSchema = new mongoose.Schema(
       },
     },
     webhookConfig: { secret: { type: String, default: '' } },
-    errorMessages: { type: mongoose.Schema.Types.Mixed, default: {} },
-    closingScripts: { type: mongoose.Schema.Types.Mixed, default: {} },
     intentDetection: {
       closingPhrases: { type: [String], default: [] },
       objectionPhrases: { type: [String], default: [] },
     },
-    callResponses: { type: mongoose.Schema.Types.Mixed, default: {} },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: false },
   },
   { timestamps: true },

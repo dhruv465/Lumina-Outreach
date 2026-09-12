@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import api from '@/services/api';
+import { configApi } from '@/services/configApi';
 import {
   Search,
   Plus,
@@ -70,12 +72,6 @@ interface Campaign {
     endTime: string;
     timeZone: string;
   };
-  llmConfiguration: {
-    model: string;
-    systemPrompt: string;
-    temperature: number;
-    maxTokens: number;
-  };
   voiceConfiguration: {
     provider: string;
     voiceId: string;
@@ -105,6 +101,27 @@ interface CampaignsData {
     limit: number;
   };
 }
+
+// One line of the Runtime panel. `source` is the point of the panel: it says
+// whether a value comes from this campaign or from the account, so nobody reads
+// an account-wide setting as something the campaign controls.
+const RuntimeRow = ({
+  label,
+  value,
+  source,
+}: {
+  label: string;
+  value?: string | number | null;
+  source: string;
+}) => (
+  <div className="space-y-1">
+    <p className="text-xs text-muted-foreground">{label}</p>
+    <p className="text-sm font-medium">
+      {value === undefined || value === null || value === '' ? 'Unavailable' : value}
+    </p>
+    <p className="text-[11px] text-muted-foreground">{source}</p>
+  </div>
+);
 
 const Campaigns = () => {
   // State
@@ -203,6 +220,26 @@ const Campaigns = () => {
     }
   };
   
+  // Account-level provider settings. These are what the agent actually runs on
+  // (buildProviderConfig reads the owner's Configuration, never the campaign),
+  // so campaign detail has to fetch them to say anything true about a call.
+  // Identical for every campaign, hence one query for the page. A failure here
+  // must never take the campaigns list down with it.
+  const { data: accountConfig } = useQuery({
+    queryKey: ['configuration'],
+    queryFn: async () => {
+      try {
+        return await configApi.getConfiguration();
+      } catch (err) {
+        console.error('Error fetching configuration:', err);
+        return null;
+      }
+    },
+    refetchOnWindowFocus: false,
+    staleTime: 300000,
+    retry: 1,
+  });
+
   // Fetch campaigns from API
   const { data: campaignsData, isLoading, error, refetch } = useQuery<CampaignsData>({
     queryKey: ['campaigns', currentPage, itemsPerPage, searchTerm, statusFilter],
@@ -824,48 +861,58 @@ const Campaigns = () => {
                         )}
                       </div>
                       
-                      {/* Configuration Sections */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="bg-card p-4 rounded-lg border">
-                          <h3 className="text-base font-medium flex items-center gap-2 mb-3 text-card-foreground">
-                            <Zap size={16} className="text-muted-foreground" />
-                            LLM Config
-                          </h3>
-                          <div className="space-y-2">
-                            <div className="space-y-1">
-                              <p className="text-xs text-muted-foreground">Model</p>
-                              <p className="text-sm font-medium">{selectedCampaign.llmConfiguration.model}</p>
-                            </div>
-                            <div className="space-y-1">
-                              <p className="text-xs text-muted-foreground">Temperature</p>
-                              <p className="text-sm font-medium">{selectedCampaign.llmConfiguration.temperature}</p>
-                            </div>
-                            <div className="space-y-1">
-                              <p className="text-xs text-muted-foreground">Max Tokens</p>
-                              <p className="text-sm font-medium">{selectedCampaign.llmConfiguration.maxTokens}</p>
-                            </div>
-                          </div>
+                      {/* What this campaign actually runs on. Voice follows the same
+                          precedence the agent applies in parse_provider_config:
+                          campaign voice, else the account default. */}
+                      <div className="bg-card p-4 rounded-lg border">
+                        <h3 className="text-base font-medium flex items-center gap-2 mb-3 text-card-foreground">
+                          <Zap size={16} className="text-muted-foreground" />
+                          Runtime
+                        </h3>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                          <RuntimeRow
+                            label="Voice"
+                            value={
+                              (selectedCampaign.voiceConfiguration?.voiceId || '').trim() ||
+                              accountConfig?.deepgramConfig?.ttsVoice
+                            }
+                            source={
+                              (selectedCampaign.voiceConfiguration?.voiceId || '').trim()
+                                ? 'this campaign'
+                                : 'account · fallback'
+                            }
+                          />
+                          <RuntimeRow
+                            label="Model"
+                            value={
+                              accountConfig?.llmConfig?.defaultModel
+                                ? `${accountConfig.llmConfig.defaultProvider} · ${accountConfig.llmConfig.defaultModel}`
+                                : undefined
+                            }
+                            source="account · all campaigns"
+                          />
+                          <RuntimeRow
+                            label="Temperature"
+                            value={
+                              typeof accountConfig?.llmConfig?.temperature === 'number'
+                                ? accountConfig.llmConfig.temperature
+                                : undefined
+                            }
+                            source="account · all campaigns"
+                          />
+                          <RuntimeRow
+                            label="Speech-to-text"
+                            value={accountConfig?.deepgramConfig?.sttModel}
+                            source="account · all campaigns"
+                          />
                         </div>
-                        
-                        <div className="bg-card p-4 rounded-lg border">
-                          <h3 className="text-base font-medium flex items-center gap-2 mb-3 text-card-foreground">
-                            <Zap size={16} className="text-muted-foreground" />
-                            Voice Config
-                          </h3>
-                          <div className="space-y-2">
-                            <div className="space-y-1">
-                              <p className="text-xs text-muted-foreground">Provider</p>
-                              <p className="text-sm font-medium">{selectedCampaign.voiceConfiguration.provider}</p>
-                            </div>
-                            <div className="space-y-1">
-                              <p className="text-xs text-muted-foreground">Voice ID</p>
-                              <p className="text-sm font-medium">{selectedCampaign.voiceConfiguration.voiceId}</p>
-                            </div>
-                            <div className="space-y-1">
-                              <p className="text-xs text-muted-foreground">Speed / Pitch</p>
-                              <p className="text-sm font-medium">{selectedCampaign.voiceConfiguration.speed} / {selectedCampaign.voiceConfiguration.pitch}</p>
-                            </div>
-                          </div>
+                        <div className="mt-3 pt-3 border-t border-border">
+                          <Link
+                            to="/configuration"
+                            className="text-xs text-muted-foreground hover:text-foreground"
+                          >
+                            Change in Configuration &rarr;
+                          </Link>
                         </div>
                       </div>
                     </div>

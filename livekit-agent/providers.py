@@ -30,6 +30,16 @@ def parse_provider_config(meta: dict) -> ProviderConfig | None:
     pc = meta.get("provider_config")
     if not isinstance(pc, dict):
         return None
+    # The campaign's own voice rides at the top level of the dispatch metadata
+    # (dispatchService sends campaign.voiceConfiguration.voiceId as voice_id),
+    # while the account default arrives inside provider_config.tts. Campaign
+    # wins when it set one; blank or whitespace falls through to the account
+    # default rather than reaching Deepgram as a model name. Unrecognised names
+    # are not screened here - the campaign form already picks from the live
+    # Deepgram catalogue, and this parser trusts the server's stt/llm model
+    # names the same way.
+    campaign_voice = str(meta.get("voice_id") or "").strip()
+
     try:
         stt, llm, tts = pc["stt"], pc["llm"], pc["tts"]
         cfg = ProviderConfig(
@@ -40,7 +50,7 @@ def parse_provider_config(meta: dict) -> ProviderConfig | None:
             llm_model=llm["model"],
             llm_temperature=float(llm.get("temperature", 0.7)),
             tts_api_key=tts["api_key"],
-            tts_voice=tts.get("voice", "aura-2-thalia-en"),
+            tts_voice=campaign_voice or tts.get("voice", "aura-2-thalia-en"),
         )
     except (KeyError, TypeError, ValueError) as e:
         logger.error("malformed provider_config: %s", e)
@@ -53,6 +63,13 @@ def parse_provider_config(meta: dict) -> ProviderConfig | None:
         # shuts down instead of build_llm raising mid session construction.
         logger.error("unsupported llm provider: %s", cfg.llm_provider)
         return None
+    # Recorded so a "why did this call sound different" question is answerable
+    # from the logs without re-reading the campaign.
+    logger.info(
+        "tts voice=%s source=%s",
+        cfg.tts_voice,
+        "campaign" if campaign_voice else "account",
+    )
     return cfg
 
 

@@ -28,6 +28,40 @@ def test_parse_valid_metadata():
     assert cfg.tts_voice == "aura-luna-en"
 
 
+# ── Per-campaign TTS voice ───────────────────────────────────────────────────
+
+
+def test_campaign_voice_overrides_the_owner_voice():
+    # voice_id rides at the top level of the dispatch metadata (dispatchService
+    # sends campaign.voiceConfiguration.voiceId there), while the owner's
+    # configured voice arrives inside provider_config.tts.
+    cfg = parse_provider_config({**VALID_META, "voice_id": "aura-2-andromeda-en"})
+    assert cfg is not None
+    assert cfg.tts_voice == "aura-2-andromeda-en"
+
+
+@pytest.mark.parametrize("voice_id", ["", "   ", None])
+def test_blank_campaign_voice_falls_back_to_the_owner_voice(voice_id):
+    # None also covers the key being absent entirely - meta.get returns None for
+    # both - which is every campaign saved before per-campaign voice existed.
+    # A whitespace-only value must not reach Deepgram as a model name.
+    cfg = parse_provider_config({**VALID_META, "voice_id": voice_id})
+    assert cfg is not None
+    assert cfg.tts_voice == "aura-luna-en"
+
+
+def test_voice_falls_back_to_the_aura_default_when_neither_is_set():
+    cfg = parse_provider_config({
+        "provider_config": {
+            "stt": {"api_key": "dg-key", "model": "nova-3"},
+            "llm": {"provider": "openai", "api_key": "sk", "model": "m", "temperature": 0.7},
+            "tts": {"api_key": "dg-key"},
+        },
+    })
+    assert cfg is not None
+    assert cfg.tts_voice == "aura-2-thalia-en"
+
+
 @pytest.mark.parametrize("meta", [
     {},                                             # missing block
     {"provider_config": None},                      # null

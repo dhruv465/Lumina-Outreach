@@ -146,12 +146,7 @@ class SalesAgent(Agent):
         self.call_id = call_id
         self.lumina = lumina_api
         self.transfer_to = transfer_to
-        # Set by entrypoint once the outbound SIP callee has answered
-        # (participant_identity, which is the dialed phone number).
         self.sip_identity: str = ""
-        # Guards against double-posting an outcome: the LLM records one, and
-        # every deterministic exit path (end_call, silence watchdog, duration
-        # cap, shutdown) falls back to recording one only if it hasn't happened.
         self.outcome_recorded = False
 
     async def ensure_outcome(self, outcome: str, notes: str = "") -> bool:
